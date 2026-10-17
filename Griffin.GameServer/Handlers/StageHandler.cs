@@ -17,7 +17,8 @@ namespace Griffin.GameServer.Handlers
         IWeaponService weaponService,
         IResourceService resourceService,
         IStaminaService staminaService,
-        IDailyQuestProgressService questProgress) : StageHandlerBase
+        IDailyQuestProgressService questProgress,
+        StageResultHandler results) : StageHandlerBase
     {
         public override void HandleStageUsableGuns(CS_StageUsableGuns request, Connection connection)
         {
@@ -148,12 +149,19 @@ namespace Griffin.GameServer.Handlers
                 new PendingStage(stage.Id, request.IsAuto, battle.Id, battle.RandomSeed, request.Other?.Together?.GunId ?? 0, request.Other?.Together?.KFIAKLNJHMB ?? 0));
             if (resourceUpdate is not null)
                 connection.SendAutoEncrypted(resourceUpdate);
-            connection.Send(new SC_StageStart
-            {
-                Stage = battle,
-                Other = request.Other?.Clone() ?? new StageOther(),
-            });
+            // a plot-only stage (dialogue, no battle) is passed by playing it: the client plays the AVG by itself and reports nothing at the end (A-63).
+            // It gets no SC_StageStart: that reply is the "battle starts" one and the client's handler threw an error with it after the dialogue (A-66).
+            bool plotOnly = TableFields.U(stage, 21) == 3;
+            if (!plotOnly)
+                connection.Send(new SC_StageStart
+                {
+                    Stage = battle,
+                    Other = request.Other?.Clone() ?? new StageOther(),
+                });
             Log.Information("Stage {StageId} started for account {Uid} (auto={Auto}).", stage.Id, connection.Account.Uid, request.IsAuto);
+
+            if (plotOnly)
+                results.CompletePlotStage(connection, connection.Account.Uid);
         }
 
         public override void HandleStageInto(CS_StageInto request, Connection connection)

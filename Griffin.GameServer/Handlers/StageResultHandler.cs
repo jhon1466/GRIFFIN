@@ -121,7 +121,34 @@ namespace Griffin.GameServer.Handlers
             Resolve(connection, uid, request.BattleResult, request.StageProgress);
         }
 
-        private void Resolve(Connection connection, uint uid, BattleResult battleResult, StageProgress? stageProgress)
+        /// <summary>
+        /// Plot-only stages (StageData column 21 = 3: SL-, AS-, LS-, BS-... 317 of them, no enemies and no objectives): the real client plays the dialogue
+        /// and sends NOTHING afterwards (no StageInto, no StageResult), so the stage never counted as passed and the next one stayed locked. The
+        /// stage is therefore passed when it is started: record, first-clear reward, achievements and the update of the record, but no battle result
+        /// screen. ASSUMPTION A-63 (seen in the live log: StageStart 10281 followed only by ClientDataUpload and Sync).
+        /// </summary>
+        public void CompletePlotStage(Connection connection, uint uid)
+        {
+            StageHandler.PendingStage? pending = accountState.Get<StageHandler.PendingStage>(uid, "stage.pending");
+            Resolve(connection, uid, BattleResult.Win, null, announce: false);
+
+            // The map of the chapter is hidden while the plot plays and does not redraw itself when it comes back (the next stage looked locked until
+            // the screen was left and entered again): the record is sent again after the next requests of the client for a while (A-64).
+            var records = accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? [];
+            if (pending is not null && records.TryGetValue(pending.StageId.ToString(), out StageRecord? record)
+                && tableService.GetTable<StageData>().FirstOrDefault(row => row.Id == pending.StageId) is { } stage)
+            {
+                // The chapter screen redraws its map when it comes back from the plot only if it was told (event 1105) that the chapter changed: the client
+                // raises it when it receives SC_ChapterHeroMode, whose list may be empty. The ticks and unlocks of the nodes are drawn when the screen
+                // rebuilds, not on a record update (A-69).
+                SC_ChapterHeroMode refresh = new();
+                connection.KeepSending(
+                    [new SC_StageRecordUpdate { Type = (int)TableFields.U(stage, 20), Record = record }, new SC_StageRecordUpdateBatch { Record = { record } }, refresh],
+                    TimeSpan.FromMinutes(3));
+            }
+        }
+
+        private void Resolve(Connection connection, uint uid, BattleResult battleResult, StageProgress? stageProgress, bool announce = true)
         {
             StageHandler.PendingStage? pending = accountState.Get<StageHandler.PendingStage>(uid, "stage.pending");
             uint reportedStageId = stageProgress?.StageInfo?.StcStageId ?? 0;
@@ -205,7 +232,18 @@ namespace Griffin.GameServer.Handlers
                 accountState.Set(uid, "stage.records", records);
                 // Type = the stage type (StageData col 20): the client files its records per type (11, 12, 13...) and looks a stage up
                 // under its own type, so a record update with another type is invisible to the result screen.
-                connection.Send(new SC_StageRecordUpdate { Type = (int)TableFields.U(stage, 20), Record = record });
+                SC_StageRecordUpdate recordUpdate = new() { Type = (int)TableFields.U(stage, 20), Record = record };
+                if (announce)
+                    connection.Send(recordUpdate);
+                else
+                {
+                    // A plot stage has no result screen. The client starts the dialogue (and puts the chapter screen on top once, which is when that
+                    // screen rebuilds its map if it was told that the chapter changed, event 1105 = SC_ChapterHeroMode) as soon as the first SEQUENCED
+                    // message of the request arrives: the record, the batch and that notice go first WITHOUT a sequence, so the data is in place when the
+                    // reply triggers the rebuild; the ticks and unlocks are drawn then, not later (A-69/A-70).
+                    connection.SendUnsequenced(new Google.Protobuf.IMessage[] { recordUpdate, new SC_StageRecordUpdateBatch { Record = { record } }, new SC_ChapterHeroMode() });
+                    connection.Send(recordUpdate);
+                }
 
                 GrantRepeatableDrops(uid, stage, response, push);
                 CompleteLoveEvent(uid, pending, stage.Id, response, push);
@@ -225,11 +263,14 @@ namespace Griffin.GameServer.Handlers
                     push.Add(new SC_CommonQuestCountUpdate { Counters = unlocked });
             }
 
-            connection.Send(response);
+            if (announce)
+                connection.Send(response);
             foreach (Google.Protobuf.IMessage message in push)
                 connection.Send(message);
 
-            accountState.Set<StageHandler.PendingStage?>(uid, "stage.pending", null);
+            // a plot stage keeps its pending entry: a client (or test) that still sends StageInto/StageResult after it finds the stage
+            if (announce)
+                accountState.Set<StageHandler.PendingStage?>(uid, "stage.pending", null);
             Log.Information("Stage result resolved for account {Uid}, stage {StageId}: {Result}, first clear={FirstClear}.", uid, stage.Id, battleResult, won && (prior is null || prior.FirstPassTime == 0));
         }
 

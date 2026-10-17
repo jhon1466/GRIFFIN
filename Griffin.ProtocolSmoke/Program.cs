@@ -1004,17 +1004,40 @@ if (scenario is "all" or "achievements")
         $"reported={achCounters?.Rewards.Count}");
     Check("achievements: an owned character completes its level ladder (人形升至N级, ids 40GGNN): the talent tree and Mind Spiral ask them",
         achCounters is not null && achCounters.Rewards.Keys.Any(k => k is >= 400000 and <= 499999), $"reported={achCounters?.Rewards.Count}");
+    // plot-only stages (StageData col 21 = 3, e.g. SL-2-1 = 10281): the real client sends nothing after the dialogue, so starting it passes it (A-63)
+    main.Send(new CS_StageStart { StcStageId = 10281 });
+    var plotStart = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("plot stage: starting a dialogue-only stage passes it at once (SC_StageRecordUpdate with a first-pass time), no battle start and no result screen",
+        !plotStart.OfType<SC_StageStart>().Any() && plotStart.OfType<SC_StageRecordUpdate>().Any(u => u.Record.StageId == 10281 && u.Record.FirstPassTime != 0)
+        && !plotStart.OfType<SC_StageResult>().Any(), $"got={string.Join(",", plotStart.Select(m => m.GetType().Name))}");
+    Check("plot stage: the batch record update (what makes the chapter map redraw its ticks and unlocks) is sent too",
+        plotStart.OfType<SC_StageRecordUpdateBatch>().Any(b => b.Record.Any(r => r.StageId == 10281)));
+    // the chapter map is hidden while the plot plays: the record comes again after the next requests of the client (A-64)
+    main.Send(new CS_Sync());
+    var plotAgain = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    Check("plot stage: the record is sent again after the client's next request (the map redraws the tick and the unlock when it is back)",
+        plotAgain.OfType<SC_StageRecordUpdateBatch>().Any(b => b.Record.Any(r => r.StageId == 10281)) && plotAgain.OfType<SC_StageRecordUpdate>().Any(u => u.Record.StageId == 10281),
+        $"got={string.Join(",", plotAgain.Select(m => m.GetType().Name))}");
+    // the chapter screen rebuilds its map (ticks, unlocks) when it comes back only after the client's event 1105, raised by SC_ChapterHeroMode (A-69)
+    Check("plot stage: the chapter-changed notice (SC_ChapterHeroMode, empty) is sent with the record, and again later",
+        plotStart.OfType<SC_ChapterHeroMode>().Any(h => h.ChapterId.Count == 0) && plotAgain.OfType<SC_ChapterHeroMode>().Any(),
+        $"start={string.Join(",", plotStart.Select(m => m.GetType().Name))} again={string.Join(",", plotAgain.Select(m => m.GetType().Name))}");
+    main.Send(new CS_StageRecord { Type = 11 });
+    Check("plot stage: the passed plot stage is in the stage records",
+        main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_StageRecord>().FirstOrDefault()?.Records.ContainsKey(10281) == true);
+
     // the command-center backgrounds (all scenes and 3D skins) are unlocked by the achievement of CommandBackgroundData column 7 (A-62)
     Check("achievements: the unlock ids of the command-center backgrounds (43001..43006 the 3D scenes, 44023, 70000, 71000) are all complete",
         achCounters is not null && new uint[] { 43001, 43002, 43003, 43004, 43005, 43006, 44023, 70000, 71000 }.All(achCounters.Rewards.ContainsKey));
     Check("achievements: 'normal SL-2-5 cleared' (99002) is not complete before that stage is cleared", achCounters is not null && !achCounters.Rewards.ContainsKey(99002));
+    // SL-2-5 is a plot-only stage: starting it passes it (A-63), so the achievement update comes with the start (a battle stage would send it with the result)
     main.Send(new CS_StageStart { StcStageId = 10285 });
-    main.ReadFor(TimeSpan.FromSeconds(2));
-    main.Send(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 });
     var achClear = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    main.Send(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 });
+    achClear.AddRange(main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message));
     var achUpdate = achClear.OfType<SC_CommonQuestCountUpdate>().FirstOrDefault(u => u.Counters.Type == CommonQuestCounters.Types.Type.Achievement);
     Check("achievements: clearing SL-2-5 completes 99002 and the client is told at once (SC_CommonQuestCountUpdate)",
-        achUpdate is not null && achUpdate.Counters.Rewards.ContainsKey(99002), $"win={achClear.OfType<SC_StageResult>().FirstOrDefault()?.BattleResult} update={achUpdate?.Counters.Rewards.Count}");
+        achUpdate is not null && achUpdate.Counters.Rewards.ContainsKey(99002), $"update={achUpdate?.Counters.Rewards.Count}");
     var claimable = achCounters?.Rewards.Where(r => !r.Value).Select(r => r.Key).FirstOrDefault() ?? 0u;
     if (claimable != 0)
     {
