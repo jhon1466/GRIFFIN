@@ -443,6 +443,37 @@ if (scenario is "all" or "gun")
         var coreAfter = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault()?.Guns.FirstOrDefault(g => g.Id == high.Id);
         Check("core: the core level is kept", coreAfter is not null && coreAfter.GrassGroup.Count == 1 && coreAfter.GrassGroup[0].Idx == coreLevel + 1 && coreAfter.GrassGroup[0].CoreLevel == coreId);
         Check("core: the reserved storage key is not sent as talent consumption", coreAfter is not null && !coreAfter.GunTalentConsume.ContainsKey(0xFFFF0001u));
+        // plugins placed in the six slots of the core are saved (they came off at every login before, A-58)
+        main.Send(new CS_GunRemouldingPlugins());
+        var pluginList = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingPlugins>().FirstOrDefault()?.RemouldingPlugins;
+        ulong pluginA = pluginList?.ElementAtOrDefault(0)?.Id ?? 0, pluginB = pluginList?.ElementAtOrDefault(1)?.Id ?? 0;
+        Check("core plugins: the catalog lists plugins", pluginA != 0 && pluginB != 0 && pluginA != pluginB);
+        main.Send(new CS_GunRemouldingPluginBelong { GunId = high.Id, Slot = 1, GIBKJMJPLGC = pluginA });
+        var belongReply = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingPluginBelong>().FirstOrDefault();
+        Check("core plugins: equipping a plugin is confirmed", belongReply is not null && belongReply.Slot == 1 && belongReply.GIBKJMJPLGC == pluginA);
+        main.Send(new CS_GunRemouldingPluginBelong { GunId = high.Id, Slot = 3, GIBKJMJPLGC = pluginB });
+        main.ReadFor(TimeSpan.FromSeconds(1));
+        main.Send(new CS_Guns());
+        var withPlugins = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault()?.Guns.FirstOrDefault(g => g.Id == high.Id);
+        Check("core plugins: the equipped plugins come back in the next gun list (they survive a restart of the game)",
+            withPlugins is { GrassGroup.Count: 1 } && withPlugins.GrassGroup[0].PluginUids.Count == 6 && withPlugins.GrassGroup[0].PluginUids[0] == pluginA
+            && withPlugins.GrassGroup[0].PluginUids[2] == pluginB && withPlugins.GrassGroup[0].PluginUids[1] == 0, $"slots={string.Join(",", withPlugins?.GrassGroup.FirstOrDefault()?.PluginUids ?? [])}");
+        main.Send(new CS_GunRemouldingPlugins());
+        var pluginsAfter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingPlugins>().FirstOrDefault()?.RemouldingPlugins;
+        Check("core plugins: the plugin list says which character holds each one", pluginsAfter?.FirstOrDefault(p => p.Id == pluginA)?.GunId == high.Id && pluginsAfter?.FirstOrDefault(p => p.Id == pluginB)?.GunId == high.Id);
+        var batch = new CS_GunRemouldingPluginBatchBelong { GunId = high.Id };
+        batch.PluginUids.AddRange([pluginB, pluginA]);
+        main.Send(batch);
+        var batchReply = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingPluginBatchBelong>().FirstOrDefault();
+        Check("core plugins: the one-click equip fills the slots in order", batchReply is not null && batchReply.PluginUids.Count == 6 && batchReply.PluginUids[0] == pluginB && batchReply.PluginUids[1] == pluginA && batchReply.PluginUids[2] == 0);
+        main.Send(new CS_GunRemouldingPluginBelong { GunId = high.Id, Slot = 0, GIBKJMJPLGC = pluginB });
+        main.ReadFor(TimeSpan.FromSeconds(1));
+        main.Send(new CS_GunRemouldingPluginBatchBelong { GunId = high.Id });
+        var emptied = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingPluginBatchBelong>().FirstOrDefault();
+        Check("core plugins: taking everything off empties the six slots", emptied is not null && emptied.PluginUids.All(u => u == 0));
+        main.Send(new CS_GunRemouldingPluginBelong { GunId = high.Id, Slot = 7, GIBKJMJPLGC = pluginA });
+        Check("core plugins: a slot above 6 is refused", !main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_GunRemouldingPluginBelong));
+
         main.Send(new CS_GunRemouldingCoreLvUp { CoreLevel = coreId + 1, Idx = 2, GunId = high.Id });
         var wrong = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingCoreLvUp>().FirstOrDefault();
         Check("core: a core that is not the character's is refused", wrong is null);

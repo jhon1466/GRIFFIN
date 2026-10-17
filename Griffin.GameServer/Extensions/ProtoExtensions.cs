@@ -5,7 +5,7 @@ namespace Griffin.GameServer.Extensions;
 
 public static class ProtoExtensions
 {
-    public static Gun ToProtoGunCharacter(this GunEntity gun)
+    public static Gun ToProtoGunCharacter(this GunEntity gun, IReadOnlyList<ulong>? pluginSlots = null)
     {
         ArgumentNullException.ThrowIfNull(gun);
 
@@ -54,8 +54,13 @@ public static class ProtoExtensions
 
         // the remoulding core of the weapon panel (unlocked at level 55); MHBBHAHAIGD (56) = index of the equipped one
         if (Services.RemouldingCores.OwnedCore(gun) is var core and not 0)
+        {
             // the client reads field 1 as the LEVEL and field 3 as the CORE ID (the proto names idx/core_level are swapped)
-            proto.GrassGroup.Add(new GrassGroup { Idx = Services.RemouldingCores.LevelOf(gun), CoreLevel = core });
+            GrassGroup group = new() { Idx = Services.RemouldingCores.LevelOf(gun), CoreLevel = core };
+            if (pluginSlots is not null)
+                group.PluginUids.AddRange(pluginSlots);
+            proto.GrassGroup.Add(group);
+        }
 
         return proto;
     }

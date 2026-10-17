@@ -117,7 +117,7 @@ namespace Griffin.GameServer.Handlers
 
             foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(connection.Account.Uid))
             {
-                scGuns.Guns.Add(gun.ToProtoGunCharacter());
+                scGuns.Guns.Add(gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId)));
 
             }
 
@@ -180,8 +180,90 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleGunRemouldingPlugins(CS_GunRemouldingPlugins request, Connection connection)
         {
-                connection.Send(4,
-                    new SC_GunRemouldingPlugins
+            SC_GunRemouldingPlugins plugins = PluginCatalog();
+            if (connection.Account is not null)
+                foreach (GunRemouldingPlugin plugin in plugins.RemouldingPlugins)
+                    plugin.GunId = RemouldingPlugins.GunOf(accountState, connection.Account.Uid, plugin.Id);
+
+            connection.Send(4, plugins);
+        }
+
+        private static readonly Lazy<IReadOnlySet<ulong>> PluginIds = new(() => PluginCatalog().RemouldingPlugins.Select(p => p.Id).ToHashSet());
+
+        /// <summary>Puts a plugin in a slot of the core (slot is 1-based; slot 0 takes the plugin off; plugin 0 empties the slot) and keeps it (A-58).</summary>
+        public override void HandleGunRemouldingPluginBelong(CS_GunRemouldingPluginBelong request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                GunEntity? gun = gunService.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == request.GunId);
+                if (gun is null || !RemouldingPlugins.HasCore(gun))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingPluginBelong, HNINDAOJCKP.GunRemouldingCoreNotEquipped);
+                    return;
+                }
+
+                if (request.Slot > RemouldingPlugins.SlotCount || !RemouldingPlugins.Owns(PluginIds.Value, request.GIBKJMJPLGC))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingPluginBelong, request.Slot > RemouldingPlugins.SlotCount
+                        ? HNINDAOJCKP.GunRemouldingCoreSlotError : HNINDAOJCKP.GunRemouldingPluginNotFound);
+                    return;
+                }
+
+                ulong[] slots = RemouldingPlugins.SlotsOf(accountState, uid, request.GunId);
+                if (request.Slot == 0)
+                {
+                    for (int i = 0; i < slots.Length; i++)
+                        if (slots[i] == request.GIBKJMJPLGC)
+                            slots[i] = 0;
+                }
+                else
+                {
+                    for (int i = 0; i < slots.Length; i++)
+                        if (request.GIBKJMJPLGC != 0 && slots[i] == request.GIBKJMJPLGC)
+                            slots[i] = 0;
+                    slots[request.Slot - 1] = request.GIBKJMJPLGC;
+                }
+
+                RemouldingPlugins.Set(accountState, uid, request.GunId, slots);
+                connection.Send(new SC_GunRemouldingPluginBelong { GunId = request.GunId, Slot = request.Slot, GIBKJMJPLGC = request.GIBKJMJPLGC });
+            }
+        }
+
+        /// <summary>All six slots at once: "一键装配" sends the plugins, "全部卸下" an empty list (A-58).</summary>
+        public override void HandleGunRemouldingPluginBatchBelong(CS_GunRemouldingPluginBatchBelong request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                GunEntity? gun = gunService.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == request.GunId);
+                if (gun is null || !RemouldingPlugins.HasCore(gun))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingPluginBatchBelong, HNINDAOJCKP.GunRemouldingCoreNotEquipped);
+                    return;
+                }
+
+                if (request.PluginUids.Count > RemouldingPlugins.SlotCount || request.PluginUids.Any(p => !RemouldingPlugins.Owns(PluginIds.Value, p)))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingPluginBatchBelong, HNINDAOJCKP.GunRemouldingPluginNotFound);
+                    return;
+                }
+
+                ulong[] slots = RemouldingPlugins.Set(accountState, uid, request.GunId, request.PluginUids.ToList());
+                SC_GunRemouldingPluginBatchBelong reply = new() { GunId = request.GunId };
+                reply.PluginUids.AddRange(slots);
+                connection.Send(reply);
+            }
+        }
+
+        private static SC_GunRemouldingPlugins PluginCatalog() =>
+            new SC_GunRemouldingPlugins
                     {
                         RemouldingPlugins =
                         {
@@ -679,8 +761,7 @@ namespace Griffin.GameServer.Handlers
                                 MDFIDAFPBJN = false,
                             },
                         },
-                    });
-        }
+                    };
 
         /// <summary>
         /// Puts a costume on a character and keeps it (<c>GunEntity.CostumeId</c>, sent back in <c>SC_Guns</c>): until now the request
