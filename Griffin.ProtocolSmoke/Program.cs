@@ -1004,6 +1004,9 @@ if (scenario is "all" or "achievements")
         $"reported={achCounters?.Rewards.Count}");
     Check("achievements: an owned character completes its level ladder (人形升至N级, ids 40GGNN): the talent tree and Mind Spiral ask them",
         achCounters is not null && achCounters.Rewards.Keys.Any(k => k is >= 400000 and <= 499999), $"reported={achCounters?.Rewards.Count}");
+    // the command-center backgrounds (all scenes and 3D skins) are unlocked by the achievement of CommandBackgroundData column 7 (A-62)
+    Check("achievements: the unlock ids of the command-center backgrounds (43001..43006 the 3D scenes, 44023, 70000, 71000) are all complete",
+        achCounters is not null && new uint[] { 43001, 43002, 43003, 43004, 43005, 43006, 44023, 70000, 71000 }.All(achCounters.Rewards.ContainsKey));
     Check("achievements: 'normal SL-2-5 cleared' (99002) is not complete before that stage is cleared", achCounters is not null && !achCounters.Rewards.ContainsKey(99002));
     main.Send(new CS_StageStart { StcStageId = 10285 });
     main.ReadFor(TimeSpan.FromSeconds(2));

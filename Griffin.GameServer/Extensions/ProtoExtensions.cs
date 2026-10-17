@@ -35,6 +35,9 @@ public static class ProtoExtensions
             },
         };
 
+        // peak keys (峰位键) have their own slots in the middle of the wheel (field 52), not in the private ones (A-61)
+        uint[] peakKeys = Services.TalentKeySlots.Normalize(gun);
+        proto.NJKHKDCNJPK.AddRange(peakKeys);
         proto.PrivateTalentSkillItems.AddRange(gun.PrivateTalentSkillItems);
         proto.PublicTalentSkillItems.AddRange(gun.PublicTalentSkillItems);
         proto.PublicTalentSkillItemsUid.AddRange(gun.PublicTalentSkillItemsUid);
@@ -44,11 +47,15 @@ public static class ProtoExtensions
             proto.TalentTree[entry.Key] = entry.Value;
         }
 
-        proto.DKKBDFJPOOA.AddRange(Services.TalentBits.Words(gun.TalentTree.Keys));
+        foreach (ulong keyPoint in Services.TalentBits.EffectivePoints(gun))
+            if (!proto.TalentTree.ContainsKey(keyPoint))
+                proto.TalentTree[keyPoint] = 1;
+
+        proto.DKKBDFJPOOA.AddRange(Services.TalentBits.Words(Services.TalentBits.EffectivePoints(gun)));
 
         foreach (KeyValuePair<uint, uint> entry in gun.GunTalentConsume)
         {
-            if (entry.Key != Services.RemouldingCores.StorageKey)
+            if (entry.Key < Services.TalentKeySlots.ReservedBase)
                 proto.GunTalentConsume[entry.Key] = entry.Value;
         }
 

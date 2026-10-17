@@ -976,11 +976,26 @@ namespace Griffin.GameServer.Handlers
 
             uint[] items = new uint[Math.Max(3, gun.PrivateTalentSkillItems.Length)];
             gun.PrivateTalentSkillItems.CopyTo(items, 0);
-            items[request.Slot] = request.PrivateTalentSkillItemId;
-            gun.PrivateTalentSkillItems = items;
+            uint[] peak = TalentKeySlots.Normalize(gun);
+            if (TalentKeySlots.IsPeakKey(request.PrivateTalentSkillItemId))
+            {
+                // the peak key (峰位键, e.g. 921055) goes to the middle slot of the wheel, not to the side ones (A-61)
+                for (int i = 0; i < peak.Length; i++)
+                    if (peak[i] == request.PrivateTalentSkillItemId)
+                        peak[i] = 0;
+                peak[request.Slot] = request.PrivateTalentSkillItemId;
+                TalentKeySlots.Store(gun, peak);
+            }
+            else
+            {
+                items[request.Slot] = request.PrivateTalentSkillItemId;
+                gun.PrivateTalentSkillItems = items;
+            }
+
             gunService.Save();
             SC_GunPrivateTalentSkillItemBelong2 reply = new() { GunId = gun.GunId };
             reply.GunPrivateTalents.AddRange(items);
+            reply.JKHPKIEMIEI.AddRange(peak);
             connection.Send(reply);
         }
 
@@ -1043,8 +1058,10 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
-                SpTalentKeyData? key = tableService.GetTable<SpTalentKeyData>()
-                    .FirstOrDefault(row => row.Id == request.PrivateTalentSkillItemId);
+                // the real client names the KEY ITEM of the character (TalentKeyData id, e.g. 921055) plus the level; the tier row id (92105501) is
+                // accepted too (A-60: the tier-2 button of Nikketa answered "client data abnormal" because only the row id was looked up)
+                SpTalentKeyData? key = tableService.GetTable<SpTalentKeyData>().FirstOrDefault(row => row.Id == request.PrivateTalentSkillItemId)
+                    ?? tableService.GetTable<SpTalentKeyData>().FirstOrDefault(row => row.CBJBAFMMPDB == request.PrivateTalentSkillItemId && row.Level == request.Level);
                 bool belongsToGun = key is not null
                     && tableService.GetTable<TalentKeyData>().Any(row => TableFields.U(row, 1) == key.CBJBAFMMPDB && TableFields.U(row, 9) == gun.GunId);
                 if (!belongsToGun || key is null || request.Level == 0 || key.Level != request.Level
