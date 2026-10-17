@@ -78,6 +78,13 @@ namespace Griffin.GameServer.Services
                 if (owned.TryGetValue(gun, out int have) && have >= level)
                     done[id] = (uint)have;
 
+            // The cards of the command-center backgrounds (CommandBackgroundData column 7: 43001..43006 for the 3D scenes, 44xxx, 70000.., 71xxx) are
+            // unlocked by the achievement named there; a card that has column 9 = 1 (Loreley's 3D scene 3058) is not even listed while it is locked.
+            // The server unlocks them all, so every scene and 3D skin shows and opens (A-62).
+            foreach (IMessage background in tableService.GetTable<CommandBackgroundData>())
+                if (TableFields.U(background, 7) is var unlock and not 0)
+                    done[unlock] = 1;
+
             HashSet<uint> cleared = ClearedStages(accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? []);
             foreach ((uint id, uint[] stages) in AchievementConditions.Stages)
                 if (stages.Any(cleared.Contains))

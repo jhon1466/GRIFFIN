@@ -65,6 +65,27 @@ namespace Griffin.GameServer.Services
             return needed.Count > 0 && needed.All(have.Contains);
         }
 
+        /// <summary>The points of a character's tree that have the given type (SquadTalentGroupData column 6): 4 = public key node, 6 = Mind Spiral key node.</summary>
+        public static IReadOnlyList<ulong> PointsOfType(uint gunId, uint type)
+        {
+            Build();
+            uint tree = TreeOf(gunId);
+            if (tree == 0 || pointsOfTree is null || pointType is null || !pointsOfTree.TryGetValue(tree, out List<ulong>? points))
+                return [];
+
+            return points.Where(p => pointType.GetValueOrDefault(p) == type).ToList();
+        }
+
+        /// <summary>
+        /// The points the client must see as unlocked: the unlocked ones plus the golden public-key node (type 4) once the key was received
+        /// (the node is "taken" by receiving the key and it is what leads to the Mind Spiral node of type 6). ASSUMPTION A-59.
+        /// </summary>
+        public static IReadOnlyCollection<ulong> EffectivePoints(Database.Entities.GunEntity gun)
+        {
+            IEnumerable<ulong> points = gun.TalentTree.Keys;
+            return gun.IsGetPublicTalentSkillItem ? points.Concat(PointsOfType(gun.GunId, 4)).Distinct().ToList() : points.ToList();
+        }
+
         /// <summary>The public key item (ItemData id) the character gets from its tree: SquadTalentGunData column 13.</summary>
         public static uint KeyItemOf(uint gunId)
         {
@@ -172,7 +193,7 @@ namespace Griffin.GameServer.Services
                 return Fail(HNINDAOJCKP.ClientInputInvalid);
 
             bool reachable = FirstGroupOpenPoints(treeKey).Contains(pointId)
-                || gun.TalentTree.Keys.Any(unlocked => Point(unlocked) is { } from && TableFields.U64List(from, 4).Contains(pointId));
+                || TalentBits.EffectivePoints(gun).Any(unlocked => Point(unlocked) is { } from && TableFields.U64List(from, 4).Contains(pointId));
             if (!reachable)
                 return Fail(HNINDAOJCKP.UserSystemLocked);
 
@@ -193,7 +214,7 @@ namespace Griffin.GameServer.Services
 
             gunService.Save();
             Log.Information("Talent: account {Uid} gun {Gun} unlocked point {Point} for {Cost}.", uid, characterId, pointId, string.Join(",", cost.Select(p => $"{p.Key}x{p.Value}")));
-            return new TalentUnlockResult(talentId, groupId, 1, cost, TalentBits.Words(gun.TalentTree.Keys));
+            return new TalentUnlockResult(talentId, groupId, 1, cost, TalentBits.Words(TalentBits.EffectivePoints(gun)));
         }
 
         public bool Reset(uint uid, uint talentId, List<IMessage> messages)
@@ -213,12 +234,13 @@ namespace Griffin.GameServer.Services
                 return false;
             }
 
+            // the reserved keys are not consumption (core level, peak-key slots): they are neither refunded nor cleared
             foreach ((uint item, uint count) in gun.GunTalentConsume)
-                if (count > 0)
+                if (count > 0 && item < TalentKeySlots.ReservedBase)
                     rewardService.Grant(uid, item, (int)count, messages);
 
             gun.TalentTree = [];
-            gun.GunTalentConsume = [];
+            gun.GunTalentConsume = gun.GunTalentConsume.Where(p => p.Key >= TalentKeySlots.ReservedBase).ToDictionary(p => p.Key, p => p.Value);
             gun.TalentResetNum++;
             gunService.Save();
             Log.Information("Talent: account {Uid} reset the tree of gun {Gun} (reset #{Count}).", uid, gun.GunId, gun.TalentResetNum);
