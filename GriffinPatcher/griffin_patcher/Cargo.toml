@@ -1,0 +1,20 @@
+[package]
+name = "griffin_patcher"
+edition = "2021"
+version.workspace = true
+
+[lib]
+name = "griffin_patcher"
+crate-type = ["cdylib"]
+
+[dependencies]
+ilhook.workspace = true
+anyhow.workspace = true
+lazy_static.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_SystemServices",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Console",
+    "Win32_System_Memory",
+] }

@@ -1,0 +1,221 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Griffin.Database.Entities;
+
+namespace Griffin.Database.Core
+{
+    public class GriffinDbContext : DbContext
+    {
+        public GriffinDbContext(DbContextOptions<GriffinDbContext> options) : base(options)
+        {
+        }
+
+        public DbSet<GunEntity> Guns => Set<GunEntity>();
+
+        public DbSet<CostumeEntity> Costumes => Set<CostumeEntity>();
+
+        public DbSet<CostumePartEntity> CostumeParts => Set<CostumePartEntity>();
+
+        public DbSet<BackgroundEntity> Backgrounds => Set<BackgroundEntity>();
+
+        public DbSet<AccountEntity> Accounts => Set<AccountEntity>();
+
+        public DbSet<AccountStateEntity> AccountStates => Set<AccountStateEntity>();
+
+        public DbSet<WeaponEntity> Weapons => Set<WeaponEntity>();
+
+        public DbSet<ItemEntity> Items => Set<ItemEntity>();
+
+        public DbSet<WeaponModEntity> WeaponMods => Set<WeaponModEntity>();
+
+        public DbSet<WeaponSkinEntity> WeaponSkins => Set<WeaponSkinEntity>();
+
+        public DbSet<WeaponModSkinEntity> WeaponModSkins => Set<WeaponModSkinEntity>();
+
+        public DbSet<AvgDuoEntity> AvgDuos => Set<AvgDuoEntity>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<GunEntity>(e =>
+            {
+                e.HasIndex(g => g.GunId);
+                e.HasIndex(g => g.WeaponId);
+                e.Property(g => g.Id).ValueGeneratedOnAdd();
+                e.Property(g => g.Level).HasDefaultValue(1);
+                e.Property(g => g.Exp).HasDefaultValue(120u);
+                e.Property(g => g.Energy).HasDefaultValue(120u);
+                e.Property(g => g.GunClass).HasDefaultValue(1u);
+                e.Property(g => g.SpTalentLevel).HasDefaultValue(0u);
+                e.Property(g => g.LoveLevel).HasDefaultValue(1u);
+                e.Property(g => g.PrivateTalentSkillItems).HasDefaultValue(new uint[] { 0, 0, 0 });
+                e.Property(g => g.PublicTalentSkillItems).HasDefaultValue(new uint[] { 0, 0, 0 });
+                e.Property(g => g.PublicTalentSkillItemsUid).HasColumnType("numeric(20,0)[]").HasDefaultValue(new ulong[] { 0, 0, 0 });
+                ConfigureJsonDictionary(e.Property(g => g.TalentTree));
+                ConfigureJsonDictionary(e.Property(g => g.GunTalentConsume));
+            });
+
+            modelBuilder.Entity<CostumeEntity>(e =>
+            {
+                e.HasIndex(c => c.CostumeId);
+                e.Property(c => c.Id).ValueGeneratedOnAdd();
+            });
+
+            modelBuilder.Entity<CostumePartEntity>(e =>
+            {
+                e.HasIndex(p => p.CostumePartId);
+                e.HasIndex("AccountUid", "CostumePartId").IsUnique();
+                e.Property(p => p.Id).ValueGeneratedOnAdd();
+            });
+
+            modelBuilder.Entity<BackgroundEntity>(e =>
+            {
+                e.HasIndex(b => b.BackgroundId);
+                e.HasIndex("AccountUid", "BackgroundId").IsUnique();
+                e.Property(b => b.Id).ValueGeneratedOnAdd();
+            });
+
+            modelBuilder.Entity<WeaponEntity>(e =>
+            {
+                e.HasIndex(w => w.WeaponId);
+                e.HasIndex(w => w.GunId);
+                e.Property(w => w.Id).ValueGeneratedOnAdd();
+                e.Property(w => w.Level).HasDefaultValue(1);
+                e.Property(w => w.BreakTimes).HasDefaultValue(1);
+                e.Property(w => w.EquippedModIds).HasDefaultValue(Array.Empty<uint>());
+            });
+
+            modelBuilder.Entity<ItemEntity>(e =>
+            {
+                e.HasIndex(i => i.ItemId);
+                e.HasIndex("AccountUid", "ItemId").IsUnique();
+                e.Property(i => i.Id).ValueGeneratedOnAdd();
+                e.Property(i => i.Type).HasDefaultValue(0);
+                e.Property(i => i.Count).HasDefaultValue(1);
+            });
+
+            modelBuilder.Entity<WeaponModEntity>(e =>
+            {
+                e.HasIndex(m => m.WeaponModId);
+                e.HasIndex(m => m.Uid).IsUnique();
+                e.HasIndex("AccountUid", "WeaponModId").IsUnique();
+                e.Property(m => m.Id).ValueGeneratedOnAdd();
+                e.Property(m => m.Level).HasDefaultValue(0u);
+                e.Property(m => m.Field5).HasDefaultValue(0u);
+                e.Property(m => m.Field6).HasDefaultValue(0u);
+                e.Property(m => m.Field7).HasDefaultValue(0ul);
+            });
+
+            modelBuilder.Entity<WeaponSkinEntity>(e =>
+            {
+                e.HasIndex(s => s.WeaponSkinId);
+                e.HasIndex("AccountUid", "WeaponSkinId").IsUnique();
+                e.Property(s => s.Id).ValueGeneratedOnAdd();
+            });
+
+            modelBuilder.Entity<WeaponModSkinEntity>(e =>
+            {
+                e.HasIndex(s => s.WeaponModSkinId);
+                e.HasIndex("AccountUid", "WeaponModSkinId").IsUnique();
+                e.Property(s => s.Id).ValueGeneratedOnAdd();
+            });
+
+            modelBuilder.Entity<AvgDuoEntity>(e =>
+            {
+                e.Property(a => a.Id).ValueGeneratedOnAdd();
+                e.Property(a => a.AvgDuoMainStageIds).HasDefaultValue(Array.Empty<uint>());
+                e.Property(a => a.AvgDuoSubStageIds).HasDefaultValue(Array.Empty<uint>());
+
+                e.HasOne(a => a.Account)
+                 .WithOne(a => a.AvgDuo)
+                 .HasForeignKey<AvgDuoEntity>("AccountUid")
+                 .OnDelete(DeleteBehavior.Cascade)
+                 .IsRequired();
+
+                e.HasIndex("AccountUid").IsUnique();
+            });
+
+            modelBuilder.Entity<AccountEntity>(e =>
+            {
+                e.HasKey(a => a.Uid);
+                e.HasIndex(a => a.Email).IsUnique();
+                e.Property(a => a.Uid).ValueGeneratedOnAdd();
+                e.Property(a => a.Email).IsRequired();
+                e.Property(a => a.PasswordHash).IsRequired();
+                e.Property(a => a.BackgroundId).HasDefaultValue(1001u);
+
+                e.HasMany(a => a.Guns)
+                 .WithOne(g => g.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.Costumes)
+                 .WithOne(c => c.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.CostumeParts)
+                 .WithOne(p => p.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.Backgrounds)
+                 .WithOne(b => b.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.Weapons)
+                 .WithOne(w => w.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.Items)
+                 .WithOne(i => i.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.WeaponMods)
+                 .WithOne(m => m.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.WeaponSkins)
+                 .WithOne(s => s.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.WeaponModSkins)
+                 .WithOne(s => s.Account)
+                 .IsRequired();
+
+                e.HasMany(a => a.States)
+                 .WithOne(s => s.Account)
+                 .HasForeignKey(s => s.AccountUid)
+                 .OnDelete(DeleteBehavior.Cascade)
+                 .IsRequired();
+            });
+
+            modelBuilder.Entity<AccountStateEntity>(e =>
+            {
+                e.HasKey(s => s.Id);
+                e.Property(s => s.Id).ValueGeneratedOnAdd();
+                e.Property(s => s.Key).HasMaxLength(128).IsRequired();
+                e.Property(s => s.Json).HasColumnType("jsonb").IsRequired();
+                e.Property(s => s.UpdatedAt).HasColumnType("timestamp with time zone").IsRequired();
+                e.HasIndex(s => new { s.AccountUid, s.Key }).IsUnique();
+            });
+        }
+
+        private static readonly JsonSerializerOptions JsonOptions = new();
+
+        private static void ConfigureJsonDictionary<TKey, TValue>(PropertyBuilder<Dictionary<TKey, TValue>> property)
+            where TKey : notnull
+        {
+            property
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb")
+                .HasConversion(
+                    v => JsonSerializer.Serialize(v ?? new Dictionary<TKey, TValue>(), JsonOptions),
+                    v => JsonSerializer.Deserialize<Dictionary<TKey, TValue>>(v, JsonOptions) ?? new())
+                .Metadata.SetValueComparer(new ValueComparer<Dictionary<TKey, TValue>>(
+                    (left, right) => JsonSerializer.Serialize(left ?? new Dictionary<TKey, TValue>(), JsonOptions)
+                        == JsonSerializer.Serialize(right ?? new Dictionary<TKey, TValue>(), JsonOptions),
+                    v => JsonSerializer.Serialize(v ?? new Dictionary<TKey, TValue>(), JsonOptions).GetHashCode(),
+                    v => JsonSerializer.Deserialize<Dictionary<TKey, TValue>>(
+                        JsonSerializer.Serialize(v ?? new Dictionary<TKey, TValue>(), JsonOptions), JsonOptions) ?? new()));
+        }
+    }
+}
