@@ -101,6 +101,54 @@ namespace Griffin.Common.Networking
             }
         }
 
+        private readonly List<IMessage> kept = [];
+        private DateTime keptUntil;
+        private DateTime keptLast;
+
+        /// <summary>
+        /// Messages that the screen of the client may have missed while it was hidden (a plot plays in another scene and the map does not
+        /// redraw from its data when it comes back): they are sent again after the next requests of the client, at most once per 1.5 s, until
+        /// <paramref name="duration"/> passes. Used for the stage record updates of dialogue-only stages (A-64).
+        /// </summary>
+        public void KeepSending(IEnumerable<IMessage> messages, TimeSpan duration)
+        {
+            lock (kept)
+            {
+                if (DateTime.UtcNow > keptUntil)
+                    kept.Clear();
+                kept.AddRange(messages);
+                if (kept.Count > 40)
+                    kept.RemoveRange(0, kept.Count - 40);
+                keptUntil = DateTime.UtcNow + duration;
+                keptLast = DateTime.UtcNow;
+            }
+        }
+
+        private readonly object writeLock = new();
+
+        /// <summary>Sends the kept messages again when the window is open (called by the dispatcher after each request).</summary>
+        public void SendKept()
+        {
+            IMessage[] again;
+            lock (kept)
+            {
+                DateTime now = DateTime.UtcNow;
+                if (kept.Count == 0 || now > keptUntil)
+                {
+                    kept.Clear();
+                    return;
+                }
+
+                if (now - keptLast < TimeSpan.FromSeconds(1.5))
+                    return;
+
+                keptLast = now;
+                again = kept.ToArray();
+            }
+
+            this.SendAutoEncrypted(again);
+        }
+
         public void Send(params object[] messages)
         {
             IMessage[] imessages = new IMessage[messages.Length];
@@ -198,7 +246,8 @@ namespace Griffin.Common.Networking
                 Interlocked.Increment(ref sentMessageCount);
                 PacketUtils.LogBasePackets("Sending", "Sending", message.Packets, message.SequenceId, message.Header.EncryptionByte, message.ToRawMessageData(), logger);
 
-                PacketFramer.WriteClientSizedChunks(_stream, message.ToRawMessageData());
+                lock (writeLock)
+                    PacketFramer.WriteClientSizedChunks(_stream, message.ToRawMessageData());
             }
         }
 

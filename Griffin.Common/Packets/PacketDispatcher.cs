@@ -95,6 +95,8 @@ namespace Griffin.Common.Packets
                     TryAutoReply(connection, packet, "handler sent nothing");
                 }
 
+                connection.SendKept();
+
                 // If the handler maps to a reply MsgId, frame its returned message and send it.
                 //if (entry.ReplyMsgId != MsgId.MsgNone && result is IMessage reply)
                 //{
