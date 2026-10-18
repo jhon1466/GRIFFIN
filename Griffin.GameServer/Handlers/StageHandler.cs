@@ -264,11 +264,12 @@ namespace Griffin.GameServer.Handlers
             HashSet<uint> passedStages = (accountState.Get<Dictionary<string, StageRecord>>(account.Uid, "stage.records") ?? [])
                 .Where(entry => entry.Value.FirstPassTime != 0 && uint.TryParse(entry.Key, out _)).Select(entry => uint.Parse(entry.Key)).ToHashSet();
             WeaponModEntity[] mods = weaponModService.GetPlayerWeaponMods(account.Uid);
+            Dictionary<string, ModRefineState> allRefine = ModPolarity.All(accountState, account.Uid);
             IReadOnlyList<uint> supportRows = SupportChips.ActiveRows(tableService, accountState, account.Uid);
             IReadOnlyList<(ulong Id, uint StcId)> publicKeys = PublicTalentHandler.ItemsOf(accountState, account.Uid);
             StatInputs InputsOf(GunEntity gun) => new(gun, controlRoomLevel, passedStages,
                 (WeaponOf(gun)?.EquippedModIds ?? []).Where(id => id != 0).Select(id => mods.FirstOrDefault(m => m.Id == id)).Where(m => m is not null)
-                    .SelectMany(m => ModPolarity.Values(m!.Field7, ModPolarity.Get(accountState, account.Uid, m.Id).Polarity)).ToList(),
+                    .SelectMany(m => ModPolarity.Values(m!.Field7, ModPolarity.From(allRefine, m.Id).Polarity)).ToList(),
                 gun.PublicTalentSkillItemsUid.Where(id => id != 0).Select(id => publicKeys.FirstOrDefault(k => k.Id == id)).Where(k => k.Id != 0)
                     .Select(k => (k.StcId, PublicTalentHandler.AffixesOf(accountState, account.Uid, k.Id))).ToList(),
                 PluginAffixesOf(account.Uid, gun.GunId), cooking.FoodRows(account.Uid, gun.GunId), supportRows,

@@ -309,8 +309,9 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
     private SC_GunWeaponMods CreateWeaponModResponse(uint accountUid)
     {
         SC_GunWeaponMods response = new();
+        Dictionary<string, ModRefineState> allRefine = ModPolarity.All(accountState, accountUid);
         foreach (WeaponModEntity mod in inventoryService.GetPlayerInventory<WeaponModEntity>(accountUid))
-            response.Mods.Add(ModPolarity.ToProto(tableService, accountState, accountUid, mod));
+            response.Mods.Add(ModPolarity.ToProto(tableService, allRefine, mod));
 
         return response;
     }

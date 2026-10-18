@@ -48,6 +48,15 @@ namespace Griffin.GameServer.Services
         public static Griffin.Common.Proto.GunWeaponMod ToProto(ITableService tables, IAccountStateService state, uint uid, WeaponModEntity mod) =>
             Griffin.GameServer.Extensions.ProtoExtensions.ToProtoWeaponMod(mod, Get(state, uid, mod.Id), ModPower.EffectIdOf(tables, mod));
 
+        /// <summary>The state of every mod of the account read ONCE: a list of hundreds of mods must not read the database once per mod (0.4-0.7 s per request, A-91).</summary>
+        public static Dictionary<string, ModRefineState> All(IAccountStateService state, uint uid) => Load(state, uid);
+
+        public static ModRefineState From(Dictionary<string, ModRefineState> all, uint modId) =>
+            all.GetValueOrDefault(modId.ToString()) ?? new ModRefineState();
+
+        public static Griffin.Common.Proto.GunWeaponMod ToProto(ITableService tables, Dictionary<string, ModRefineState> all, WeaponModEntity mod) =>
+            Griffin.GameServer.Extensions.ProtoExtensions.ToProtoWeaponMod(mod, From(all, mod.Id), ModPower.EffectIdOf(tables, mod));
+
         public static ModRefineState Get(IAccountStateService state, uint uid, uint modId) =>
             Load(state, uid).GetValueOrDefault(modId.ToString()) ?? new ModRefineState();
 
