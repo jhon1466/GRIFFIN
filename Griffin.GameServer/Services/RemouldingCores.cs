@@ -1,3 +1,4 @@
+using Griffin.Common.Table;
 using Griffin.Database.Entities;
 
 namespace Griffin.GameServer.Services
@@ -32,6 +33,15 @@ namespace Griffin.GameServer.Services
         public static uint OwnedCore(GunEntity gun) => gun.Level >= UnlockLevel ? CoreOf(gun.GunId) : 0;
 
         public static uint LevelOf(GunEntity gun) => Math.Clamp(gun.GunTalentConsume.GetValueOrDefault(StorageKey, 1u), 1u, MaxLevel);
+
+        /// <summary>(Data Links, gold) to take a core from one level to another: <c>LevelUpData</c> column 2 and 6 hold the totals accumulated up to each level.</summary>
+        public static (uint Links, uint Gold) CostBetween(Griffin.Common.Table.ITableService tables, uint from, uint to)
+        {
+            uint Total(uint level, int column) =>
+                tables.GetTable<LevelUpData>().Where(row => TableFields.U(row, 1) == level).Select(row => TableFields.U(row, column)).FirstOrDefault();
+
+            return (Total(to, 2) - Math.Min(Total(from, 2), Total(to, 2)), Total(to, 6) - Math.Min(Total(from, 6), Total(to, 6)));
+        }
 
         public static void SetLevel(GunEntity gun, uint level) => gun.GunTalentConsume[StorageKey] = Math.Clamp(level, 1u, MaxLevel);
     }

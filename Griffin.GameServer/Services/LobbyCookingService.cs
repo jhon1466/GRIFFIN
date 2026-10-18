@@ -88,6 +88,12 @@ namespace Griffin.GameServer.Services
 
         HNINDAOJCKP Gift(uint uid, CS_LobbyDishGift request, List<IMessage> messages);
 
+        /// <summary>The PropertyData rows the dishes given to a character switched on (the row of the level each property reached), A-76.</summary>
+        IReadOnlyList<uint> FoodRows(uint uid, uint gunId);
+
+        /// <summary>The bytes the client keeps in <c>Gun</c> field 61: the points of each property (slots 0-2 = primary 1 with sub 0-2, slot 7 = the most fed primary 2).</summary>
+        ulong FoodBytes(uint uid, uint gunId);
+
         HNINDAOJCKP ClaimIndex(uint uid, IReadOnlyList<uint> dishes, List<IMessage> messages);
 
         HNINDAOJCKP ClaimMilestone(uint uid, uint group, List<IMessage> messages, out uint level);
@@ -291,6 +297,60 @@ namespace Griffin.GameServer.Services
             }
         }
 
+        /// <summary>The level of a property for a satiety total: the highest <c>LobbyCookPropertyData</c> row whose accumulated experience (column 5) it reaches.</summary>
+        private IMessage? LevelRow(uint primary, uint sub, uint total)
+        {
+            IMessage? best = null;
+            uint accumulated = 0;
+            foreach (IMessage row in tableService.GetTable<LobbyCookPropertyData>().Where(r => TableFields.U(r, 2) == primary && TableFields.U(r, 3) == sub).OrderBy(r => TableFields.U(r, 4)))
+            {
+                accumulated += TableFields.U(row, 5);
+                if (total >= accumulated)
+                    best = row;
+            }
+
+            return best;
+        }
+
+        public IReadOnlyList<uint> FoodRows(uint uid, uint gunId)
+        {
+            List<uint> rows = [];
+            foreach ((string key, uint total) in Load(uid).Satiety)
+            {
+                string[] parts = key.Split(':');
+                if (parts.Length == 3 && uint.TryParse(parts[0], out uint gun) && gun == gunId && uint.TryParse(parts[1], out uint primary) && uint.TryParse(parts[2], out uint sub)
+                    && LevelRow(primary, sub, total) is { } row)
+                    rows.Add(TableFields.U(row, 6));
+            }
+
+            return rows;
+        }
+
+        public ulong FoodBytes(uint uid, uint gunId) => FoodBytesOf(Load(uid), gunId);
+
+        private static ulong FoodBytesOf(CookState state, uint gunId)
+        {
+            ulong bytes = 0;
+            uint bestElement = 0;
+            foreach ((string key, uint total) in state.Satiety)
+            {
+                string[] parts = key.Split(':');
+                if (parts.Length != 3 || !uint.TryParse(parts[0], out uint gun) || gun != gunId || !uint.TryParse(parts[1], out uint primary) || !uint.TryParse(parts[2], out uint sub))
+                    continue;
+
+                ulong value = Math.Min(255u, total);
+                if (primary == 1 && sub <= 2)
+                    bytes |= value << (int)(sub * 8);
+                else if (primary == 2 && total > bestElement)
+                {
+                    bestElement = total;
+                    bytes = (bytes & ~(0xFFUL << 56)) | (value << 56);
+                }
+            }
+
+            return bytes;
+        }
+
         public HNINDAOJCKP Gift(uint uid, CS_LobbyDishGift request, List<IMessage> messages)
         {
             lock (Gate)
@@ -394,7 +454,7 @@ namespace Griffin.GameServer.Services
                         LOJOMOMJLPB = sub,
                         EMOLDIANHCJ = level,
                         JKGBIKEDACK = levelRow is null ? 0 : PropertyValue(TableFields.U(levelRow, 6)),
-                        EEPPFPLKGKN = total,
+                        EEPPFPLKGKN = FoodBytesOf(state, gun.GunId),
                     });
                     Log.Information("Cooking: account {Uid} gave dishes to {Gun}: property {Primary}/{Sub} satiety {Total}, level {Level}.", uid, gun.GunId, primary, sub, total, level);
                 }

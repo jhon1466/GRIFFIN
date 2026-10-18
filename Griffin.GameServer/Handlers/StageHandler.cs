@@ -15,6 +15,8 @@ namespace Griffin.GameServer.Handlers
         IAccountStateService accountState,
         IGunService gunService,
         IWeaponService weaponService,
+        IWeaponModService weaponModService,
+        ILobbyCookingService cooking,
         IResourceService resourceService,
         IStaminaService staminaService,
         IDailyQuestProgressService questProgress,
@@ -247,13 +249,27 @@ namespace Griffin.GameServer.Handlers
                 .ToDictionary(group => group.Key, group => group.First()[1]);
             string RotationOf(uint pointId) => rotations.GetValueOrDefault(pointId, BattleUnitBuilder.DefaultRotation);
             var playerUnits = new List<byte[]>();
+            // account data that adds to the stats of every character: control room level and the stages passed (A-73)
+            uint controlRoomLevel = accountState.Get<ControlRoomHandler.RoomState>(account.Uid, ControlRoomHandler.StateKey)?.Level ?? 1;
+            HashSet<uint> passedStages = (accountState.Get<Dictionary<string, StageRecord>>(account.Uid, "stage.records") ?? [])
+                .Where(entry => entry.Value.FirstPassTime != 0 && uint.TryParse(entry.Key, out _)).Select(entry => uint.Parse(entry.Key)).ToHashSet();
+            WeaponModEntity[] mods = weaponModService.GetPlayerWeaponMods(account.Uid);
+            IReadOnlyList<uint> supportRows = SupportChips.ActiveRows(tableService, accountState, account.Uid);
+            IReadOnlyList<(ulong Id, uint StcId)> publicKeys = PublicTalentHandler.ItemsOf(accountState, account.Uid);
+            StatInputs InputsOf(GunEntity gun) => new(gun, controlRoomLevel, passedStages,
+                (WeaponOf(gun)?.EquippedModIds ?? []).Where(id => id != 0).Select(id => mods.FirstOrDefault(m => m.Id == id)).Where(m => m is not null)
+                    .SelectMany(m => ModPolarity.Values(m!.Field7, ModPolarity.Get(accountState, account.Uid, m.Id).Polarity)).ToList(),
+                gun.PublicTalentSkillItemsUid.Where(id => id != 0).Select(id => publicKeys.FirstOrDefault(k => k.Id == id)).Where(k => k.Id != 0)
+                    .Select(k => (k.StcId, PublicTalentHandler.AffixesOf(accountState, account.Uid, k.Id))).ToList(),
+                PluginAffixesOf(account.Uid, gun.GunId), cooking.FoodRows(account.Uid, gun.GunId), supportRows,
+                ModSkillsOf(WeaponOf(gun)?.EquippedModIds ?? [], mods));
             if (requestedGuns is { Count: > 0 })
             {
                 foreach ((uint unitId, uint gunId) in requestedGuns.OrderBy(pair => pair.Key))
                 {
                     if (!ownedGuns.TryGetValue(gunId, out GunEntity? gun))
                         continue;
-                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId)));
+                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
                 }
             }
 
@@ -269,7 +285,7 @@ namespace Griffin.GameServer.Handlers
                         || !uint.TryParse(fields[2], out uint gunId)
                         || !ownedGuns.TryGetValue(gunId, out GunEntity? gun))
                         continue;
-                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId)));
+                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
                 }
             }
 
@@ -283,6 +299,25 @@ namespace Griffin.GameServer.Handlers
             Log.Information("Stage {StageId} battle composed from table config {ConfigId}: {PlayerUnits} player units.",
                 stage.Id, config.StageId, playerUnits.Count);
             return battle;
+        }
+
+        /// <summary>The powers of the mods a weapon carries (A-78): one skill each with the numbers of its rank; two mods with the same power give the larger numbers once.</summary>
+        private IReadOnlyList<(uint Skill, int[] Values)> ModSkillsOf(IEnumerable<uint> equippedIds, WeaponModEntity[] mods)
+        {
+            var skills = new Dictionary<uint, int[]>();
+            foreach (uint id in equippedIds.Where(id => id != 0))
+                if (mods.FirstOrDefault(m => m.Id == id) is { } mod && ModPower.SkillOf(tableService, mod) is { } power)
+                    if (!skills.TryGetValue(power.Skill, out int[]? known) || known.Sum() < power.Values.Sum())
+                        skills[power.Skill] = power.Values;
+
+            return skills.Select(pair => (pair.Key, pair.Value)).ToList();
+        }
+
+        /// <summary>The affixes of the plugins in the six slots of the core of a character (A-75).</summary>
+        private IReadOnlyList<uint> PluginAffixesOf(uint uid, uint gunId)
+        {
+            ulong[] slots = RemouldingPlugins.SlotsOf(accountState, uid, gunId);
+            return GunHandler.PluginCatalog().RemouldingPlugins.Where(plugin => slots.Contains(plugin.Id)).SelectMany(plugin => plugin.ACEIFDEGLMH).ToList();
         }
 
         /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>.</summary>

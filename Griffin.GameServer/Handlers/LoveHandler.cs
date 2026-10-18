@@ -30,7 +30,10 @@ namespace Griffin.GameServer.Handlers
         IItemUseService itemUse,
         ILoveService love) : LoveHandlerBase
     {
-        private const uint VowLevel = 9;
+        public const uint VowLevel = 9;
+
+        /// <summary>Key of <c>GunEntity.GunTalentConsume</c> that keeps the time of the vow (never sent as consumption).</summary>
+        public const uint VowTimeKey = 0xFFFF0040;
 
         public override void HandleLoveSendGift(CS_LoveSendGift request, Connection connection)
         {
@@ -157,6 +160,7 @@ namespace Griffin.GameServer.Handlers
 
             uint beforeVow = gun.LoveLevel;
             gun.LoveLevel = VowLevel;
+            gun.GunTalentConsume[VowTimeKey] = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             gunService.Save();
             List<IMessage> vow = [];
             GrantLevelRewards(connection.Account.Uid, beforeVow, VowLevel, vow);

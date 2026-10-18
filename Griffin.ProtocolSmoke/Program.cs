@@ -725,6 +725,22 @@ if (scenario == "stage")
     Check("stage: each unit lists the main skills of its grade (GunGradeData column 11, e.g. 10170101...) followed by its grade passives (column 5), never grade ids",
         stgGuns.Count == 2 && stgGuns.All(g => g is not null && StgSkills(g) is { Count: >= 4 } s && s.All(id => id > 1000000) && s.Distinct().Count() == s.Count),
         string.Join(" | ", stgGuns.Where(g => g is not null).Select(g => string.Join(",", StgSkills(g!)))));
+    // the weapon skill (field 9 of the skill message) as the client's own unit builder writes it (A-75)
+    bool HasWeaponSkill(byte[] gun)
+    {
+        var sr = new CodedInputStream(StgFields(gun, 11).FirstOrDefault() ?? []);
+        uint tag;
+        while ((tag = sr.ReadTag()) != 0)
+        {
+            if ((tag >> 3) == 9 && sr.ReadUInt32() != 0)
+                return true;
+            if ((tag >> 3) != 9)
+                sr.SkipLastField();
+        }
+
+        return false;
+    }
+    Check("stage: each unit's skill message carries the skill of its weapon (field 9)", stgGuns.Count == 2 && stgGuns.All(g => g is not null && HasWeaponSkill(g)));
     Check("stage: the character of each unit carries details_ with the weapon (field 30 with weapon 1 and weapon_lite 11) and a skin (field 5)",
         stgGuns.Count == 2 && stgGuns.All(g => g is not null && StgFields(g, 1).FirstOrDefault() is { } ch
             && StgFields(ch, 30).FirstOrDefault() is { } det && StgFields(det, 1).Count == 1 && StgFields(det, 11).Count == 1
@@ -745,6 +761,123 @@ if (scenario == "stage")
         stgStats.GetValueOrDefault(1) > 0 && stgStats.GetValueOrDefault(2) > stgStats.GetValueOrDefault(1) && stgStats.GetValueOrDefault(6) > 0
         && stgStats.GetValueOrDefault(10) == 1200 && stgStats.GetValueOrDefault(77) == 1 && stgStats.GetValueOrDefault(3) == 0,
         string.Join(",", stgStats.OrderBy(k => k.Key).Select(k => $"{k.Key}:{k.Value}")));
+    // public keys: the client chooses the affixes (field 6 = four pairs, property << 8 | level), the server checks them against EntryData, keeps and returns them (A-75)
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });   // the keys cost Universal Chain Keys (228), Transcription Conductors VI (9011) and gold
+    main.ReadFor(TimeSpan.FromSeconds(4));
+    main.Send(new CS_PublicTalentSkillItems());
+    var keyList = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_PublicTalentSkillItems>().FirstOrDefault();
+    var keyItem = keyList?.PublicSkillItems.FirstOrDefault();
+    if (keyItem is not null)
+    {
+        ulong chosen = (30UL << 8 | 3) | ((9UL << 8 | 5) << 16);
+        main.Send(new CS_PublicTalentItemLevelUp { Id = keyItem.Id, Locked = chosen });
+        var keyReply = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_PublicTalentItemLevelUp>().FirstOrDefault();
+        main.Send(new CS_PublicTalentSkillItems());
+        var keyAfter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_PublicTalentSkillItems>().FirstOrDefault()?.PublicSkillItems.FirstOrDefault(k => k.Id == keyItem.Id);
+        Check("public keys: the chosen affixes are confirmed and sent back in the item list (field 4)", keyReply?.Locked == chosen && keyAfter?.Locked == chosen, $"reply={keyReply?.Locked} list={keyAfter?.Locked}");
+        main.Send(new CS_PublicTalentItemLevelUp { Id = keyItem.Id, Locked = 99UL << 8 | 1 });
+        Check("public keys: an affix the rank does not allow is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -10008));
+    }
+    // support chips (A-77): 63 core chips owned, up to three per formation, saved, shown in the room and refused when unknown
+    main.Send(new CS_SupportChip());
+    var chipList = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportChip>().FirstOrDefault();
+    Check("support: the account owns 6 copies of each of the 63 core chips", chipList?.ENFCKIOLJNM.Count == 378, $"chips={chipList?.ENFCKIOLJNM.Count}");
+    var chipIds = chipList?.ENFCKIOLJNM.Select(c => c.Id).Take(4).ToList() ?? [];
+    if (chipIds.Count == 4)
+    {
+        var formation = new CS_SupportFormationModifyCoreChip { Id = 1 };
+        formation.JHCLPBBJDFH.AddRange(chipIds.Take(2));
+        main.Send(formation);
+        var formationReply = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportFormationModifyCoreChip>().FirstOrDefault();
+        main.Send(new CS_SupportRoomInfo());
+        var room = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SupportRoomInfo>().FirstOrDefault();
+        Check("support: a formation keeps its core chips and the room shows them",
+            formationReply?.ENFCKIOLJNM.SequenceEqual(chipIds.Take(2)) == true && room?.ABOENIKPJLH.KMPIHKFBAEP[0].ENFCKIOLJNM.SequenceEqual(chipIds.Take(2)) == true);
+        // the formation used in battle (1 by default) gives its chips to every character: two chips at break 0 = +1 % life (DevelopProperty 30) each
+        main.Send(new CS_StageStart { StcStageId = 10101 });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StageInto { Guns = { [1769499u] = 1017u, [1835035u] = 1008u } });
+        var chipBattle = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault()?.Stage;
+        var chipUnit = chipBattle?.Camps.Select(c => c.ToByteArray()).Where(c => StgSide(c) == 1).SelectMany(c => StgFields(c, 2)).Select(u => StgFields(u, 1).FirstOrDefault()).FirstOrDefault();
+        int chipLife = 0;
+        if (chipUnit is not null)
+            foreach (var entry in StgFields(StgFields(chipUnit, 22)[0], 1))
+            {
+                var er = new CodedInputStream(entry); int k = 0, v = 0; uint t2;
+                while ((t2 = er.ReadTag()) != 0) { if ((t2 >> 3) == 1) k = er.ReadInt32(); else if ((t2 >> 3) == 2) v = er.ReadInt32(); else er.SkipLastField(); }
+                if (k == 30) chipLife = v;
+            }
+        Check("support: the core chips of the battle formation add to the stats of the characters (MaxHpPercent 30 = 20 with two chips)", chipLife >= 20, $"MaxHpPercent={chipLife}");
+        var tooMany = new CS_SupportFormationModifyCoreChip { Id = 1 };
+        tooMany.JHCLPBBJDFH.AddRange(chipIds);
+        main.Send(tooMany);
+        Check("support: more core chips than slots are refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+        var unknown = new CS_SupportFormationModifyCoreChip { Id = 1 };
+        unknown.JHCLPBBJDFH.Add(9999);
+        main.Send(unknown);
+        Check("support: an unknown chip is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+    }
+    // break (consumes copies of the same chip, one break each) and decompose (A-78)
+    if (chipList is not null)
+    {
+        var groups = chipList.ENFCKIOLJNM.GroupBy(c => c.StcId).Where(g => g.Count() >= 6).Take(2).ToList();
+        var strong = groups[0].Select(c => c.Id).ToList();
+        main.Send(new CS_SupportChipBreak { Id = strong[0], NNGEBCPGILL = { strong[1], strong[2] } });
+        var broke = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportChipBreak>().FirstOrDefault();
+        Check("support: breaking a chip with two copies raises its break to 2 and consumes them", broke is { BreakTimes: 2 } && broke.NNGEBCPGILL.SequenceEqual([strong[1], strong[2]]), $"break={broke?.BreakTimes}");
+        main.Send(new CS_SupportChipLockUnlock { BHIHPMCMOEL = 2, Id = strong[3], MDFIDAFPBJN = true });
+        Check("support: a chip can be locked", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportChipLockUnlock>().Any(l => l.Id == strong[3] && l.MDFIDAFPBJN));
+        main.Send(new CS_SupportChipBreak { Id = strong[0], NNGEBCPGILL = { strong[3] } });
+        Check("support: a locked copy cannot be a material without the confirmation (SupportCoreChipLocked)", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo is not 0));
+        main.Send(new CS_SupportChipBreak { Id = strong[0], NNGEBCPGILL = { strong[3], strong[4], strong[5] }, MNIPNBBJPJL = true });
+        var broke5 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportChipBreak>().FirstOrDefault();
+        Check("support: with the confirmation the break reaches its last step (5) and takes only the copies it needs", broke5 is { BreakTimes: 5 } && broke5.NNGEBCPGILL.Count == 3, $"break={broke5?.BreakTimes}");
+        main.Send(new CS_SupportChipBreak { Id = strong[0], NNGEBCPGILL = { groups[1].First().Id } });
+        Check("support: a chip at its last break refuses another one", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+        var scrap = groups[1].Select(c => c.Id).Skip(3).Take(2).ToList();
+        main.Send(new CS_SupportChipDecompose { BHIHPMCMOEL = 2, Ids = { scrap } });
+        var scrapped = main.ReadFor(TimeSpan.FromSeconds(2));
+        Check("support: decomposing two chips lists them and returns 178006 (协同阵列升级材料)",
+            scrapped.Select(p => p.Message).OfType<SC_SupportChipDecompose>().Any(d => d.Ids.SequenceEqual(scrap)) && scrapped.Any(p => p.Message is SC_Items or SC_ResourceUpdate));
+        main.Send(new CS_SupportChip());
+        var chipsAfter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportChip>().FirstOrDefault();
+        Check("support: the list lost the 5 + 2 chips and keeps the break of the broken one", chipsAfter?.ENFCKIOLJNM.Count == 371 && chipsAfter.ENFCKIOLJNM.First(c => c.Id == strong[0]).BreakTimes == 5, $"chips={chipsAfter?.ENFCKIOLJNM.Count}");
+    }
+    // powers of the mods (A-78): field 4 of the mod and field 15 (accessories) of the unit of the character that wears it
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory addall weaponmod" });
+    main.ReadFor(TimeSpan.FromSeconds(8));
+    main.Send(new CS_GunWeaponMods());
+    var powerMods = main.ReadFor(TimeSpan.FromSeconds(8)).Select(p => p.Message).OfType<SC_GunWeaponMods>().SelectMany(m => m.Mods).Where(m => m.ModSuitPowerId != 0).ToList();
+    Check("mods: the class-3 mods of rank 4 and 5 carry the effect id of their power (1..16, valid in ModPowerData and ModPowerEffectData) in field 4", powerMods.Count >= 300 && powerMods.All(m => m.ModSuitPowerId is >= 1 and <= 16), $"powered={powerMods.Count}");
+    main.Send(new CS_GunWeapons());
+    var powerWeapon = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(w => w.Weapons).FirstOrDefault(w => w.GunId == 1017);
+    if (powerWeapon is not null && powerMods.Count > 0)
+    {
+        main.Send(new CS_GunWeaponModBelong { WeaponId = powerWeapon.Id, Slot = 1, WeaponModId = powerMods[0].Id });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StageStart { StcStageId = 10101 });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StageInto { Guns = { [1769499u] = 1017u, [1835035u] = 1008u } });
+        var powerBattle = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault()?.Stage;
+        var powerUnits = powerBattle?.Camps.Select(c => c.ToByteArray()).Where(c => StgSide(c) == 1).SelectMany(c => StgFields(c, 2)).Select(u => StgFields(u, 1).FirstOrDefault()).Where(u => u is not null).ToList() ?? [];
+        var accessories = powerUnits.SelectMany(u => StgFields(StgFields(u!, 11).FirstOrDefault() ?? [], 15)).ToList();
+        uint accessorySkill = 0;
+        int accessoryValues = 0;
+        if (accessories.Count > 0)
+        {
+            var ar = new CodedInputStream(accessories[0]); uint at;
+            while ((at = ar.ReadTag()) != 0)
+            {
+                if ((at >> 3) == 1) accessorySkill = ar.ReadUInt32();
+                else if ((at >> 3) == 2) accessoryValues = ar.ReadBytes().Length;
+                else ar.SkipLastField();
+            }
+        }
+
+        Check("mods: the unit of the character wearing a power mod lists its skill (1001..1020) with the values of its rank in the accessories (field 15)", accessories.Count == 1 && accessorySkill is >= 1001 and <= 1020 && accessoryValues > 0,
+            $"accessories={accessories.Count} skill={accessorySkill} bytes={accessoryValues}");
+    }
+
     // The 4.0.5136 client sends the result WITHOUT stage_progress: the stage of StageStart is the one that was played (the 20:17 log was answered
     // with a bare Lose and the result screen with its rewards never opened).
     main.Send(new CS_StageStart { StcStageId = 10145 });
@@ -1305,8 +1438,28 @@ if (scenario == "mods")
             upReply is not null && upReply.Level > 1 && up.Any(p => p.Message is SC_ResourceUpdate), $"level={upReply?.Level} exp={upReply?.Exp}");
 
         main.Send(new CS_GunWeaponMods());
-        var after = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_GunWeaponMods>().SelectMany(m => m.Mods).ToList();
-        Check("mods: the material was consumed", after.All(m => m.Id != modB.Id) && after.Any(m => m.Id == modA.Id && m.Level == upReply?.Level));
+        var afterAll = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).ToList();
+        var after = afterAll.OfType<SC_GunWeaponMods>().SelectMany(m => m.Mods).ToList();
+        Check("mods: the material was consumed", after.All(m => m.Id != modB.Id) && after.Any(m => m.Id == modA.Id));
+        // the 4.0.5136 client creates every mod at level 1 (no level/experience in the list: field 5 is its polarity): the real level comes in a push (A-74)
+        Check("mods: the list carries no level (field 5 = polarity = 0) and the level of a levelled mod is pushed after it",
+            after.All(m => m.Level == 0) && afterAll.OfType<SC_GunWeaponModLvUp>().Any(l => l.Id == modA.Id && l.Level == upReply?.Level), $"pushes={afterAll.OfType<SC_GunWeaponModLvUp>().Count()}");
+        // the affixes (field 3): four 16-bit pairs, low byte = value, high byte = DevelopProperty from AffixGroupData (1 Pow, 2 MaxHp, 4 ShieldArmor, 9 Crit, 10 CritMult, 29/30/33 percentages)
+        var allowed = new HashSet<ulong> { 1, 2, 4, 9, 10, 29, 30, 33 };
+        bool WellFormed(ulong bits)
+        {
+            for (int slot = 0; slot < 4; slot++)
+            {
+                ulong pair = bits >> (slot * 16);
+                ulong value = pair & 0xFF, property = (pair >> 8) & 0xFF;
+                if ((value == 0) != (property == 0) || (property != 0 && !allowed.Contains(property)))
+                    return false;
+            }
+
+            return true;
+        }
+        Check("mods: the mods carry affixes in field 3 (well formed pairs; more than 700 mods have at least one)",
+            after.Count(m => m.Locked != 0) > 700 && after.All(m => WellFormed(m.Locked)), $"withAffixes={after.Count(m => m.Locked != 0)}/{after.Count}");
 
         main.Send(new CS_GunWeaponModDismantle { Ids = { modC.Id } });
         var dis = main.ReadFor(TimeSpan.FromSeconds(2));
@@ -1328,6 +1481,79 @@ if (scenario == "mods")
         main.ReadFor(TimeSpan.FromSeconds(1));
         main.Send(new CS_UnlockGunWeaponModLockPlan { JNADCNCACDA = { modA.Id } });
         Check("mods: unlock-by-plan frees the mod", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_UnlockGunWeaponModLockPlan>().Any(r => r.Ids.Contains(modA.Id) && !r.Locked));
+
+        // ---- polarization (amplification) and refinement of a rank-5 mod (A-78): the 4.0.5136 client levels mods up with CS 11073
+        main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
+        main.ReadFor(TimeSpan.FromSeconds(6));
+        var top = allMods.FirstOrDefault(m => m.StcId == 120127353);
+        Check("mods: the account owns a rank-5 mod for the polarization checks", top is not null);
+        if (top is not null)
+        {
+            main.Send(new CS_GunWeaponModPolarization { Id = top.Id, Items = { { 8307u, 1u } } });
+            Check("mods: enhancing with too little fodder is refused (the bar needs 5000 experience for a rank-5 mod)",
+                main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+
+            // upgrade items: dismantle 300 other mods first (the account has none of 8307 yet)
+            var junk = new CS_GunWeaponModDismantle();
+            junk.Ids.AddRange(allMods.Where(m => m.Id != top.Id && m.Id != modA.Id && m.Id != modB.Id && m.Id != modC.Id).Take(300).Select(m => (ulong)m.Id));
+            main.Send(junk);
+            main.ReadFor(TimeSpan.FromSeconds(3));
+            main.Send(new CS_GunWeaponModPolarization { Id = top.Id, Items = { { 8307u, 25u } } });
+            var enhanced = main.ReadFor(TimeSpan.FromSeconds(3));
+            var firstMod = enhanced.Select(p => p.Message).OfType<SC_GunWeaponModPolarization>().FirstOrDefault()?.Mod;
+            ulong firstPolarity = firstMod?.Suit ?? 0;
+            Check("mods: enhancing (CS 11073, 25 upgrade items = 5000 experience) polarizes the affixes, charges gold and the level push comes AFTER the mod",
+                firstPolarity != 0 && enhanced.Any(p => p.Message is SC_ResourceUpdate)
+                && enhanced.Select(p => p.Message).ToList() is var order && order.FindIndex(m => m is SC_GunWeaponModLvUp) > order.FindIndex(m => m is SC_GunWeaponModPolarization), $"polarity=0x{firstPolarity:X}");
+
+            main.Send(new CS_GunWeaponModPolarization { Id = top.Id, FKBCLPBCILC = 2, Items = { { 8307u, 25u } } });
+            var amplified = main.ReadFor(TimeSpan.FromSeconds(3));
+            var amplifiedMod = amplified.Select(p => p.Message).OfType<SC_GunWeaponModPolarization>().FirstOrDefault()?.Mod;
+            ulong polarity = amplifiedMod?.Suit ?? 0;
+            var slots = Enumerable.Range(0, 4).Select(s => (polarity >> (s * 16)) & 0xFFFF).Where(v => v != 0).ToList();
+            Check("mods: amplifying with 2 items re-rolls every slot with a permille of the table (100..2000, bit 12 set) and charges the items",
+                slots.Count >= 1 && slots.All(v => (v & 0x1000) != 0 && (v & 0xFFF) % 100 == 0 && (v & 0xFFF) is >= 100 and <= 2000) && amplified.Any(p => p.Message is SC_ResourceUpdate or SC_Items),
+                $"polarity=0x{polarity:X}");
+
+            main.Send(new CS_WeaponModPolarityRollBack { FNKBBPNGFBC = top.Id, NGODDODILBB = true });
+            var redo = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+            Check("mods: redoing restores the polarity the mod had before the last roll and answers",
+                redo.OfType<SC_WeaponModPolarityRollBack>().Any() && redo.OfType<SC_WeaponModAdvanceEnhance>().Any(r => r.Mod.Suit == firstPolarity));
+            main.Send(new CS_WeaponModPolarityRollBack { FNKBBPNGFBC = top.Id, NGODDODILBB = false });
+            Check("mods: the backup is gone after a redo (ModPolarityBackUpNotExist)",
+                main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -14401));
+
+            main.Send(new CS_GunWeaponModPolarization { Id = top.Id, FKBCLPBCILC = 2, Items = { { 8307u, 25u } } });
+            amplifiedMod = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeaponModPolarization>().FirstOrDefault()?.Mod;
+            polarity = amplifiedMod?.Suit ?? 0;
+            main.Send(new CS_WeaponModPolarityRollBack { FNKBBPNGFBC = top.Id, NGODDODILBB = false });
+            Check("mods: confirming keeps the polarity", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_WeaponModPolarityRollBack>().Any() && polarity != 0);
+
+            // refinement: one step on the first polarized slot
+            int slot = Enumerable.Range(0, 4).First(s => ((polarity >> (s * 16)) & 0xFFF) != 0);
+            ulong affixesBefore = amplifiedMod!.Locked;
+            main.Send(new CS_WeaponModAdvanceEnhance { Id = top.Id, NOADAJNECCF = { { (uint)slot, 1u } } });
+            var refined = main.ReadFor(TimeSpan.FromSeconds(3));
+            var refinedMod = refined.Select(p => p.Message).OfType<SC_WeaponModAdvanceEnhance>().FirstOrDefault()?.Mod;
+            Check("mods: one refinement step changes the affix or its polarity, counts it (field 5 = 1) and charges items and gold",
+                refinedMod is { Level: 1 } && (refinedMod.Locked != affixesBefore || refinedMod.Suit != polarity) && refined.Any(p => p.Message is SC_ResourceUpdate or SC_Items), $"count={refinedMod?.Level}");
+            main.Send(new CS_WeaponModAdvanceEnhance { Id = top.Id, NOADAJNECCF = { { 9u, 1u } } });
+            Check("mods: a refinement of a slot that does not exist is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -10208));
+
+            // continuous polarization: one round (6 upgrade items = 1200 experience >= the 1000 the mod is worth), then keep the candidate
+            var series = new CS_GunWeaponModContinuouslyPolarization { Id = top.Id, JFMFOHAHOBL = { new DDFNNIBCBND { Items = { { 8307u, 6u } } } } };
+            main.Send(series);
+            var rounds = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeaponModContinuouslyPolarization>().FirstOrDefault();
+            Check("mods: a continuous round returns one candidate with the same polarized slots", rounds is { GENGCMEPHFM.Count: 1 } r && r.GENGCMEPHFM[0] != 0);
+            main.Send(new CS_GunWeaponModGetContinuouslyPolarization());
+            Check("mods: the pending series can be read back", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModGetContinuouslyPolarization>().Any(g => g.NHJFCEMIPEO.AMKICOIHKPD == top.Id && g.NHJFCEMIPEO.GENGCMEPHFM.Count == 1));
+            main.Send(new CS_GunWeaponModContinuouslyPolarizationSelect { Id = top.Id, LMLFNAACPPN = 0 });
+            var picked = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+            Check("mods: choosing a candidate makes it the polarity of the mod", picked.OfType<SC_GunWeaponModContinuouslyPolarizationSelect>().Any()
+                && picked.OfType<SC_WeaponModAdvanceEnhance>().Any(r => rounds is not null && r.Mod.Suit == rounds.GENGCMEPHFM[0]));
+            main.Send(new CS_GunWeaponModContinuouslyPolarizationSelect { Id = top.Id, LMLFNAACPPN = 0 });
+            Check("mods: choosing again without candidates is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -10446));
+        }
     }
 }
 
@@ -1592,6 +1818,11 @@ if (scenario == "equip")
         Check("equip: moving the first mod to slot 2 frees slot 1 and takes the second mod out",
             moved.Any(b => b.WeaponId == 0 && b.Slot == 1 && b.WeaponModId == equipMods[0].Id) && moved.Any(b => b.WeaponId == 0 && b.Slot == 2 && b.WeaponModId == equipMods[1].Id)
             && moved.Any(b => b.WeaponId == equipWeapon.Id && b.Slot == 2 && b.WeaponModId == equipMods[0].Id), $"answers={moved.Count}");
+        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id });
+        Check("equip: the red button \"unequip all\" (no slot, no mod) frees the equipped mods slot by slot",
+            main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.Slot == 2 && b.WeaponModId == 0));
+        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[0].Id });
+        main.ReadFor(TimeSpan.FromSeconds(2));
     }
 
     var equipAgain = await Connect(true);
@@ -1739,6 +1970,23 @@ if (scenario is "all" or "restored")
 
 if (scenario is "all" or "dorm")
 {
+    // U-07: the dorm interaction cache and the level achievement are separate state. 410451 is a real
+    // action/achievement key in DormFormationData/CharacterDailyData for Gun 1045; buying it must survive
+    // both the dorm-formation query and a reconnect (a daily-info response alone does not populate this cache).
+    const uint dormAction = 410451;
+    main.Send(new CS_BuyGunPerformance { HLKFJHBHEDC = dormAction });
+    var boughtAction = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_BuyGunPerformance>().FirstOrDefault();
+    Check("dorm: interaction purchase is acknowledged", boughtAction?.HLKFJHBHEDC == dormAction);
+    main.Send(new CS_GetDormFormationInfo());
+    var formationInfo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetDormFormationInfo>().FirstOrDefault();
+    Check("dorm: purchased interaction is returned by GetDormFormationInfo",
+        formationInfo?.AHFNBKINDGB.TryGetValue(dormAction, out bool actionBought) == true && actionBought,
+        $"keys={string.Join(',', formationInfo?.AHFNBKINDGB.Keys ?? [])}");
+    main.Send(new CS_GetCharacterDailyInfo());
+    var dailyInfo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetCharacterDailyInfo>().FirstOrDefault();
+    Check("dorm: purchased interaction is also present in CharacterDailyInfo",
+        dailyInfo?.GGMFOMHIBNJ.TryGetValue(dormAction, out bool dailyBought) == true && dailyBought);
+
     main.Send(new CS_DormInfo());
     var d = main.ReadFor(TimeSpan.FromSeconds(3));
     main.Dump("dorm", d);
@@ -1893,6 +2141,24 @@ if (scenario == "all")
         $"limit={string.Join(",", relogin.Select(p => p.Message).OfType<SC_Record>().FirstOrDefault()?.Limit.Select(kv => kv.Key + ":" + kv.Value) ?? [])}");
 var (gunsRe, weaponsRe) = CountOwned(again);
 Console.WriteLine($"       inventory after reconnect: guns {gunsRe}, weapons {weaponsRe}");
+if (scenario is "all" or "dorm")
+{
+    again.Send(new CS_GetDormFormationInfo());
+    var formationInfo = again.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetDormFormationInfo>().FirstOrDefault();
+    Check("dorm: purchased interaction remains unlocked after reconnect",
+        formationInfo?.AHFNBKINDGB.TryGetValue(410451u, out bool actionBought) == true && actionBought,
+        $"keys={string.Join(',', formationInfo?.AHFNBKINDGB.Keys ?? [])}");
+}
+if (scenario is "all" or "formation")
+{
+    again.Send(new CS_GetCustomFormation());
+    var formationsAfterReconnect = again.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetCustomFormation>().FirstOrDefault()?.OGNHICHKFAD?.KMPIHKFBAEP;
+    Check("formation: manually saved presets keep their roster/name after reconnect",
+        formationsAfterReconnect is { Count: >= 4 }
+        && formationsAfterReconnect[1].Name == "Bravo" && formationsAfterReconnect[1].Guns.Count == 2
+        && formationsAfterReconnect[3].Name == "Bravo" && formationsAfterReconnect[3].Guns.Count == 2,
+        $"slots={formationsAfterReconnect?.Count}");
+}
 again.Dispose();
 
 Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");

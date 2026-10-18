@@ -32,7 +32,7 @@ namespace Griffin.GameServer.Handlers
         IStaminaService staminaService,
         IDailyQuestProgressService questProgress) : ControlRoomHandlerBase
     {
-        private const string StateKey = "controlroom";
+        public const string StateKey = "controlroom";
 
         public sealed class RoomState
         {

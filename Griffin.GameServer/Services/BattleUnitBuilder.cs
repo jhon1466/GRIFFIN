@@ -24,6 +24,9 @@ namespace Griffin.GameServer.Services
     /// field 6 is the "skill list" of the client's builder (its first repeated id field); the stats are the base row of the gun
     /// without level, class, weapon or module scaling (the tutorial units are level 1).
     /// </summary>
+    /// <summary>What the account adds to the stats of a character besides its own tables (A-73): the character, the control room level and the stages passed.</summary>
+    public sealed record StatInputs(GunEntity Gun, uint ControlRoomLevel, IReadOnlySet<uint> PassedStages, IReadOnlyList<(int Property, int Value)> ModAffixes, IReadOnlyList<(uint Stc, ulong Affixes)> PublicKeys, IReadOnlyList<uint> PluginAffixes, IReadOnlyList<uint> FoodRows, IReadOnlyList<uint> SupportRows, IReadOnlyList<(uint Skill, int[] Values)>? ModSkills = null);
+
     public static class BattleUnitBuilder
     {
         /// <summary>The side numbers of <c>StageBattle.side</c>, <c>user_sides</c> and the camps: the player is 1, the opposing camp 2.</summary>
@@ -106,7 +109,7 @@ namespace Griffin.GameServer.Services
         /// The oneof wrapper (<c>Gun</c> case) of one character deployed at <paramref name="pointId"/>. <paramref name="weapon"/> is the
         /// character's own weapon (null when the account has none: the weapon of the character's table row is used).
         /// </summary>
-        public static byte[] GunUnit(ITableService tables, uint pointId, uint gunId, Gun character, WeaponEntity? weapon = null, string rotation = DefaultRotation)
+        public static byte[] GunUnit(ITableService tables, uint pointId, uint gunId, Gun character, WeaponEntity? weapon = null, string rotation = DefaultRotation, StatInputs? inputs = null)
         {
             byte[] gunUnit = Encode(output =>
             {
@@ -115,9 +118,9 @@ namespace Griffin.GameServer.Services
                 output.WriteUInt32(pointId);
                 WriteBytes(output, 3, System.Text.Encoding.UTF8.GetBytes(rotation));
                 WriteBytes(output, 10, []);
-                WriteBytes(output, 11, SkillMessage(tables, gunId, character.Grade));
+                WriteBytes(output, 11, SkillMessage(tables, gunId, character.Grade, weapon?.WeaponId ?? DefaultWeaponOf(tables, gunId), (uint)Math.Max(1, weapon?.BreakTimes ?? 1), CoreSkills(tables, inputs), KeySkills(tables, inputs), inputs?.ModSkills));
                 WriteBytes(output, 12, []);
-                WriteBytes(output, 22, PropertyMap(StatsOf(tables, gunId, weapon?.WeaponId ?? DefaultWeaponOf(tables, gunId))));
+                WriteBytes(output, 22, PropertyMap(StatsOf(tables, gunId, weapon, character.Level, character.GunClass, inputs)));
                 WriteBytes(output, 23, []);
             });
             return Encode(output => WriteBytes(output, 1, gunUnit));
@@ -159,32 +162,257 @@ namespace Griffin.GameServer.Services
             return unit;
         }
 
-        /// <summary>
-        /// The stat map of a character, keyed by <c>DevelopProperty</c>: the nonzero columns of its own <c>PropertyData</c> row (<c>GunData</c> column 40, e.g. 11017 for
-        /// gun 1017; every such row is a complete set, rates such as the critical multiplier included, so rows are not summed) plus the
-        /// attack of its weapon's row (the weapon's stc id is also a <c>PropertyData</c> id), and the flag the client always sets.
-        /// Level, class and module scaling are not applied.
-        /// </summary>
-        public static IReadOnlyDictionary<int, int> StatsOf(ITableService tables, uint gunId, uint weaponStcId = 0)
+        /// <summary>DevelopProperty -> PropertyData column (inverse of <see cref="ColumnToDevelopProperty"/>).</summary>
+        private static readonly Dictionary<int, int> DevelopToColumn = ColumnToDevelopProperty.ToDictionary(pair => pair.Value, pair => pair.Key);
+
+        /// <summary>Properties that have a percentage twin (client <c>MPAGLAMJGIK.FBLAIHJNNPI</c>): Pow, MaxHp, MaxShieldHp, ShieldArmor, MaxWillValue, SuppressValue.</summary>
+        private static readonly Dictionary<int, int> PercentTwin = new() { [1] = 29, [2] = 30, [3] = 34, [4] = 33, [8] = 31, [7] = 32 };
+
+        /// <summary>The non-zero stats of a PropertyData row keyed by DevelopProperty (empty when the row does not exist).</summary>
+        public static IReadOnlyDictionary<int, int> RowByDevelopProperty(ITableService tables, uint rowId)
         {
-            var stats = new Dictionary<int, int>();
+            var result = new Dictionary<int, int>();
+            if (StatRows(tables).TryGetValue(rowId, out Dictionary<int, int>? row))
+                foreach ((int column, int value) in row)
+                    if (ColumnToDevelopProperty.TryGetValue(column, out int dev) && value > 0)
+                        result[dev] = value;
+            return result;
+        }
+
+        private static int Column(Dictionary<int, int>? row, int developProperty) =>
+            row is not null && DevelopToColumn.TryGetValue(developProperty, out int column) ? row.GetValueOrDefault(column) : 0;
+
+        /// <summary>The client's rounding (<c>GFMath.CeilToInt</c> after an integer check with 0.001 of tolerance).</summary>
+        private static int CeilLike(double value)
+        {
+            int whole = (int)value;
+            return Math.Abs(value - whole) <= 0.001 ? whole : (int)Math.Ceiling(value);
+        }
+
+        /// <summary>
+        /// The final stat map of a character, keyed by <c>DevelopProperty</c>, computed like the client does for its own attribute panel
+        /// (<c>FJLGHAHLHML.KLNEOKCKAFN</c>, A-71/A-72):
+        /// <list type="bullet">
+        /// <item><description>base: PropertyData row of the character (<c>GunData</c> column 40) x level row (<c>GunLevelExpData</c> column 4) / 1000, rounded up
+        /// (a column the level row does not list becomes 0, as in the client);</description></item>
+        /// <item><description>class: every <c>GunClassData</c> row of the character's group (<c>GunData</c> column 35) up to its class (column 3) adds its
+        /// PropertyData row (column 8);</description></item>
+        /// <item><description>weapon: |ceil(base row of the weapon (<c>GunWeaponData</c> column 21) x level row (<c>GunWeaponExpData</c> id = level x 100 + rank
+        /// (column 11), column 9) / 1000) + break row (<c>WeaponBreakData</c> id = weapon x 10 + breaks, column 5)|;</description></item>
+        /// <item><description>Pow, MaxHp, MaxShieldHp, ShieldArmor, MaxWillValue and SuppressValue then multiply by (1 + the sum of the same sources of their percentage
+        /// twin / 1000); every other property is just the sum.</description></item>
+        /// </list>
+        /// Not applied (the server keeps no data for them or the table link is unknown): remoulding core, talents, weapon parts, equipment, training slots.
+        /// </summary>
+        public static IReadOnlyDictionary<int, int> StatsOf(ITableService tables, uint gunId, WeaponEntity? weapon, uint level = 1, uint gunClass = 1, StatInputs? inputs = null)
+        {
             GunData? gun = tables.GetTable<GunData>().FirstOrDefault(row => row.Id == gunId);
             Dictionary<uint, Dictionary<int, int>> rows = StatRows(tables);
-            uint own = gun is null ? 0 : TableFields.U(gun, GunPropertyColumn);
-            if (own != 0 && rows.TryGetValue(own, out Dictionary<int, int>? ownRow))
+            Dictionary<int, int>? Row(uint id) => rows.TryGetValue(id, out Dictionary<int, int>? row) ? row : null;
+
+            Dictionary<int, int>? baseRow = Row(gun is null ? 0 : TableFields.U(gun, GunPropertyColumn));
+            GunLevelExpData? levelData = tables.GetTable<GunLevelExpData>().FirstOrDefault(row => row.Level == Math.Max(1u, level));
+            Dictionary<int, int>? levelRow = levelData is null ? null : Row(TableFields.U(levelData, 4));
+
+            // every class row up to the current class (the rows grow with the class, but the client adds them all)
+            uint group = gun is null ? 0 : TableFields.U(gun, 35);
+            List<Dictionary<int, int>> classRows = [];
+            foreach (GunClassData classData in tables.GetTable<GunClassData>().Where(row => TableFields.U(row, 2) == group && TableFields.U(row, 3) <= Math.Max(1u, gunClass)))
+                if (Row(TableFields.U(classData, 8)) is { } classRow)
+                    classRows.Add(classRow);
+
+            // rows added flat and as percentage by their columns, like the class rows: affection levels and the keys in the private slots
+            List<Dictionary<int, int>> extraRows = [];
+            Dictionary<int, int> coreFlat = [];
+            Dictionary<int, int> controlRoomFlat = [];
+            Dictionary<int, int> keyValues = [];
+            List<Dictionary<int, int>> allAddRows = [];
+            if (inputs is not null)
             {
-                foreach ((int column, int value) in ownRow)
-                    stats[column] = value;
+                // affection (LoveLevelData id = level, column 8 + the character id x 10 = a PropertyData row), every level up to the current one
+                for (uint loveLevel = 1; loveLevel <= inputs.Gun.LoveLevel; loveLevel++)
+                {
+                    LoveLevelData? love = tables.GetTable<LoveLevelData>().FirstOrDefault(row => TableFields.U(row, 1) == loveLevel);
+                    uint loveRow = love is null ? 0 : TableFields.U(love, 8);
+                    if (loveRow != 0 && Row(loveRow + gunId * 10) is { } loveStats)
+                        extraRows.Add(loveStats);
+                }
+
+                // the vow (level 9) adds the row LoveConfigData column 10 (the client's IIEJCPCDKOC), flat and as percentage
+                if (inputs.Gun.LoveLevel >= Handlers.LoveHandler.VowLevel
+                    && tables.GetTable<LoveConfigData>().FirstOrDefault() is { } loveConfig && Row(TableFields.U(loveConfig, 10)) is { } vowStats)
+                    extraRows.Add(vowStats);
+
+                // talent keys in the private slots: TalentKeyData column 5 = a PropertyData row
+                foreach (uint key in inputs.Gun.PrivateTalentSkillItems.Where(item => item != 0))
+                {
+                    TalentKeyData? keyData = tables.GetTable<TalentKeyData>().FirstOrDefault(row => TableFields.U(row, 1) == key);
+                    if (keyData is not null && Row(TableFields.U(keyData, 5)) is { } keyStats)
+                        extraRows.Add(keyStats);
+                }
+
+                // core chips of the support formation used in battle: they apply to every character (A-77)
+                foreach (uint supportRow in inputs.SupportRows)
+                    if (Row(supportRow) is { } supportStats)
+                        extraRows.Add(supportStats);
+
+                // dishes given to the character (A-76): the row of the level each property reached (LobbyCookPropertyData column 6), flat and as percentage
+                foreach (uint foodRow in inputs.FoodRows)
+                    if (Row(foodRow) is { } foodStats)
+                        extraRows.Add(foodStats);
+
+                // Neural Helix (A-76): every unlocked enhancement node (SquadTalentGroupData column 6 = 1) gives the property row of its effect
+                // (column 8 lists GroupTalentEffectGeneData rows, one per node level; column 4 of the row = a PropertyData row), and every two evolved nodes
+                // (column 6 = 3) raise a bonus: TalentBonusData (group = SquadTalentGunData column 14, threshold = column 3, row = column 4).
+                int evolvedNodes = 0;
+                foreach ((ulong point, uint nodeLevel) in inputs.Gun.TalentTree)
+                {
+                    SquadTalentGroupData? node = tables.GetTable<SquadTalentGroupData>().FirstOrDefault(row => TableFields.U64(row, 1) == point);
+                    if (node is null)
+                        continue;
+
+                    uint nodeType = TableFields.U(node, 6);
+                    if (nodeType == 3)
+                        evolvedNodes++;
+                    if (nodeType != 1)
+                        continue;
+
+                    foreach (ulong geneId in TableFields.U64List(node, 8))
+                    {
+                        GroupTalentEffectGeneData? gene = tables.GetTable<GroupTalentEffectGeneData>().FirstOrDefault(row => TableFields.U64(row, 1) == geneId);
+                        if (gene is not null && TableFields.U(gene, 3) == Math.Max(1u, nodeLevel) && Row(TableFields.U(gene, 4)) is { } nodeStats)
+                        {
+                            extraRows.Add(nodeStats);
+                            break;
+                        }
+                    }
+                }
+
+                SquadTalentGunData? tree = tables.GetTable<SquadTalentGunData>().FirstOrDefault(row => TableFields.U(row, 1) == gunId);
+                TalentBonusByTalentBonusGroupData? bonusGroup = tree is null ? null
+                    : tables.GetTable<TalentBonusByTalentBonusGroupData>().FirstOrDefault(row => TableFields.U(row, 1) == TableFields.U(tree, 14));
+                if (bonusGroup is not null)
+                {
+                    TalentBonusData? bonus = TableFields.List(bonusGroup, 2)
+                        .Select(id => tables.GetTable<TalentBonusData>().FirstOrDefault(row => TableFields.U(row, 1) == id))
+                        .Where(row => row is not null && TableFields.U(row, 3) <= evolvedNodes)
+                        .OrderByDescending(row => TableFields.U(row!, 3)).FirstOrDefault();
+                    if (bonus is not null && Row(TableFields.U(bonus, 4)) is { } bonusStats)
+                        extraRows.Add(bonusStats);
+                }
+
+                // public keys in the public slots (A-75): the base row of the key (TalentKeyData column 5) and its affixes (type 4 keys do not count)
+                foreach ((uint stc, ulong affixes) in inputs.PublicKeys)
+                {
+                    TalentKeyData? keyData = tables.GetTable<TalentKeyData>().FirstOrDefault(row => TableFields.U(row, 1) == stc);
+                    if (keyData is null || TableFields.U(keyData, 2) == 4)
+                        continue;
+
+                    var keyBase = new Dictionary<int, int>();
+                    if (Row(TableFields.U(keyData, 5)) is { } keyRow)
+                        foreach ((int column, int value) in keyRow)
+                            if (ColumnToDevelopProperty.TryGetValue(column, out int dev) && value > 0)
+                                keyBase[dev] = value;
+
+                    foreach ((int dev, int value) in keyBase)
+                        keyValues[dev] = keyValues.GetValueOrDefault(dev) + value;
+                    foreach ((int dev, int value) in KeyAffixes.AffixValues(tables, affixes, stc, keyBase))
+                        keyValues[dev] = keyValues.GetValueOrDefault(dev) + value - keyBase.GetValueOrDefault(dev);
+                }
+
+                // remoulding core: CoreData columns 6/7/8 (attack, life, armor) x LevelUpData[core level] columns 3/4/5 / 1000
+                uint core = RemouldingCores.OwnedCore(inputs.Gun);
+                CoreData? coreData = core == 0 ? null : tables.GetTable<CoreData>().FirstOrDefault(row => TableFields.U(row, 1) == core);
+                uint coreLevelId = RemouldingCores.LevelOf(inputs.Gun);
+                LevelUpData? coreLevel = coreData is null ? null : tables.GetTable<LevelUpData>().FirstOrDefault(row => TableFields.U(row, 1) == coreLevelId);
+                if (coreData is not null && coreLevel is not null)
+                {
+                    coreFlat[1] = CeilLike(TableFields.U(coreData, 6) * (TableFields.U(coreLevel, 3) / 1000.0));
+                    coreFlat[2] = CeilLike(TableFields.U(coreData, 7) * (TableFields.U(coreLevel, 4) / 1000.0));
+                    coreFlat[4] = CeilLike(TableFields.U(coreData, 8) * (TableFields.U(coreLevel, 5) / 1000.0));
+                }
+
+                // control room: ControlRoomData[room level] column 6 = a row with the stats of each duty (Guard/Scout/Assist/Suppress: GuardPow 201,
+                // ScoutPow 203, ... GuardMaxHp 209 ..., GuardShieldArmor 217 ...) that apply to the characters of that duty
+                uint duty = gun is null ? 0 : TableFields.U(gun, 13);
+                ControlRoomData? room = inputs.ControlRoomLevel == 0 ? null : tables.GetTable<ControlRoomData>().FirstOrDefault(row => TableFields.U(row, 1) == inputs.ControlRoomLevel);
+                if (room is not null && duty is >= 1 and <= 4 && Row(TableFields.U(room, 6)) is { } roomStats)
+                {
+                    int step = (int)(duty - 1) * 2;
+                    controlRoomFlat[1] = Column(roomStats, 201 + step);
+                    controlRoomFlat[2] = Column(roomStats, 209 + step);
+                    controlRoomFlat[4] = Column(roomStats, 217 + step);
+                }
+
+                // stages whose first clear adds a row of "all characters" stats (DarkzoneHiddenStageBaseData column 5, columns AllAddPow/MaxHp/ShieldArmor)
+                foreach (DarkzoneHiddenStageBaseData hidden in tables.GetTable<DarkzoneHiddenStageBaseData>())
+                    if (inputs.PassedStages.Contains(TableFields.U(hidden, 1)) && Row(TableFields.U(hidden, 5)) is { } allAdd)
+                        allAddRows.Add(allAdd);
             }
 
-            if (weaponStcId != 0 && rows.TryGetValue(weaponStcId, out Dictionary<int, int>? weaponRow))
-                stats[AttackColumn] = stats.GetValueOrDefault(AttackColumn) + weaponRow.GetValueOrDefault(AttackColumn);
+            uint weaponId = weapon?.WeaponId ?? DefaultWeaponOf(tables, gunId);
+            GunWeaponData? weaponData = weaponId == 0 ? null : tables.GetTable<GunWeaponData>().FirstOrDefault(row => row.Id == weaponId);
+            Dictionary<int, int>? weaponBase = null, weaponLevel = null, weaponBreak = null;
+            if (weaponData is not null)
+            {
+                weaponBase = Row(TableFields.U(weaponData, 21));
+                uint maxLevel = Math.Max(1u, TableFields.U(weaponData, 17));
+                uint weaponLv = Math.Min((uint)Math.Max(1, weapon?.Level ?? 1), maxLevel);
+                GunWeaponExpData? exp = tables.GetTable<GunWeaponExpData>().FirstOrDefault(row => row.Id == weaponLv * 100 + TableFields.U(weaponData, 11));
+                weaponLevel = exp is null ? null : Row(TableFields.U(exp, 9));
+                uint breaks = (uint)Math.Max(1, weapon?.BreakTimes ?? 1);
+                if (breaks <= TableFields.U(weaponData, 18))
+                {
+                    WeaponBreakData? breakData = tables.GetTable<WeaponBreakData>().FirstOrDefault(row => row.Id == weaponId * 10 + breaks);
+                    weaponBreak = breakData is null ? null : Row(TableFields.U(breakData, 5));
+                }
+            }
+
+            // affixes of the parts (mods) on the weapon: GunWeaponMod field 7 holds four 16-bit pairs, low byte = value, high byte = DevelopProperty
+            // (client LICHBCMONFI); the value is used as it is when the part is not polarized
+            int Affixes(int property)
+            {
+                int sum = 0;
+                foreach ((int affixProperty, int value) in inputs?.ModAffixes ?? [])
+                    if (affixProperty == property)
+                        sum += value;
+
+                return sum;
+            }
+
+            int Weapon(int property) =>
+                weaponBase is null ? 0 : Math.Abs(CeilLike(Column(weaponBase, property) * (Column(weaponLevel, property) / 1000.0)) + Column(weaponBreak, property) + Affixes(property));
+
+            // the sources of a property: character (scaled by level) + classes + weapon + affection/keys; the flat value also takes the core and the control room
+            int Sum(int property, bool flat) =>
+                CeilLike(Column(baseRow, property) * (Column(levelRow, property) / 1000.0)) + classRows.Sum(row => Column(row, property)) + Weapon(property)
+                + extraRows.Sum(row => Column(row, property))
+                + keyValues.GetValueOrDefault(property)
+                + (flat ? coreFlat.GetValueOrDefault(property) + controlRoomFlat.GetValueOrDefault(property) : 0);
+
+            HashSet<int> properties = [];
+            foreach (Dictionary<int, int>? row in new[] { baseRow, weaponBase, weaponBreak }.Concat(classRows).Concat(extraRows))
+                if (row is not null)
+                    foreach (int column in row.Keys)
+                        if (ColumnToDevelopProperty.TryGetValue(column, out int property))
+                            properties.Add(property);
+            foreach (int property in coreFlat.Keys.Concat(controlRoomFlat.Keys).Concat(keyValues.Keys))
+                properties.Add(property);
+            foreach ((int affixProperty, _) in inputs?.ModAffixes ?? [])
+                properties.Add(affixProperty);
 
             var developed = new Dictionary<int, int>();
-            foreach ((int column, int value) in stats)
+            foreach (int property in properties)
             {
-                if (ColumnToDevelopProperty.TryGetValue(column, out int property))
-                    developed[property] = value;
+                int total = Sum(property, flat: true);
+                if (PercentTwin.TryGetValue(property, out int twin))
+                    total = CeilLike(total * (1.0 + Sum(twin, flat: false) / 1000.0));
+                // all-characters rows (AllAddPow = 225, AllAddMaxHp = 226, AllAddShieldArmor = 227) come after the percentage
+                int allAddProperty = property switch { 1 => 225, 2 => 226, 4 => 227, _ => 0 };
+                if (allAddProperty != 0)
+                    total += allAddRows.Sum(row => Column(row, allAddProperty));
+                if (total != 0)
+                    developed[property] = total;
             }
 
             developed[AlwaysOneProperty] = 1;
@@ -206,7 +434,87 @@ namespace Griffin.GameServer.Services
         /// not skills) plus the grade row's column 4, so ids 6 and 7 were not in <c>BattleSkillData</c> and the unit never existed.
         /// ASSUMPTION: the column-11 list is what the official server sends as the unit's skills.
         /// </summary>
-        private static byte[] SkillMessage(ITableService tables, uint gunId, uint grade)
+        /// <summary>
+        /// The skills the plugins of the remoulding core switch on (client <c>FEIGCBDGLPB</c>): every plugin lists two affixes (<c>FeaturesEntryData</c> ids), each
+        /// adds its value (column 12) to its group (column 8); for each group the skill (column 11) of the highest row whose value (column 12) does not
+        /// exceed the sum is used. Only a character that owns its core has them (A-75).
+        /// </summary>
+        private static List<uint> CoreSkills(ITableService tables, StatInputs? inputs)
+        {
+            var skills = new List<uint>();
+            if (inputs is null || inputs.PluginAffixes.Count == 0 || RemouldingCores.OwnedCore(inputs.Gun) == 0)
+                return skills;
+
+            List<FeaturesEntryData> entries = tables.GetTable<FeaturesEntryData>().ToList();
+            var sums = new SortedDictionary<uint, uint>();
+            foreach (uint affix in inputs.PluginAffixes)
+                if (entries.FirstOrDefault(row => TableFields.U(row, 1) == affix) is { } entry)
+                    sums[TableFields.U(entry, 8)] = sums.GetValueOrDefault(TableFields.U(entry, 8)) + TableFields.U(entry, 12);
+
+            foreach ((uint group, uint total) in sums)
+            {
+                uint skill = entries.Where(row => TableFields.U(row, 8) == group && TableFields.U(row, 12) <= total)
+                    .OrderByDescending(row => TableFields.U(row, 12)).Select(row => TableFields.U(row, 11)).FirstOrDefault();
+                if (skill != 0 && !skills.Contains(skill))
+                    skills.Add(skill);
+            }
+
+            // The masteries of the core (A-78): CoreData columns 9..14 name six MasterEntryData rows; as the client's panel decides ("Finish"), a mastery is reached when
+            // the core level is at least its column 5 and the sums of the features by category (FeaturesEntryData column 7: 1 defense, 2 pioneer, 3 support, 4 power;
+            // each affix adds its column 12) reach every number of its column 4. A reached mastery gives the battle skill of its column 6.
+            var categories = new uint[5];
+            foreach (uint affix in inputs.PluginAffixes)
+                if (entries.FirstOrDefault(row => TableFields.U(row, 1) == affix) is { } featureEntry && TableFields.U(featureEntry, 7) is >= 1 and <= 4)
+                    categories[TableFields.U(featureEntry, 7)] += TableFields.U(featureEntry, 12);
+
+            uint core = RemouldingCores.OwnedCore(inputs.Gun);
+            CoreData? coreData = tables.GetTable<CoreData>().FirstOrDefault(row => row.Id == core);
+            uint coreLevel = Math.Max(1, RemouldingCores.LevelOf(inputs.Gun));
+            if (coreData is not null)
+                foreach (int column in new[] { 9, 10, 11, 12, 13, 14 })
+                {
+                    uint entryId = TableFields.U(coreData, column);
+                    MasterEntryData? master = entryId == 0 ? null : tables.GetTable<MasterEntryData>().FirstOrDefault(row => TableFields.U(row, 1) == entryId);
+                    if (master is null || TableFields.U(master, 5) > coreLevel)
+                        continue;
+
+                    IReadOnlyList<uint> needed = TableFields.List(master, 4);
+                    bool reached = true;
+                    for (int index = 0; index < needed.Count && index < 4; index++)
+                        if (categories[index + 1] < needed[index])
+                            reached = false;
+
+                    uint masterSkill = TableFields.U(master, 6);
+                    if (reached && masterSkill != 0 && !skills.Contains(masterSkill))
+                        skills.Add(masterSkill);
+                }
+
+            return skills;
+        }
+
+        /// <summary>
+        /// The skills of the keys the character wears (private slots = Gun field 42, public keys, peak keys = field 52), which the engine files under its
+        /// "Talent" category (field 12 of the skill message): <c>TalentKeyData</c> column 6 = a <c>BattleSkillData</c> id (A-76).
+        /// </summary>
+        private static List<uint> KeySkills(ITableService tables, StatInputs? inputs)
+        {
+            var skills = new List<uint>();
+            if (inputs is null)
+                return skills;
+
+            IEnumerable<uint> keys = inputs.Gun.PrivateTalentSkillItems.Concat(inputs.PublicKeys.Select(k => k.Stc)).Concat(TalentKeySlots.Normalize(inputs.Gun)).Where(k => k != 0);
+            foreach (uint key in keys)
+            {
+                TalentKeyData? row = tables.GetTable<TalentKeyData>().FirstOrDefault(r => TableFields.U(r, 1) == key);
+                uint skill = row is null ? 0 : TableFields.U(row, 6);
+                if (skill != 0 && !skills.Contains(skill))
+                    skills.Add(skill);
+            }
+
+            return skills;
+        }
+
+        private static byte[] SkillMessage(ITableService tables, uint gunId, uint grade, uint weaponId = 0, uint breaks = 1, IReadOnlyList<uint>? coreSkills = null, IReadOnlyList<uint>? keySkills = null, IReadOnlyList<(uint Skill, int[] Values)>? accessories = null)
         {
             GunGradeData? gradeRow = tables.GetTable<GunGradeData>().FirstOrDefault(row => row.Id == gunId * 100 + grade + 1)
                 ?? tables.GetTable<GunGradeData>().FirstOrDefault(row => row.Id == gunId * 100 + 1);
@@ -224,17 +532,83 @@ namespace Griffin.GameServer.Services
                     if (extra != 0 && !skills.Contains(extra))
                         skills.Add(extra);
 
+            // The weapon (A-75), as the client's own unit builder writes it: field 9 = the weapon skill (BattleWeaponData column 2, replaced by column 4
+            // of the WeaponBreakData row of its break when that one names a skill), field 13 = the extra skill of the character's own weapon
+            // (BattleWeaponData column 4), field 16 = the weapon passives (BattleWeaponData column 5).
+            uint weaponSkill = 0, exclusiveSkill = 0;
+            List<uint> weaponPassives = [];
+            BattleWeaponData? battleWeapon = weaponId == 0 ? null : tables.GetTable<BattleWeaponData>().FirstOrDefault(row => row.Id == weaponId);
+            if (battleWeapon is not null)
+            {
+                weaponSkill = TableFields.U(battleWeapon, 2);
+                WeaponBreakData? breakRow = tables.GetTable<WeaponBreakData>().FirstOrDefault(row => row.Id == weaponId * 10 + breaks);
+                if (breakRow is not null && TableFields.U(breakRow, 4) != 0)
+                    weaponSkill = TableFields.U(breakRow, 4);
+
+                GunData? gun = tables.GetTable<GunData>().FirstOrDefault(row => row.Id == gunId);
+                if (gun is not null && TableFields.List(gun, GunWeaponColumn).Contains(weaponId))
+                    exclusiveSkill = TableFields.U(battleWeapon, 4);
+
+                weaponPassives = TableFields.List(battleWeapon, 5).Where(id => id != 0).Distinct().ToList();
+                if (weaponPassives.Count == 0 && TableFields.U(battleWeapon, 5) != 0)
+                    weaponPassives.Add(TableFields.U(battleWeapon, 5));
+            }
+
             return Encode(output =>
             {
-                if (skills.Count == 0)
-                    return;
-
-                byte[] packed = Encode(inner =>
+                if (skills.Count > 0)
                 {
-                    foreach (uint skill in skills)
-                        inner.WriteUInt32(skill);
-                });
-                WriteBytes(output, 6, packed);
+                    byte[] packed = Encode(inner =>
+                    {
+                        foreach (uint skill in skills)
+                            inner.WriteUInt32(skill);
+                    });
+                    WriteBytes(output, 6, packed);
+                }
+
+                if (coreSkills is { Count: > 0 })
+                    WriteBytes(output, 11, Encode(inner =>
+                    {
+                        foreach (uint skill in coreSkills)
+                            inner.WriteUInt32(skill);
+                    }));
+
+                // field 15: the powers of the mods (skill, base values, extra values) that the battle expressions read as the weapon-part specification (A-78)
+                if (accessories is { Count: > 0 })
+                    foreach ((uint accessorySkill, int[] values) in accessories)
+                        WriteBytes(output, 15, Encode(inner =>
+                        {
+                            inner.WriteTag(1, WireFormat.WireType.Varint);
+                            inner.WriteUInt32(accessorySkill);
+                            WriteBytes(inner, 2, Encode(packed => { foreach (int value in values) packed.WriteInt32(value); }));
+                            WriteBytes(inner, 3, Encode(packed => { foreach (int value in values) packed.WriteInt32(0); }));
+                        }));
+
+                if (keySkills is { Count: > 0 })
+                    WriteBytes(output, 12, Encode(inner =>
+                    {
+                        foreach (uint skill in keySkills)
+                            inner.WriteUInt32(skill);
+                    }));
+
+                if (weaponSkill != 0)
+                {
+                    output.WriteTag(9, WireFormat.WireType.Varint);
+                    output.WriteUInt32(weaponSkill);
+                }
+
+                if (exclusiveSkill != 0)
+                {
+                    output.WriteTag(13, WireFormat.WireType.Varint);
+                    output.WriteUInt32(exclusiveSkill);
+                }
+
+                if (weaponPassives.Count > 0)
+                    WriteBytes(output, 16, Encode(inner =>
+                    {
+                        foreach (uint passive in weaponPassives)
+                            inner.WriteUInt32(passive);
+                    }));
             });
         }
 
