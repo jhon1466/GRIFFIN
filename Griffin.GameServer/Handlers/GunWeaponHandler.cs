@@ -98,8 +98,42 @@ namespace Griffin.GameServer.Handlers
                 // the client builds a NEW mod object from the answer (level 1): the level push goes AFTER it (A-82)
                 messages.Add(new SC_GunWeaponModPolarization { Id = mod.Id, Mod = ModPolarity.ToProto(tableService, accountState, uid, mod), FKBCLPBCILC = n });
                 messages.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
+                messages.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, uid));
                 connection.SendAutoEncrypted(messages.ToArray());
             }
+        }
+
+        /// <summary>
+        /// The weapon list as <see cref="HandleGunWeapons"/> sends it. Sent after a mod answer so that the client rebuilds the weapons (and their accessory cards) from the new
+        /// mod objects: the polarity "+" of a card only showed after logging in again (A-92).
+        /// </summary>
+        internal static List<Google.Protobuf.IMessage> RefreshBatch(ITableService tableService, IAccountStateService accountState, IInventoryService inventoryService, IWeaponModService weaponMods, uint uid)
+        {
+            // the same pushes as at login (mods + their levels, then the weapons), so that every panel is rebuilt from the saved data without logging in again (A-92)
+            WeaponModEntity[] mods = weaponMods.GetPlayerWeaponMods(uid);
+            SC_GunWeaponMods modList = new();
+            Dictionary<string, ModRefineState> allRefine = ModPolarity.All(accountState, uid);
+            foreach (WeaponModEntity mod in mods)
+                modList.Mods.Add(ModPolarity.ToProto(tableService, allRefine, mod));
+
+            List<Google.Protobuf.IMessage> batch = [modList];
+            foreach (WeaponModEntity mod in mods.Where(m => m.Level > 1 || m.Field6 > 0))
+                batch.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
+            batch.Add(WeaponsMessage(inventoryService, accountState, uid));
+            return batch;
+        }
+
+        internal static SC_GunWeapons WeaponsMessage(IInventoryService inventoryService, IAccountStateService accountState, uint uid)
+        {
+            SC_GunWeapons message = new();
+            foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(uid))
+            {
+                message.Weapons.Add(weapon.ToProtoWeapon(WeaponModSkins.Of(accountState, uid, weapon.Id)));
+                if (weapon.GunId != 0)
+                    message.FEDCFGGDNBN[weapon.Id] = weapon.GunId;
+            }
+
+            return message;
         }
 
         /// <summary>
@@ -324,6 +358,7 @@ namespace Griffin.GameServer.Handlers
             }
 
             messages.Add(new SC_GunWeaponModLvUp { Id = result.Id, Level = result.Level, Exp = result.Exp });
+            messages.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, connection.Account.Uid));
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
@@ -378,6 +413,7 @@ namespace Griffin.GameServer.Handlers
 
             List<Google.Protobuf.IMessage> messages = [new SC_GunWeaponUp { Id = result.WeaponUid, Level = result.Level, Exp = result.Exp }];
             messages.AddRange(result.Updates);
+            messages.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, connection.Account.Uid));
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
@@ -417,7 +453,11 @@ namespace Griffin.GameServer.Handlers
                 return;
 
             if (progress.Break(connection.Account.Uid, request.Id, request.MaterialUid) is { } times)
-                connection.Send(new SC_GunWeaponBreak { Id = request.Id, BreakTimes = times });
+            {
+                List<Google.Protobuf.IMessage> messages = [new SC_GunWeaponBreak { Id = request.Id, BreakTimes = times }];
+                messages.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, connection.Account.Uid));
+                connection.SendAutoEncrypted(messages.ToArray());
+            }
             else
                 connection.Refuse(MsgId.MsgCsGunWeaponBreak, progress.LastError);
         }
