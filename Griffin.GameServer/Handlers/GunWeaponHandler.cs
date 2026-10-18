@@ -1,4 +1,4 @@
-﻿using Griffin.Common.Networking;
+using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Common.Protocol;
@@ -110,6 +110,8 @@ namespace Griffin.GameServer.Handlers
         internal static List<Google.Protobuf.IMessage> RefreshBatch(ITableService tableService, IAccountStateService accountState, IInventoryService inventoryService, IWeaponModService weaponMods, uint uid)
         {
             // the same pushes as at login (mods + their levels, then the weapons), so that every panel is rebuilt from the saved data without logging in again (A-92)
+            if (DedupeMods(inventoryService.GetPlayerInventory<WeaponEntity>(uid)))
+                weaponMods.Save();
             WeaponModEntity[] mods = weaponMods.GetPlayerWeaponMods(uid);
             SC_GunWeaponMods modList = new();
             Dictionary<string, ModRefineState> allRefine = ModPolarity.All(accountState, uid);
@@ -121,6 +123,32 @@ namespace Griffin.GameServer.Handlers
                 batch.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
             batch.Add(WeaponsMessage(inventoryService, accountState, uid));
             return batch;
+        }
+
+        /// <summary>A mod belongs to ONE weapon: older versions could leave the same mod in two (the parts panel showed several characters on it); the first weapon keeps it (A-103).</summary>
+        internal static bool DedupeMods(IEnumerable<WeaponEntity> weapons)
+        {
+            HashSet<uint> seen = [];
+            bool changed = false;
+            foreach (WeaponEntity weapon in weapons.OrderBy(w => w.Id))
+            {
+                uint[] equipped = (uint[])weapon.EquippedModIds.Clone();
+                bool weaponChanged = false;
+                for (int index = 0; index < equipped.Length; index++)
+                    if (equipped[index] != 0 && !seen.Add(equipped[index]))
+                    {
+                        equipped[index] = 0;
+                        weaponChanged = true;
+                    }
+
+                if (weaponChanged)
+                {
+                    weapon.EquippedModIds = equipped;
+                    changed = true;
+                }
+            }
+
+            return changed;
         }
 
         internal static SC_GunWeapons WeaponsMessage(IInventoryService inventoryService, IAccountStateService accountState, uint uid)
@@ -467,6 +495,8 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account == null) return;
 
             SC_GunWeapons scGunWeapons = new SC_GunWeapons();
+            if (DedupeMods(inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid)))
+                weaponRepository.SaveChanges();
 
             foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid))
             {
@@ -653,17 +683,24 @@ namespace Griffin.GameServer.Handlers
                 if (request.Slot == 0)
                 {
                     // "unequip everything" (the red button of the parts panel): the request carries no slot
-                    List<SC_GunWeaponModBelong> cleared = [];
+                    // the client takes a mod off its weapon when told {weapon 0, slot, mod}: it finds the weapon through the mod (A-103; before it got {weapon, slot, 0} and
+                    // the parts panel kept showing the character on the mods)
+                    List<Google.Protobuf.IMessage> cleared = [];
                     for (int index = 0; index < target.EquippedModIds.Length; index++)
                         if (target.EquippedModIds[index] != 0)
                         {
+                            uint occupant = target.EquippedModIds[index];
                             Unequip(target, index);
-                            cleared.Add(new SC_GunWeaponModBelong { WeaponId = target.Id, Slot = (uint)index + 1, WeaponModId = 0 });
+                            cleared.Add(new SC_GunWeaponModBelong { WeaponId = 0, Slot = (uint)index + 1, WeaponModId = occupant });
                         }
 
                     weaponRepository.SaveChanges();
                     if (cleared.Count > 0)
+                    {
+                        cleared.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, uid));
                         connection.SendAutoEncrypted(cleared.ToArray());
+                    }
+
                     return;
                 }
 
@@ -674,12 +711,22 @@ namespace Griffin.GameServer.Handlers
                 }
 
                 int emptyIndex = (int)request.Slot - 1;
+                uint removed = emptyIndex < target.EquippedModIds.Length ? target.EquippedModIds[emptyIndex] : 0;
                 if (emptyIndex < target.EquippedModIds.Length)
                 {
                     Unequip(target, emptyIndex);
                     weaponRepository.SaveChanges();
                 }
-                connection.Send(new SC_GunWeaponModBelong { WeaponId = target.Id, Slot = request.Slot, WeaponModId = 0 });
+
+                if (removed == 0)
+                {
+                    connection.Send(new SC_GunWeaponModBelong { WeaponId = target.Id, Slot = request.Slot, WeaponModId = 0 });
+                    return;
+                }
+
+                List<Google.Protobuf.IMessage> taken = [new SC_GunWeaponModBelong { WeaponId = 0, Slot = request.Slot, WeaponModId = removed }];
+                taken.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, uid));
+                connection.SendAutoEncrypted(taken.ToArray());
                 return;
             }
 

@@ -1,4 +1,4 @@
-﻿using Griffin.Common.Networking;
+using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
 using Griffin.Common.Table;
@@ -210,11 +210,25 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account == null) return;
 
             SC_Guns scGuns = new SC_Guns();
+            Dictionary<string, uint> savedParts = SavedParts(connection.Account.Uid);
 
             foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(connection.Account.Uid))
             {
-                scGuns.Guns.Add(gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId), cooking.FoodBytes(connection.Account.Uid, gun.GunId)));
+                Gun reported = gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId), cooking.FoodBytes(connection.Account.Uid, gun.GunId));
+                // the parts saved for the costume the character wears win over the copy kept in the character row (A-103: the preparation room "forgot" them at login)
+                if (savedParts.TryGetValue(PartsKey(reported.Costume, BAGPCFGACEF.Types.GCBADMLINMA.Barrack), out uint savedBarrack))
+                    reported.CostumeParts = savedBarrack;
+                scGuns.Guns.Add(reported);
 
+            }
+
+            // field 2 of SC_Guns = the Barrack parts of EVERY costume (client dictionary of the character screen; the parts window reads its selection from it):
+            // without it the window showed no accessory after logging in again (A-104)
+            foreach ((string key, uint parts) in savedParts)
+            {
+                string[] pieces = key.Split(':');
+                if (pieces.Length == 2 && uint.TryParse(pieces[0], out uint costume) && pieces[1] == ((int)BAGPCFGACEF.Types.GCBADMLINMA.Barrack).ToString())
+                    scGuns.GDJOKNOBNBM[costume] = parts;
             }
 
             //uint[] chars = new uint[] { 1017, 1024, 1001, 1008 };
