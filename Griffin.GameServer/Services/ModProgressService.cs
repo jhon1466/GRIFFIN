@@ -25,6 +25,18 @@ namespace Griffin.GameServer.Services
 
         ModLevelResult? LevelUp(uint uid, uint modId, IEnumerable<uint> materials, IReadOnlyDictionary<uint, uint> items, List<IMessage> messages);
 
+        /// <summary>True when the mod has reached the last level of its rank.</summary>
+        bool AtMaxLevel(uint uid, uint modId);
+
+        /// <summary>Gold charged for one unit of experience.</summary>
+        uint GoldPerExp();
+
+        /// <summary>
+        /// Consumes the fodder (mods and upgrade items) of one polarization round when it is worth at least <paramref name="minExp"/> experience and charges
+        /// <paramref name="extraCost"/> with it; false (nothing consumed, <see cref="LastError"/> set) otherwise.
+        /// </summary>
+        bool ConsumeFodder(uint uid, uint modId, IEnumerable<uint> materials, IReadOnlyDictionary<uint, uint> items, long minExp, IReadOnlyDictionary<uint, int> extraCost, List<IMessage> messages);
+
         IReadOnlyList<uint> Dismantle(uint uid, IEnumerable<uint> modIds, List<IMessage> messages);
     }
 
@@ -108,6 +120,77 @@ namespace Griffin.GameServer.Services
             messages.AddRange(spent);
             Log.Information("Mod {Mod} of account {Uid}: +{Gained} experience -> level {Level} ({Exp}).", modId, uid, gained, mod.Level, mod.Field6);
             return new ModLevelResult(mod.Id, mod.Level, mod.Field6);
+        }
+
+        public bool AtMaxLevel(uint uid, uint modId)
+        {
+            WeaponModEntity? mod = accountService.GetByUid(uid)?.WeaponMods.FirstOrDefault(m => m.Id == modId);
+            return mod is not null && Curve(mod) is { Count: > 0 } curve && Math.Max(1, mod.Level) >= curve[^1].Level;
+        }
+
+        public uint GoldPerExp() => Math.Max(1, tableService.GetTable<ModExpData>().Select(r => TableFields.U(r, 7)).FirstOrDefault(m => m > 0));
+
+        public bool ConsumeFodder(uint uid, uint modId, IEnumerable<uint> materials, IReadOnlyDictionary<uint, uint> items, long minExp, IReadOnlyDictionary<uint, int> extraCost, List<IMessage> messages)
+        {
+            AccountEntity? account = accountService.GetByUid(uid);
+            if (account is null || account.WeaponMods.All(m => m.Id != modId))
+            {
+                LastError = HNINDAOJCKP.GunWeaponModNotFound;
+                return false;
+            }
+
+            long gained = 0;
+            List<WeaponModEntity> consumed = [];
+            foreach (uint materialId in materials.Distinct().Where(id => id != modId))
+            {
+                WeaponModEntity? material = account.WeaponMods.FirstOrDefault(m => m.Id == materialId);
+                if (material is null)
+                {
+                    LastError = HNINDAOJCKP.GunWeaponModMaterialNotFound;
+                    return false;
+                }
+
+                if (material.Field5 != 0 || Equipped(account, material.Id))
+                {
+                    LastError = HNINDAOJCKP.GunWeaponModMaterialNotFree;
+                    return false;
+                }
+
+                gained += BaseExp(material) + Invested(material);
+                consumed.Add(material);
+            }
+
+            long perItem = tableService.GetTable<ModExpItemData>().Where(i => TableFields.U(i, 1) == UpgradeItem).Select(i => (long)TableFields.U(i, 2)).FirstOrDefault();
+            Dictionary<uint, int> cost = extraCost.ToDictionary(pair => pair.Key, pair => pair.Value);
+            foreach ((uint item, uint count) in items)
+            {
+                if (item != UpgradeItem || count == 0)
+                {
+                    LastError = HNINDAOJCKP.GunWeaponLvUpUsedWrongItem;
+                    return false;
+                }
+
+                gained += perItem * count;
+                cost[item] = cost.GetValueOrDefault(item) + (int)count;
+            }
+
+            if (gained < minExp)
+            {
+                LastError = HNINDAOJCKP.ClientInputInvalid;
+                return false;
+            }
+
+            List<IMessage> spent = [];
+            if (!itemUse.Spend(uid, cost, spent))
+            {
+                LastError = HNINDAOJCKP.ItemNotEnough;
+                return false;
+            }
+
+            foreach (WeaponModEntity material in consumed)
+                weaponMods.RemoveWeaponMod(uid, material);
+            messages.AddRange(spent);
+            return true;
         }
 
         public IReadOnlyList<uint> Dismantle(uint uid, IEnumerable<uint> modIds, List<IMessage> messages)

@@ -5,6 +5,8 @@ using Griffin.Common.Protocol;
 using Griffin.GameServer.Extensions;
 using Griffin.Common.Table;
 using Griffin.GameServer.Services;
+using Griffin.Database.Entities;
+using Griffin.Database.Services;
 using Serilog;
 
 namespace Griffin.GameServer.Handlers
@@ -16,10 +18,116 @@ namespace Griffin.GameServer.Handlers
     public sealed class WeaponHandler(
         ITableService tableService,
         IItemUseService itemUse,
-        IRewardService rewardService) : WeaponHandlerBase
+        IRewardService rewardService,
+        IAccountStateService accountState,
+        IInventoryService inventoryService,
+        IWeaponModService weaponMods) : WeaponHandlerBase
     {
-        public override void HandleWeaponModAdvanceEnhance(CS_WeaponModAdvanceEnhance request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsWeaponModAdvanceEnhance, HNINDAOJCKP.WeaponModAdvanceEnhanceLocked);
+        /// <summary>
+        /// Refinement of a polarized mod (the "polarity plus" panel): the request maps the slot of each affix to the number of steps bought. A step raises the value of
+        /// the affix by one step of its row until its maximum and then one polarity level; the steps cost the <c>ModRefineData</c> rows that follow the ones
+        /// already bought (items and gold). The answer is the mod with its new affixes, polarity and count (A-78).
+        /// </summary>
+        public override void HandleWeaponModAdvanceEnhance(CS_WeaponModAdvanceEnhance request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                WeaponModEntity? mod = inventoryService.GetPlayerInventory<WeaponModEntity>(uid).FirstOrDefault(m => m.Id == request.Id);
+                if (mod is null)
+                {
+                    connection.Refuse(MsgId.MsgCsWeaponModAdvanceEnhance, HNINDAOJCKP.GunWeaponModNotFound);
+                    return;
+                }
+
+                ModRefineState refine = ModPolarity.Get(accountState, uid, mod.Id);
+                ulong affixes = mod.Field7, polarity = refine.Polarity;
+                int total = 0;
+                foreach ((uint slot, uint steps) in request.NOADAJNECCF)
+                {
+                    if (steps == 0)
+                        continue;
+
+                    if (slot > 3 || !ModPolarity.Refine(tableService, mod.WeaponModId, ref affixes, ref polarity, (int)slot, (int)steps))
+                    {
+                        connection.Refuse(MsgId.MsgCsWeaponModAdvanceEnhance, HNINDAOJCKP.WeaponModAdvanceEnhanceLocked);
+                        return;
+                    }
+
+                    total += (int)steps;
+                }
+
+                if (total == 0 || ModPolarity.RefineCost(tableService, refine.Count, total) is not { } cost)
+                {
+                    connection.Refuse(MsgId.MsgCsWeaponModAdvanceEnhance, HNINDAOJCKP.WeaponModAdvanceEnhanceLocked);
+                    return;
+                }
+
+                List<IMessage> messages = [];
+                if (!itemUse.Spend(uid, cost, messages))
+                {
+                    connection.Refuse(MsgId.MsgCsWeaponModAdvanceEnhance, HNINDAOJCKP.ItemNotEnough);
+                    return;
+                }
+
+                mod.Field7 = affixes;
+                refine.Polarity = polarity;
+                refine.Count += (uint)total;
+                ModPolarity.Set(accountState, uid, mod.Id, refine);
+                weaponMods.Save();
+                messages.Add(new SC_WeaponModAdvanceEnhance { Mod = ModPolarity.ToProto(tableService, accountState, uid, mod) });
+                messages.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
+                connection.SendAutoEncrypted(messages.ToArray());
+            }
+        }
+
+        /// <summary>
+        /// Answer to the dialog that follows a polarization: "confirm" (false) keeps the result, "redo" (true) restores the polarity and the count the mod had before it
+        /// (the client restores its own copy at the same time; the mod is sent again so both agree). Nothing is refunded (A-78).
+        /// </summary>
+        public override void HandleWeaponModPolarityRollBack(CS_WeaponModPolarityRollBack request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                WeaponModEntity? mod = inventoryService.GetPlayerInventory<WeaponModEntity>(uid).FirstOrDefault(m => m.Id == request.FNKBBPNGFBC);
+                if (mod is null)
+                {
+                    connection.Refuse(MsgId.MsgCsWeaponModPolarityRollBack, HNINDAOJCKP.ModPolarityBackUpIdNotMatch);
+                    return;
+                }
+
+                ModRefineState refine = ModPolarity.Get(accountState, uid, mod.Id);
+                if (!refine.HasBackup)
+                {
+                    connection.Refuse(MsgId.MsgCsWeaponModPolarityRollBack, HNINDAOJCKP.ModPolarityBackUpNotExist);
+                    return;
+                }
+
+                if (request.NGODDODILBB)
+                {
+                    refine.Polarity = refine.BackupPolarity;
+                    refine.Count = refine.BackupCount;
+                }
+
+                refine.HasBackup = false;
+                refine.BackupPolarity = 0;
+                refine.BackupCount = 0;
+                ModPolarity.Set(accountState, uid, mod.Id, refine);
+                connection.SendAutoEncrypted<IMessage>(
+                [
+                    new SC_WeaponModAdvanceEnhance { Mod = ModPolarity.ToProto(tableService, accountState, uid, mod) },
+                    new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 },
+                    new SC_WeaponModPolarityRollBack(),
+                ]);
+            }
+        }
 
         public override void HandleWeaponCompose(CS_WeaponCompose request, Connection connection)
         {
