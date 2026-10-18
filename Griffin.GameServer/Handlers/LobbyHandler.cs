@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -152,6 +152,10 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account is null)
                 return info;
+
+            foreach (uint unlockedRoom in accountState.Get<List<uint>>(connection.Account.Uid, RoomsKey) ?? [])
+                if (!info.CPJOGIOCNMM.ContainsKey(unlockedRoom))
+                    info.CPJOGIOCNMM[unlockedRoom] = new OICGGHHHFBI();
 
             foreach (uint part in accountState.Get<List<uint>>(connection.Account.Uid, PartsKey) ?? [])
             {
@@ -1940,8 +1944,42 @@ namespace Griffin.GameServer.Handlers
             AddHeat(connection, 99010);
         }
 
-        public override void HandleLobbyUnlockRoom(CS_LobbyUnlockRoom request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsLobbyUnlockRoom, HNINDAOJCKP.LobbyRoomAlreadyUnlocked);
+        private const string RoomsKey = "lobby.rooms";
+
+        /// <summary>The rooms the build info lists from the start (the others are cleaned and paid for from the build list).</summary>
+        private static readonly uint[] StartingRooms = [101, 102, 103, 104, 106, 107, 109, 201, 202];
+
+        /// <summary>
+        /// "Clean" a room of the build list (洗浴间...): the price is <c>LobbyRoomData</c> column 21 (item, amount; 30 x item 202 for the bathroom) and the room is kept in
+        /// <c>lobby.rooms</c> and listed in the build info (A-103). It used to be refused with "already unlocked" (error -18008, "undefined:18008" in the client).
+        /// </summary>
+        public override void HandleLobbyUnlockRoom(CS_LobbyUnlockRoom request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            IMessage? room = tableService.GetTable<LobbyRoomData>().FirstOrDefault(r => TableFields.U(r, 1) == request.IAAPPCGFLMD);
+            List<uint> unlocked = accountState.Get<List<uint>>(uid, RoomsKey) ?? [];
+            if (room is null || StartingRooms.Contains(request.IAAPPCGFLMD) || unlocked.Contains(request.IAAPPCGFLMD))
+            {
+                connection.Refuse(MsgId.MsgCsLobbyUnlockRoom, room is null ? HNINDAOJCKP.LobbyRoomLocked : HNINDAOJCKP.LobbyRoomAlreadyUnlocked);
+                return;
+            }
+
+            List<IMessage> messages = [];
+            Dictionary<uint, int> cost = TableFields.Map(room, 21).Where(p => p.Value > 0).ToDictionary(p => p.Key, p => (int)p.Value);
+            if (cost.Count > 0 && !itemUse.Spend(uid, cost, messages))
+            {
+                connection.Refuse(MsgId.MsgCsLobbyUnlockRoom, HNINDAOJCKP.ItemNotEnough);
+                return;
+            }
+
+            unlocked.Add(request.IAAPPCGFLMD);
+            accountState.Set(uid, RoomsKey, unlocked);
+            messages.Add(new SC_LobbyUnlockRoom { IAAPPCGFLMD = request.IAAPPCGFLMD, Info = new OICGGHHHFBI() });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
 
         /// <summary>Level rewards (see <see cref="ILobbyProgressService"/>).</summary>
         public override void HandleLobbyClaimLevelReward(CS_LobbyClaimLevelReward request, Connection connection)

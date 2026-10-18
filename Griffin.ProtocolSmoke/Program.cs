@@ -628,6 +628,20 @@ if (scenario is "all" or "minigame")
     var buttAfter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyGameInfo>().FirstOrDefault();
     Check("minigame: the win is kept in the info", buttAfter is not null && buttAfter.ToByteArray().Length > (buttInfo?.ToByteArray().Length ?? 0));
 }
+if (scenario is "all" or "lobbyroom")
+{
+    // A-103: cleaning a room of the build list (the bathroom, 108) is paid for and kept
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
+    main.ReadFor(TimeSpan.FromSeconds(6));
+    main.Send(new CS_LobbyUnlockRoom { IAAPPCGFLMD = 108 });
+    var roomReply = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("lobby: the bathroom (108) is cleaned and paid for", roomReply.OfType<SC_LobbyUnlockRoom>().Any(r => r.IAAPPCGFLMD == 108), $"messages={string.Join(',', roomReply.Select(m => m.GetType().Name))}");
+    main.Send(new CS_LobbyUnlockRoom { IAAPPCGFLMD = 108 });
+    Check("lobby: cleaning it twice is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+    main.Send(new CS_LobbyGetBuildInfo());
+    var buildInfo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_LobbyGetBuildInfo>().FirstOrDefault();
+    Check("lobby: the cleaned room is listed in the build info", buildInfo is not null && buildInfo.CPJOGIOCNMM.ContainsKey(108));
+}
 if (scenario is "all" or "formation")
 {
     // Custom squads are stored per account and come back in order of id.
@@ -2024,7 +2038,7 @@ if (scenario == "equip")
             && moved.Any(b => b.WeaponId == equipWeapon.Id && b.Slot == 2 && b.WeaponModId == equipMods[0].Id), $"answers={moved.Count}");
         main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id });
         Check("equip: the red button \"unequip all\" (no slot, no mod) frees the equipped mods slot by slot",
-            main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.Slot == 2 && b.WeaponModId == 0));
+            main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.WeaponId == 0 && b.Slot == 2 && b.WeaponModId == equipMods[0].Id));
         main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[0].Id });
         main.ReadFor(TimeSpan.FromSeconds(2));
     }
@@ -2032,7 +2046,9 @@ if (scenario == "equip")
     var equipAgain = await Connect(true);
     equipAgain.ReadFor(TimeSpan.FromSeconds(20));
     equipAgain.Send(new CS_Guns());
-    var gunAfter = equipAgain.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).FirstOrDefault(g => g.Id == 1017);
+    var gunsAfter = equipAgain.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault();
+    var gunAfter = gunsAfter?.Guns.FirstOrDefault(g => g.Id == 1017);
+    Check("equip: SC_Guns carries the Barrack parts of the costume in its map (field 2) for the parts window", gunsAfter is not null && gunsAfter.GDJOKNOBNBM.GetValueOrDefault(1101701u) == 273, $"map={gunsAfter?.GDJOKNOBNBM.Count}");
     Check("equip: after a new login character 1017 still wears costume 1101701 with parts 273", gunAfter is not null && gunAfter.Costume == 1101701 && gunAfter.CostumeParts == 273,
         $"costume={gunAfter?.Costume} parts={gunAfter?.CostumeParts}");
     equipAgain.Send(new CS_GunWeapons());
