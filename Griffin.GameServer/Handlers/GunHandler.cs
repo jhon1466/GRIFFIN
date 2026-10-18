@@ -3,6 +3,7 @@ using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
+using Griffin.Database.Repositories;
 using Griffin.GameServer.Extensions;
 using Griffin.GameServer.Services;
 using Griffin.PcapParser;
@@ -18,8 +19,83 @@ namespace Griffin.GameServer.Handlers
         IAccountStateService accountState,
         ITableService tableService,
         IItemUseService itemUse,
-        ILobbyCookingService cooking) : GunHandlerBase
+        ILobbyCookingService cooking,
+        IRewardService rewardService,
+        IWeaponRepository weaponRepositoryForReset) : GunHandlerBase
     {
+        /// <summary>
+        /// The reset event (activity type 38, "重置详情"): the character goes back to level 1, class 1, without experience, keys and core, and the weapon to level 1 and
+        /// break 1; the dialog of the client promises the return of what was invested, which is paid back here (A-84): the experience (resource 25) and gold of every level
+        /// of <c>GunLevelExpData</c>, the materials of the classes passed (<c>GunClassData</c> col 7) and the Data Links and gold of the core (<c>LevelUpData</c>).
+        /// </summary>
+        public override void HandleActicityResetWeaponOrGun(CS_ActicityResetWeaponOrGun request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            GunEntity? gun = request.GunId == 0 ? null : gunService.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == request.GunId);
+            WeaponEntity? weapon = request.WeaponId == 0 ? null : inventoryService.GetPlayerInventory<WeaponEntity>(uid).FirstOrDefault(w => w.Id == request.WeaponId);
+            if (gun is null && weapon is null)
+            {
+                connection.Refuse(MsgId.MsgCsActicityResetWeaponOrGun, HNINDAOJCKP.GunNotFound);
+                return;
+            }
+
+            List<Google.Protobuf.IMessage> messages = [];
+            if (gun is not null)
+            {
+                Dictionary<uint, long> refund = [];
+                foreach (GunLevelExpData row in tableService.GetTable<GunLevelExpData>().Where(r => r.Level > 1 && r.Level <= (uint)gun.Level))
+                {
+                    refund[ICharacterProgressService.ExpResource] = refund.GetValueOrDefault(ICharacterProgressService.ExpResource) + row.Exp;
+                    refund[ICharacterProgressService.GoldResource] = refund.GetValueOrDefault(ICharacterProgressService.GoldResource) + row.Gold;
+                }
+
+                refund[ICharacterProgressService.ExpResource] = refund.GetValueOrDefault(ICharacterProgressService.ExpResource) + gun.Exp;
+                GunData? data = tableService.GetTable<GunData>().FirstOrDefault(g => g.Id == gun.GunId);
+                uint group = data is null ? 0 : TableFields.U(data, 35);
+                for (uint gunClass = 1; gunClass < Math.Max(1u, gun.GunClass); gunClass++)
+                {
+                    GunClassData? classRow = tableService.GetTable<GunClassData>().FirstOrDefault(c => TableFields.U(c, 2) == group && TableFields.U(c, 3) == gunClass);
+                    if (classRow is not null)
+                        foreach ((uint item, uint count) in TableFields.Map(classRow, 7))
+                            refund[item] = refund.GetValueOrDefault(item) + count;
+                }
+
+                uint coreLevel = RemouldingCores.LevelOf(gun);
+                if (coreLevel > 1)
+                {
+                    (uint links, uint coreGold) = RemouldingCores.CostBetween(tableService, 1, coreLevel);
+                    refund[49u] = refund.GetValueOrDefault(49u) + links;
+                    refund[ICharacterProgressService.GoldResource] = refund.GetValueOrDefault(ICharacterProgressService.GoldResource) + coreGold;
+                }
+
+                foreach ((uint item, long count) in refund.Where(p => p.Value > 0))
+                    rewardService.Grant(uid, item, (int)Math.Min(count, int.MaxValue), messages);
+
+                gun.Level = 1;
+                gun.Exp = 0;
+                gun.GunClass = 1;
+                RemouldingCores.SetLevel(gun, 1);
+                gun.PrivateTalentSkillItems = [0, 0, 0];
+                gun.PublicTalentSkillItems = [0, 0, 0];
+                gun.IsAllTalentUnlock = false;
+                gunService.Save();
+            }
+
+            if (weapon is not null)
+            {
+                weapon.Level = 1;
+                weapon.CurExp = 0;
+                weapon.BreakTimes = 1;
+                weaponRepositoryForReset.SaveChanges();
+            }
+
+            messages.Add(new SC_ActicityResetWeaponOrGun { IKDMNOBMIFE = request.IKDMNOBMIFE, GunId = request.GunId, WeaponId = request.WeaponId });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
         // Remoulding plugins and cores: no plugin or core exists on the account (the list is empty), so acting on one is "not found".
         // A character has exactly one core (see RemouldingCores), so "belong" only confirms it.
         public override void HandleGunRemouldingCoreBelong(CS_GunRemouldingCoreBelong request, Connection connection)

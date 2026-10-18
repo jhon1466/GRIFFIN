@@ -24,13 +24,81 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account is not null && accountState.Get<string>(connection.Account.Uid, StateKey) is { Length: > 0 } saved)
             {
-                connection.Send(new SC_ClientDataGet { Data = ByteString.FromBase64(saved) });
+                byte[] data = ByteString.FromBase64(saved).ToByteArray();
+                // accounts that started with the captured blob keep its "skip the barrack animations" (A-85): changed once to "always play"
+                if (accountState.Get<bool?>(connection.Account.Uid, BarrackFixKey) != true)
+                {
+                    data = WithBarrackSkip(data, BarrackAlwaysPlay);
+                    accountState.Set(connection.Account.Uid, StateKey, Convert.ToBase64String(data));
+                    accountState.Set<bool?>(connection.Account.Uid, BarrackFixKey, true);
+                }
+
+                connection.Send(new SC_ClientDataGet { Data = ByteString.CopyFrom(data) });
                 return;
             }
 
             connection.Send(new SC_ClientDataGet
             {
-                Data = ByteString.CopyFrom(
+                Data = ByteString.CopyFrom(WithBarrackSkip(DefaultBlob, BarrackAlwaysPlay))
+            });
+        }
+
+        private const string BarrackFixKey = "client.data.barrack";
+
+        /// <summary>
+        /// Field 9 of the client data is the setting «animations of the barracks» (<c>BarrackSkipKey</c>: 0 automatic = once a day per character, 1 skip, 2 always). The blob
+        /// captured from the real game carried 1, so the level-up and break cutscenes never played. Replaced by 2 (A-85).
+        /// </summary>
+        private const uint BarrackAlwaysPlay = 2;
+
+        private static byte[] WithBarrackSkip(byte[] data, uint value)
+        {
+            using MemoryStream output = new();
+            CodedInputStream input = new(data);
+            CodedOutputStream writer = new(output);
+            try
+            {
+                bool seen = false;
+                uint tag;
+                while ((tag = input.ReadTag()) != 0)
+                {
+                    if (tag >> 3 == 9 && (tag & 7) == 0)
+                    {
+                        input.ReadUInt32();
+                        writer.WriteTag(tag);
+                        writer.WriteUInt32(value);
+                        seen = true;
+                        continue;
+                    }
+
+                    writer.WriteTag(tag);
+                    switch (tag & 7)
+                    {
+                        case 0: writer.WriteUInt64(input.ReadUInt64()); break;
+                        case 1: writer.WriteFixed64(input.ReadFixed64()); break;
+                        case 2: writer.WriteBytes(input.ReadBytes()); break;
+                        case 5: writer.WriteFixed32(input.ReadFixed32()); break;
+                        default: return data;
+                    }
+                }
+
+                if (!seen)
+                {
+                    writer.WriteTag(9, WireFormat.WireType.Varint);
+                    writer.WriteUInt32(value);
+                }
+
+                writer.Flush();
+                return output.ToArray();
+            }
+            catch (InvalidProtocolBufferException)
+            {
+                return data;
+            }
+        }
+
+        private static readonly byte[] DefaultBlob = new byte[]
+        {
                     10,
         217,
         1,
@@ -872,9 +940,8 @@ namespace Griffin.GameServer.Handlers
         112,
         101,
         16,
-        85)
-            });
-        }
+        85
+        };
 
         public override void HandleClientDataUpload(CS_ClientDataUpload request, Connection connection)
         {

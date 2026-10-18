@@ -91,6 +91,61 @@ namespace Griffin.GameServer.Handlers
         }
 
         private const string PartsKey = "lobby.parts";
+        private const string BedroomKey = "lobby.bedroom";
+
+        /// <summary>
+        /// Rebuild of the central bedroom (A-84): <c>LobbyBedroomUnlockData</c> col 5 = steps that must be done first, col 7 = price (items), col 9 = reward. The steps done
+        /// are stored in <c>lobby.bedroom</c> and sent in field 2 of the build info extra (<c>ABOOLELFBEE</c>); before they were not kept ("after logging back in, the state resets").
+        /// </summary>
+        public override void HandleLobbyBedRoomRebuildUnlock(CS_LobbyBedRoomRebuildUnlock request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            IMessage? row = tableService.GetTable<LobbyBedroomUnlockData>().FirstOrDefault(r => TableFields.U(r, 1) == request.FKDDKKFIKCA);
+            List<uint> done = accountState.Get<List<uint>>(uid, BedroomKey) ?? [];
+            if (row is null)
+            {
+                connection.Refuse(MsgId.MsgCsLobbyBedRoomRebuildUnlock, HNINDAOJCKP.LobbyBedroomPreConditionNotFinish);
+                return;
+            }
+
+            if (done.Contains(request.FKDDKKFIKCA))
+            {
+                connection.Refuse(MsgId.MsgCsLobbyBedRoomRebuildUnlock, HNINDAOJCKP.LobbyBedroomUnlockRepeat);
+                return;
+            }
+
+            if (TableFields.List(row, 5).Any(need => need != 0 && !done.Contains(need)))
+            {
+                connection.Refuse(MsgId.MsgCsLobbyBedRoomRebuildUnlock, HNINDAOJCKP.LobbyBedroomPreConditionNotFinish);
+                return;
+            }
+
+            List<IMessage> messages = [];
+            Dictionary<uint, int> cost = TableFields.Map(row, 7).Where(p => p.Value > 0).ToDictionary(p => p.Key, p => (int)p.Value);
+            if (cost.Count > 0 && !itemUse.Spend(uid, cost, messages))
+            {
+                connection.Refuse(MsgId.MsgCsLobbyBedRoomRebuildUnlock, HNINDAOJCKP.ItemNotEnough);
+                return;
+            }
+
+            foreach ((uint item, uint count) in TableFields.Map(row, 9))
+                rewardService.Grant(uid, item, (int)count, messages);
+            done.Add(request.FKDDKKFIKCA);
+            accountState.Set(uid, BedroomKey, done);
+            messages.Add(new SC_LobbyBedRoomRebuildUnlock { FKDDKKFIKCA = request.FKDDKKFIKCA });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
+        private ABOOLELFBEE BedroomState(Connection connection)
+        {
+            ABOOLELFBEE extra = new() { DAAAANLMKAA = 35 };
+            if (connection.Account is not null)
+                extra.HKCFCDNFCAE.AddRange(accountState.Get<List<uint>>(connection.Account.Uid, BedroomKey) ?? []);
+            return extra;
+        }
 
         /// <summary>The parts the player unlocked (LobbyUnlockPart) are added to the room of each part (LobbyPartData col 2) in the build info.</summary>
         private SC_LobbyGetBuildInfo WithUnlockedParts(Connection connection, SC_LobbyGetBuildInfo info)
@@ -336,10 +391,7 @@ namespace Griffin.GameServer.Handlers
                             Level = progressNow.Level,
                             CFOCLIHKKJL = { progressNow.ClaimedLevels },
                             Exp = progressNow.Exp,
-                            KAFLIJKLBKO = new ABOOLELFBEE
-                            {
-                                DAAAANLMKAA = 35,
-                            },
+                            KAFLIJKLBKO = BedroomState(connection),
                         }));
 
                     if (lobbyGetBuildInfoCount != 2)
