@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Griffin.Common.Networking;
 using Griffin.Common.Packets;
 using Griffin.Common.Proto;
@@ -43,7 +43,6 @@ namespace Griffin.GameServer.Services
             (new Regex("^Shootspace", RegexOptions.Compiled), HNINDAOJCKP.ShootspaceNotOpen),
             (new Regex("^TpsShoot", RegexOptions.Compiled), HNINDAOJCKP.TpsShootNotOpen),
             (new Regex("^MiniGame", RegexOptions.Compiled), HNINDAOJCKP.MiniGameNotOpen),
-            (new Regex("^LobbyGame", RegexOptions.Compiled), HNINDAOJCKP.MiniGameNotOpen),
             (new Regex("^PazzleStage", RegexOptions.Compiled), HNINDAOJCKP.PazzleStageNotOpen),
             (new Regex("^Jigsaw", RegexOptions.Compiled), HNINDAOJCKP.JigsawNotOpen),
             (new Regex("^OperationMiniGame", RegexOptions.Compiled), HNINDAOJCKP.OperationActivityNotOpen),

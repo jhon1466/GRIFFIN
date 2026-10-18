@@ -602,6 +602,32 @@ if (scenario is "all" or "weapon")
     }
 }
 
+if (scenario is "all" or "minigame")
+{
+    // A-101: the "I Wanna" challenge (28001) of the event and any other mini game of an event open and finish
+    main.Send(new CS_ThemeMiniGameStart { ThemeId = 4101, FNEFKKLJMDN = 28001, StageId = 2001 });
+    Check("minigame: the Iwanna challenge starts", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ThemeMiniGameStart>().Any(r => r.ThemeId == 4101 && r.FNEFKKLJMDN == 28001 && r.StageId == 2001));
+    main.Send(new CS_ThemeMiniGameFinish { ThemeId = 4101, FNEFKKLJMDN = 28001, StageId = 2001, Score = 777, Iwanna = new CS_ThemeMiniGameFinish.Types.KFKMJBNENIB { Result = LLKGHFKHHHN.MiniGameWin, GJPONLPNJNG = 777 } });
+    Check("minigame: finishing it is answered with the result", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ThemeMiniGameFinish>().Any(r => r.StageId == 2001 && r.Iwanna is not null && r.Iwanna.Result == LLKGHFKHHHN.MiniGameWin));
+    main.Send(new CS_ThemeMiniGameInfo { ThemeId = 4101, FNEFKKLJMDN = 28001 });
+    var iwannaInfo = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ThemeMiniGameInfo>().FirstOrDefault();
+    byte[] iwannaBytes = iwannaInfo?.ToByteArray() ?? [];
+    Check("minigame: the record of the stage is kept (score 777 in the info)", Enumerable.Range(0, Math.Max(0, iwannaBytes.Length - 1)).Any(i => iwannaBytes[i] == 0x89 && iwannaBytes[i + 1] == 0x06));
+    main.Send(new CS_ThemeMiniGameStart { ThemeId = 3001, FNEFKKLJMDN = 23002, StageId = 1 });
+    Check("minigame: another mini game opens with a generic answer", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ThemeMiniGameStart>().Any(r => r.FNEFKKLJMDN == 23002));
+    // A-102: the lobby "butt game" challenge (擂台挑战)
+    main.Send(new CS_LobbyGameInfo { Type = GGIHCININON.LobbyGamTypeButtGame });
+    var buttInfo = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyGameInfo>().FirstOrDefault();
+    Check("minigame: the lobby game info lists the three butt games", buttInfo is not null && buttInfo.ToByteArray().Length > 20, $"bytes={buttInfo?.ToByteArray().Length}");
+    var buttStart = new FJKDCILGCKA { LAOKONCHCHL = 103, StageId = 1030101, Type = MJHICDHLNBG.LobbyButtGameTypeNormal };
+    main.Send(new CS_LobbyGameStart { Type = GGIHCININON.LobbyGamTypeButtGame, LobbyButtGameStart = buttStart });
+    Check("minigame: a butt game starts", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyGameStart>().Any(r => r.LobbyButtGameStart?.StageId == 1030101));
+    main.Send(new CS_LobbyGameFinish { Type = GGIHCININON.LobbyGamTypeButtGame, LobbyButtGameFinish = new EAAIAKKEEMB { JOOPJGIOLIE = buttStart, Result = FPDDLCKDDNE.LobbyGameWin, Duration = 30 } });
+    Check("minigame: finishing it answers the result", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyGameFinish>().Any(r => r.LobbyButtGameFinish?.Result == FPDDLCKDDNE.LobbyGameWin));
+    main.Send(new CS_LobbyGameInfo { Type = GGIHCININON.LobbyGamTypeButtGame });
+    var buttAfter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyGameInfo>().FirstOrDefault();
+    Check("minigame: the win is kept in the info", buttAfter is not null && buttAfter.ToByteArray().Length > (buttInfo?.ToByteArray().Length ?? 0));
+}
 if (scenario is "all" or "formation")
 {
     // Custom squads are stored per account and come back in order of id.
