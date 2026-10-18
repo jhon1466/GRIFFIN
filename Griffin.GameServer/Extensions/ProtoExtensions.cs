@@ -77,7 +77,7 @@ public static class ProtoExtensions
         return proto;
     }
 
-    public static GunWeaponLite ToProtoWeapon(this WeaponEntity weapon)
+    public static GunWeaponLite ToProtoWeapon(this WeaponEntity weapon, IReadOnlyList<uint>? modSkins = null)
     {
         ArgumentNullException.ThrowIfNull(weapon);
 
@@ -87,22 +87,26 @@ public static class ProtoExtensions
             StcId = weapon.WeaponId,
             Level = (uint)weapon.Level,
             Exp = weapon.CurExp,
-            GunId = weapon.GunId,
+            // field 5 of the weapon is its equipped SKIN in client 4.0.5136 (ECOCKEKCCAF.ELLCBFHEEJO, set by the replace-skin reply); the owner gun travels in the map of SC_GunWeapons (A-88)
+            GunId = weapon.EquippedSkinId,
             BreakTimes = (uint)weapon.BreakTimes,
             LPEEABKNKKE = weapon.Flags,
         };
 
-        if (weapon.EquippedModIds is { Length: > 0 })
+        // The mods are POSITIONAL (index = slot - 1; the client reads them with its slot index and pads the list) and field 2 of each entry is the SKIN
+        // of the accessory in that slot (ECOCKEKCCAF.LGBBHFCNAJD.ELLCBFHEEJO, set by SC_ReplaceGunWeaponModSkin; the old proto called it gun_id, A-89).
+        int slots = Math.Max(weapon.EquippedModIds?.Length ?? 0, modSkins?.Count ?? 0);
+        for (int slot = 0; slot < slots; slot++)
         {
-            foreach (uint modId in weapon.EquippedModIds.Where(id => id != 0))
-            {
-                proto.WeaponMods.Add(new GunWeaponLite.Types.WeaponMod
-                {
-                    Id = modId,
-                    GunId = weapon.GunId,
-                });
-            }
+            uint modId = weapon.EquippedModIds is not null && slot < weapon.EquippedModIds.Length ? weapon.EquippedModIds[slot] : 0;
+            uint skin = modSkins is not null && slot < modSkins.Count ? modSkins[slot] : 0;
+            if (modId == 0 && skin == 0 && slot >= slots - 1 && proto.WeaponMods.Count == 0)
+                continue;
+            proto.WeaponMods.Add(new GunWeaponLite.Types.WeaponMod { Id = modId, GunId = skin });
         }
+
+        while (proto.WeaponMods.Count > 0 && proto.WeaponMods[^1].Id == 0 && proto.WeaponMods[^1].GunId == 0)
+            proto.WeaponMods.RemoveAt(proto.WeaponMods.Count - 1);
 
         return proto;
     }

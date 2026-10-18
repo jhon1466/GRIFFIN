@@ -156,7 +156,7 @@ namespace Griffin.GameServer.Services
                     BreakTimes = (uint)(weapon?.BreakTimes ?? 1),
                     Timestamp = unit.Timestamp,
                 },
-                WeaponLite = weapon?.ToProtoWeapon() ?? new GunWeaponLite { StcId = weaponStcId, Level = 1, GunId = gunId, BreakTimes = 1 },
+                WeaponLite = weapon?.ToProtoWeapon() ?? new GunWeaponLite { StcId = weaponStcId, Level = 1, BreakTimes = 1 },
             };
 #pragma warning restore CS0612, CS0618
             return unit;

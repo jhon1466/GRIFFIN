@@ -430,7 +430,7 @@ namespace Griffin.GameServer.Handlers
 
             foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid))
             {
-                scGunWeapons.Weapons.Add(weapon.ToProtoWeapon());
+                scGunWeapons.Weapons.Add(weapon.ToProtoWeapon(WeaponModSkins.Of(accountState, connection.Account.Uid, weapon.Id)));
 
                 if (weapon.GunId != 0)
                     scGunWeapons.FEDCFGGDNBN[weapon.Id] = weapon.GunId;
@@ -542,6 +542,19 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleReplaceGunWeaponSkin(CS_ReplaceGunWeaponSkin request, Connection connection)
         {
+            // CS: weapon id + skin id (0 = none). The skin is kept on the weapon and travels in field 5 of its message (A-88).
+            if (connection.Account is null)
+                return;
+
+            WeaponEntity? weapon = inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid).FirstOrDefault(w => w.Id == request.Id);
+            if (weapon is null)
+            {
+                connection.Refuse(MsgId.MsgCsReplaceGunWeaponSkin, HNINDAOJCKP.GunWeaponNotFound);
+                return;
+            }
+
+            weapon.EquippedSkinId = request.GunId;
+            weaponRepository.SaveChanges();
             connection.Send(new SC_ReplaceGunWeaponSkin
             {
                 Id = request.Id,

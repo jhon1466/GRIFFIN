@@ -30,6 +30,15 @@ namespace Griffin.GameServer.Handlers
             // 12:56 session ended in a native stack overflow (0xC00000FD, a 5-function cycle repeated ~290 times) while it loaded
             // the third character model of the 1-4 squad. The original server did not answer this request either.
             var response = new SC_StageUsableGuns { StageId = request.StageId };
+            // The deployment screen preselects `lineup` (field 2, one gun id per slot, 0 = empty) and orders the turns by `sequence` (field 4): the team the
+            // player took into their last battle, remembered from CS_StageInto (A-90). Characters the account no longer owns are left out.
+            if (connection.Account is not null && accountState.Get<SavedLineup>(connection.Account.Uid, "stage.lineup") is { } saved)
+            {
+                HashSet<uint> owned = gunService.GetPlayerGuns(connection.Account.Uid).Select(g => g.GunId).ToHashSet();
+                response.Lineup.AddRange(saved.Lineup.Select(id => owned.Contains(id) ? id : 0u));
+                response.Sequence.AddRange(saved.Sequence.Where(owned.Contains));
+            }
+
             connection.Send(response);
         }
 
@@ -180,6 +189,7 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            accountState.Set(connection.Account.Uid, "stage.lineup", new SavedLineup(request.Guns.Values.ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
                 pending.BattleId, pending.RandomSeed);
             if (pending.BattleId == 0 || pending.RandomSeed == 0)
@@ -322,6 +332,7 @@ namespace Griffin.GameServer.Handlers
 
         /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>.</summary>
         internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0);
+        internal sealed record SavedLineup(List<uint> Lineup, List<uint> Sequence);
 
 
         // Borrowed (friend/preset) assistants of a stage: the account has no friends, so none are offered.
