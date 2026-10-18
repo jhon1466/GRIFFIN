@@ -126,10 +126,14 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleGetDormFormationInfo(CS_GetDormFormationInfo request, Connection connection)
         {
-            connection.Send(new SC_GetDormFormationInfo
+            SC_GetDormFormationInfo reply = new();
+            if (connection.Account is not null)
             {
-                AHFNBKINDGB = { },
-            });
+                foreach ((uint id, bool bought) in accountState.Get<Dictionary<uint, bool>>(connection.Account.Uid, GunHandler.PerformancesKey) ?? [])
+                    reply.AHFNBKINDGB[id] = bought;
+            }
+
+            connection.Send(reply);
         }
 
         public override void HandleEnterDorm(CS_EnterDorm request, Connection connection)

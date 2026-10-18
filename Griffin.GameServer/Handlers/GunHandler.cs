@@ -21,6 +21,7 @@ namespace Griffin.GameServer.Handlers
         IItemUseService itemUse,
         ILobbyCookingService cooking,
         IRewardService rewardService,
+        IAchievementService achievements,
         IWeaponRepository weaponRepositoryForReset) : GunHandlerBase
     {
         /// <summary>
@@ -229,7 +230,9 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account is null)
                 return;
 
-            int before = gunService.GetPlayerGuns(connection.Account.Uid).FirstOrDefault(g => g.GunId == request.GunId)?.Level ?? 0;
+            uint uid = connection.Account.Uid;
+            int before = gunService.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == request.GunId)?.Level ?? 0;
+            IReadOnlyDictionary<uint, bool> achievementsBefore = achievements.Completed(uid);
             LevelUpResult? result = progress.LevelUp(connection.Account.Uid, request.GunId, request.Level);
             if (result is null)
             {
@@ -244,6 +247,8 @@ namespace Griffin.GameServer.Handlers
                 levelUp.PDGOLKFCJFH.Add(core);
 
             connection.SendAutoEncrypted<Google.Protobuf.IMessage>(levelUp, result.Spent);
+            if (achievements.NewlyCompleted(uid, achievementsBefore) is { } unlocked)
+                connection.Send(new SC_CommonQuestCountUpdate { Counters = unlocked });
         }
 
         public override void HandleGunClassUpdate(CS_GunClassUpdate request, Connection connection)

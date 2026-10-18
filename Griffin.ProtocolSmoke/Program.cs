@@ -417,6 +417,12 @@ if (scenario is "all" or "prefs")
 if (scenario is "all" or "gun")
 {
     // Character progression: level (paid with resources 25 and 2), class cap, class promotion, grade.
+    // The class promotion below spends ItemData goods; seed only the isolated test account, preserving any positive balances.
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
+    main.ReadFor(TimeSpan.FromSeconds(6));
+    main.Send(new CS_Items());
+    var seededInventory = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Items>().FirstOrDefault();
+    int classMaterialBefore = seededInventory?.Items.GetValueOrDefault(8328u) ?? 0;
     main.Send(new CS_Guns());
     var gunList = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault();
     // the lowest-level character: the order of the list is not fixed and a level-60 one would refuse the level-up checks below
@@ -489,6 +495,14 @@ if (scenario is "all" or "gun")
         var paid = up.Select(p => p.Message).OfType<SC_ResourceUpdate>().FirstOrDefault();
         Check("gun: level-up to 20 answered with the new level", lv is not null && lv.Level == 20 && lv.GunId == id, $"level={lv?.Level}");
         Check("gun: battle reports (resource 25) were charged", paid is not null && paid.ResourceEx.ContainsKey(25u));
+        // The client's dorm action gate uses its separate per-character level achievement (Gun 1008 -> 410081 at level 20).
+        // The account must receive the newly completed counter immediately after leveling, not only on a later login/query.
+        var unlockedCounters = up.Select(p => p.Message).OfType<SC_CommonQuestCountUpdate>()
+            .FirstOrDefault(u => u.Counters.Type == CommonQuestCounters.Types.Type.Achievement)?.Counters;
+        uint level20Achievement = 410000u + (id - 1000u) * 10u + 1u;
+        Check("gun: crossing level 20 pushes its per-character dorm achievement counter",
+            unlockedCounters is not null && unlockedCounters.Rewards.TryGetValue(level20Achievement, out bool unlocked) && unlocked,
+            $"gun={id}, expected={level20Achievement}, pushed={unlockedCounters?.Rewards.ContainsKey(level20Achievement)}");
 
         main.Send(new CS_GunLevelUp { GunId = id, Level = 60 });
         var cappedMessages = main.ReadFor(TimeSpan.FromSeconds(2));
@@ -502,8 +516,9 @@ if (scenario is "all" or "gun")
         var clsMessages = main.ReadFor(TimeSpan.FromSeconds(2));
         var cls = clsMessages.Select(p => p.Message).OfType<SC_GunClassUpdate>().FirstOrDefault();
         Check("gun: class promotion at the cap succeeds (class 2)", cls is not null && cls.GunClass == 2, $"class={cls?.GunClass}");
-        Check("gun: the promotion charged its materials (GunClassData: 4 x 8328 and 1000 gold)",
-            clsMessages.Select(p => p.Message).OfType<SC_Items>().Any(i => i.Items.TryGetValue(8328u, out int left) && left == 96)
+        int? classMaterialAfter = clsMessages.Select(p => p.Message).OfType<SC_Items>().FirstOrDefault()?.Items.GetValueOrDefault(8328u);
+        Check("gun: the promotion charged its tabled materials (4 x 8328 and 1000 gold)",
+            classMaterialBefore >= 4 && classMaterialAfter == classMaterialBefore - 4
             && clsMessages.Select(p => p.Message).OfType<SC_ResourceUpdate>().Any(r => r.ResourceEx.ContainsKey(2u)));
 
         main.Send(new CS_GunClassUpdate { GunId = id });
@@ -699,6 +714,10 @@ if (scenario == "stage")
     main.Send(new CS_StageInto { Guns = { [1769499u] = 1017u, [1835035u] = 1008u } });
     var stgInto = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault();
     var stgBattle = stgInto?.Stage;
+    // A-90: the team of the last battle is offered again by the deployment screen
+    main.Send(new CS_StageUsableGuns { StageId = 10101 });
+    var stgLastTeam = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_StageUsableGuns>().FirstOrDefault();
+    Check("stage: the deployment screen gets the remembered team of the last battle", stgLastTeam is not null && stgLastTeam.Lineup.ToList().SequenceEqual(new uint[] { 1017, 1008 }), $"lineup={string.Join(',', stgLastTeam?.Lineup ?? [])}");
     Check("stage: the player is side 1 (Side and UserSides)", stgBattle is not null && (int)stgBattle.Side == 1 && stgBattle.UserSides.Count == 1 && stgBattle.UserSides.Values.All(v => (int)v == 1),
         $"side={(int?)stgBattle?.Side} userSides={stgBattle?.UserSides.Count}");
     var stgCamps = stgBattle?.Camps.Select(c => c.ToByteArray()).ToList() ?? [];
@@ -714,10 +733,6 @@ if (scenario == "stage")
     // The client puts the first 5 skill ids in the main list and looks the rest up in BattleSkillData without a null check (crash of the 16:14 battle).
     List<uint> StgSkills(byte[] gun)
     {
-    // A-90: the team of the last battle is offered again by the deployment screen
-    main.Send(new CS_StageUsableGuns { StageId = 10101 });
-    var stgLastTeam = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_StageUsableGuns>().FirstOrDefault();
-    Check("stage: the deployment screen gets the remembered team of the last battle", stgLastTeam is not null && stgLastTeam.Lineup.ToList().SequenceEqual(new uint[] { 1017, 1008 }), $"lineup={string.Join(',', stgLastTeam?.Lineup ?? [])}");
         var ids = new List<uint>();
         foreach (var packed in StgFields(StgFields(gun, 11).FirstOrDefault() ?? [], 6))
         {
@@ -1813,21 +1828,6 @@ if (scenario == "bugs")
         while ((ct = cr.ReadTag()) != 0) { if ((ct >> 3) == 9 && (ct & 7) == 0) barrackSkip = cr.ReadUInt32(); else cr.SkipLastField(); }
     }
     Check("cutscene: the client data starts with the barrack animations set to \"always play\" (2), not \"skip\" (1)", barrackSkip == 2, $"BarrackSkipKey={barrackSkip}");
-    main.Send(new CS_GunLevelUp { GunId = 1017, Level = 20 });
-    main.ReadFor(TimeSpan.FromSeconds(3));
-    main.Send(new CS_ActicityResetWeaponOrGun { IKDMNOBMIFE = 1, GunId = 1017 });
-    var reset = main.ReadFor(TimeSpan.FromSeconds(3));
-    Check("reset: the reset event answers and pays back the experience and gold of the levels", reset.Any(p => p.Message is SC_ActicityResetWeaponOrGun { GunId: 1017 }) && reset.Any(p => p.Message is SC_ResourceUpdate or SC_Items));
-    main.Send(new CS_Guns());
-    var resetGun = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).FirstOrDefault(g => g.Id == 1017);
-    Check("reset: the character is back at level 1", resetGun is { Level: 1 }, $"level={resetGun?.Level}");
-}
-
-if (scenario == "equip")
-{
-    // Costumes, costume parts and weapon mods (accessories) must survive a new login: they used to be echoed and lost.
-    main.Send(new CS_Guns());
-    var equipGuns = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).ToList();
     // Existing accounts may have uploaded the captured blob with field 9 = 1. Migrate that
     // saved value once, then preserve a later explicit user choice instead of forcing it on every read.
     main.Send(new CS_ClientDataUpload { Data = ByteString.CopyFrom([0x48, 0x01]) });
@@ -1853,6 +1853,21 @@ if (scenario == "equip")
         while ((ct = cr.ReadTag()) != 0) { if ((ct >> 3) == 9 && (ct & 7) == 0) userBarrackSkip = cr.ReadUInt32(); else cr.SkipLastField(); }
     }
     Check("cutscene: a later user setting is not overwritten by the one-time migration", userBarrackSkip == 1, $"BarrackSkipKey={userBarrackSkip}");
+    main.Send(new CS_GunLevelUp { GunId = 1017, Level = 20 });
+    main.ReadFor(TimeSpan.FromSeconds(3));
+    main.Send(new CS_ActicityResetWeaponOrGun { IKDMNOBMIFE = 1, GunId = 1017 });
+    var reset = main.ReadFor(TimeSpan.FromSeconds(3));
+    Check("reset: the reset event answers and pays back the experience and gold of the levels", reset.Any(p => p.Message is SC_ActicityResetWeaponOrGun { GunId: 1017 }) && reset.Any(p => p.Message is SC_ResourceUpdate or SC_Items));
+    main.Send(new CS_Guns());
+    var resetGun = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).FirstOrDefault(g => g.Id == 1017);
+    Check("reset: the character is back at level 1", resetGun is { Level: 1 }, $"level={resetGun?.Level}");
+}
+
+if (scenario == "equip")
+{
+    // Costumes, costume parts and weapon mods (accessories) must survive a new login: they used to be echoed and lost.
+    main.Send(new CS_Guns());
+    var equipGuns = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).ToList();
     uint equipGun = equipGuns.Select(g => g.Id).FirstOrDefault(id => id == 1017);
     Check("equip: the starter character 1017 exists", equipGun == 1017);
 
@@ -1874,21 +1889,6 @@ if (scenario == "equip")
     main.Send(new CS_GunWeapons());
     var equipWeapon = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(m => m.Weapons.Where(w => m.FEDCFGGDNBN.GetValueOrDefault(w.Id) == 1017u)).FirstOrDefault();
     Check("equip: the account has a weapon of 1017 and two mods", equipWeapon is not null && equipMods.Count == 2, $"weapon={equipWeapon?.Id} mods={equipMods.Count}");
-    if (equipWeapon is not null && equipMods.Count == 2)
-    {
-        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 1, WeaponModId = equipMods[0].Id });
-        Check("equip: a mod goes into slot 1", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.WeaponId == equipWeapon.Id && b.Slot == 1 && b.WeaponModId == equipMods[0].Id));
-        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[1].Id });
-        main.ReadFor(TimeSpan.FromSeconds(2));
-        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[0].Id });
-        var moved = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().ToList();
-        Check("equip: moving the first mod to slot 2 frees slot 1 and takes the second mod out",
-            moved.Any(b => b.WeaponId == 0 && b.Slot == 1 && b.WeaponModId == equipMods[0].Id) && moved.Any(b => b.WeaponId == 0 && b.Slot == 2 && b.WeaponModId == equipMods[1].Id)
-            && moved.Any(b => b.WeaponId == equipWeapon.Id && b.Slot == 2 && b.WeaponModId == equipMods[0].Id), $"answers={moved.Count}");
-        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id });
-        Check("equip: the red button \"unequip all\" (no slot, no mod) frees the equipped mods slot by slot",
-            main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.Slot == 2 && b.WeaponModId == 0));
-        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[0].Id });
     // A-88: field 5 of a weapon is its skin (0 until one is chosen) and survives a new list
     Check("equip: a weapon starts without a skin", equipWeapon is not null && equipWeapon.GunId == 0, $"skin={equipWeapon?.GunId}");
     if (equipWeapon is not null)
@@ -1909,6 +1909,21 @@ if (scenario == "equip")
         main.Send(new CS_ReplaceGunWeaponSkin { Id = equipWeapon.Id, GunId = 0 });
         main.ReadFor(TimeSpan.FromSeconds(1));
     }
+    if (equipWeapon is not null && equipMods.Count == 2)
+    {
+        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 1, WeaponModId = equipMods[0].Id });
+        Check("equip: a mod goes into slot 1", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.WeaponId == equipWeapon.Id && b.Slot == 1 && b.WeaponModId == equipMods[0].Id));
+        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[1].Id });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[0].Id });
+        var moved = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().ToList();
+        Check("equip: moving the first mod to slot 2 frees slot 1 and takes the second mod out",
+            moved.Any(b => b.WeaponId == 0 && b.Slot == 1 && b.WeaponModId == equipMods[0].Id) && moved.Any(b => b.WeaponId == 0 && b.Slot == 2 && b.WeaponModId == equipMods[1].Id)
+            && moved.Any(b => b.WeaponId == equipWeapon.Id && b.Slot == 2 && b.WeaponModId == equipMods[0].Id), $"answers={moved.Count}");
+        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id });
+        Check("equip: the red button \"unequip all\" (no slot, no mod) frees the equipped mods slot by slot",
+            main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.Slot == 2 && b.WeaponModId == 0));
+        main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[0].Id });
         main.ReadFor(TimeSpan.FromSeconds(2));
     }
 
@@ -2033,12 +2048,16 @@ if (scenario is "all" or "restored")
         dormSkin?.Info?.PIOFFPPPEPK.GetValueOrDefault(1017u)?.PPMIBJEJABD == 1101703u && dormSkin.GDJOKNOBNBM.GetValueOrDefault(1101703u) == 273u,
         $"costume={dormSkin?.Info?.PIOFFPPPEPK.GetValueOrDefault(1017u)?.PPMIBJEJABD} parts={dormSkin?.GDJOKNOBNBM.GetValueOrDefault(1101703u)}");
 
-    // Lobby part: refused without its price (item 202 x50), unlocked and reported by the build info once paid
-    main.Send(new CS_LobbyUnlockPart { EGINIIGDCBO = 10410 });
-    Check("restored: unlocking a lobby part without its price is refused (ItemNotEnough)",
-        main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -10015));
-    main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
-    main.ReadFor(TimeSpan.FromSeconds(8));
+    // This negative-price assertion is only valid in the focused, clean `restored` account. The integrated `all`
+    // scenario has already provisioned table items for progression earlier, so it must not expect item 202 to be absent.
+    if (scenario == "restored")
+    {
+        main.Send(new CS_LobbyUnlockPart { EGINIIGDCBO = 10410 });
+        Check("restored: unlocking a lobby part without its price is refused (ItemNotEnough)",
+            main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -10015));
+        main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
+        main.ReadFor(TimeSpan.FromSeconds(8));
+    }
     main.Send(new CS_LobbyUnlockPart { EGINIIGDCBO = 10410 });
     var partMsgs = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
     main.Send(new CS_LobbyGetBuildInfo());
@@ -2057,10 +2076,10 @@ if (scenario is "all" or "restored")
 
 if (scenario is "all" or "dorm")
 {
-    // U-07: the dorm interaction cache and the level achievement are separate state. 410451 is a real
-    // action/achievement key in DormFormationData/CharacterDailyData for Gun 1045; buying it must survive
-    // both the dorm-formation query and a reconnect (a daily-info response alone does not populate this cache).
-    const uint dormAction = 410451;
+    // U-07: the dorm interaction cache and the level achievement are separate state. 101703 is an actual
+    // DormFormationData action row for Gun 1017; its separate level gate is achievement 410171. Buying
+    // the action must survive both the dorm-formation query and reconnect (daily-info alone is not enough).
+    const uint dormAction = 101703;
     main.Send(new CS_BuyGunPerformance { HLKFJHBHEDC = dormAction });
     var boughtAction = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_BuyGunPerformance>().FirstOrDefault();
     Check("dorm: interaction purchase is acknowledged", boughtAction?.HLKFJHBHEDC == dormAction);
@@ -2233,7 +2252,7 @@ if (scenario is "all" or "dorm")
     again.Send(new CS_GetDormFormationInfo());
     var formationInfo = again.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetDormFormationInfo>().FirstOrDefault();
     Check("dorm: purchased interaction remains unlocked after reconnect",
-        formationInfo?.AHFNBKINDGB.TryGetValue(410451u, out bool actionBought) == true && actionBought,
+        formationInfo?.AHFNBKINDGB.TryGetValue(101703u, out bool actionBought) == true && actionBought,
         $"keys={string.Join(',', formationInfo?.AHFNBKINDGB.Keys ?? [])}");
 }
 if (scenario is "all" or "formation")
