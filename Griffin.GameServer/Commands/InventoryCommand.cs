@@ -297,7 +297,7 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
         SC_GunWeapons response = new();
         foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(accountUid))
         {
-            response.Weapons.Add(weapon.ToProtoWeapon());
+            response.Weapons.Add(weapon.ToProtoWeapon(WeaponModSkins.Of(accountState, accountUid, weapon.Id)));
 
             if (weapon.GunId != 0)
                 response.FEDCFGGDNBN[weapon.Id] = weapon.GunId;

@@ -567,7 +567,7 @@ if (scenario is "all" or "weapon")
     }
     main.Send(new CS_GunWeapons());
     var after = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().FirstOrDefault();
-    var loose = after?.Weapons.Where(w => w.StcId == 11016 && w.GunId == 0).OrderByDescending(w => w.Id).Take(2).ToList() ?? [];
+    var loose = after?.Weapons.Where(w => w.StcId == 11016 && !after.FEDCFGGDNBN.ContainsKey(w.Id)).OrderByDescending(w => w.Id).Take(2).ToList() ?? [];
     Check("weapon: two loose copies of weapon 11016 are available", loose.Count == 2);
     if (loose.Count == 2)
     {
@@ -714,6 +714,10 @@ if (scenario == "stage")
     // The client puts the first 5 skill ids in the main list and looks the rest up in BattleSkillData without a null check (crash of the 16:14 battle).
     List<uint> StgSkills(byte[] gun)
     {
+    // A-90: the team of the last battle is offered again by the deployment screen
+    main.Send(new CS_StageUsableGuns { StageId = 10101 });
+    var stgLastTeam = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_StageUsableGuns>().FirstOrDefault();
+    Check("stage: the deployment screen gets the remembered team of the last battle", stgLastTeam is not null && stgLastTeam.Lineup.ToList().SequenceEqual(new uint[] { 1017, 1008 }), $"lineup={string.Join(',', stgLastTeam?.Lineup ?? [])}");
         var ids = new List<uint>();
         foreach (var packed in StgFields(StgFields(gun, 11).FirstOrDefault() ?? [], 6))
         {
@@ -850,7 +854,7 @@ if (scenario == "stage")
     var powerMods = main.ReadFor(TimeSpan.FromSeconds(8)).Select(p => p.Message).OfType<SC_GunWeaponMods>().SelectMany(m => m.Mods).Where(m => m.ModSuitPowerId != 0).ToList();
     Check("mods: the class-3 mods of rank 4 and 5 carry the effect id of their power (1..16, valid in ModPowerData and ModPowerEffectData) in field 4", powerMods.Count >= 300 && powerMods.All(m => m.ModSuitPowerId is >= 1 and <= 16), $"powered={powerMods.Count}");
     main.Send(new CS_GunWeapons());
-    var powerWeapon = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(w => w.Weapons).FirstOrDefault(w => w.GunId == 1017);
+    var powerWeapon = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(m => m.Weapons.Where(w => m.FEDCFGGDNBN.GetValueOrDefault(w.Id) == 1017u)).FirstOrDefault();
     if (powerWeapon is not null && powerMods.Count > 0)
     {
         main.Send(new CS_GunWeaponModBelong { WeaponId = powerWeapon.Id, Slot = 1, WeaponModId = powerMods[0].Id });
@@ -1824,6 +1828,31 @@ if (scenario == "equip")
     // Costumes, costume parts and weapon mods (accessories) must survive a new login: they used to be echoed and lost.
     main.Send(new CS_Guns());
     var equipGuns = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).ToList();
+    // Existing accounts may have uploaded the captured blob with field 9 = 1. Migrate that
+    // saved value once, then preserve a later explicit user choice instead of forcing it on every read.
+    main.Send(new CS_ClientDataUpload { Data = ByteString.CopyFrom([0x48, 0x01]) });
+    var uploadAck = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ClientDataUpload>().FirstOrDefault();
+    Check("cutscene: an existing client-data blob upload is acknowledged", uploadAck is not null);
+    main.Send(new CS_ClientDataGet());
+    var migratedData = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ClientDataGet>().FirstOrDefault();
+    uint migratedBarrackSkip = 99;
+    if (migratedData is not null)
+    {
+        var cr = new CodedInputStream(migratedData.Data.ToByteArray()); uint ct;
+        while ((ct = cr.ReadTag()) != 0) { if ((ct >> 3) == 9 && (ct & 7) == 0) migratedBarrackSkip = cr.ReadUInt32(); else cr.SkipLastField(); }
+    }
+    Check("cutscene: a saved skip value is migrated to always play", migratedBarrackSkip == 2, $"BarrackSkipKey={migratedBarrackSkip}");
+    main.Send(new CS_ClientDataUpload { Data = ByteString.CopyFrom([0x48, 0x01]) });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_ClientDataGet());
+    var userChoiceData = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ClientDataGet>().FirstOrDefault();
+    uint userBarrackSkip = 99;
+    if (userChoiceData is not null)
+    {
+        var cr = new CodedInputStream(userChoiceData.Data.ToByteArray()); uint ct;
+        while ((ct = cr.ReadTag()) != 0) { if ((ct >> 3) == 9 && (ct & 7) == 0) userBarrackSkip = cr.ReadUInt32(); else cr.SkipLastField(); }
+    }
+    Check("cutscene: a later user setting is not overwritten by the one-time migration", userBarrackSkip == 1, $"BarrackSkipKey={userBarrackSkip}");
     uint equipGun = equipGuns.Select(g => g.Id).FirstOrDefault(id => id == 1017);
     Check("equip: the starter character 1017 exists", equipGun == 1017);
 
@@ -1843,7 +1872,7 @@ if (scenario == "equip")
     main.Send(new CS_GunWeaponMods());
     var equipMods = main.ReadFor(TimeSpan.FromSeconds(8)).Select(p => p.Message).OfType<SC_GunWeaponMods>().SelectMany(m => m.Mods).Take(2).ToList();
     main.Send(new CS_GunWeapons());
-    var equipWeapon = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(w => w.Weapons).FirstOrDefault(w => w.GunId == 1017);
+    var equipWeapon = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(m => m.Weapons.Where(w => m.FEDCFGGDNBN.GetValueOrDefault(w.Id) == 1017u)).FirstOrDefault();
     Check("equip: the account has a weapon of 1017 and two mods", equipWeapon is not null && equipMods.Count == 2, $"weapon={equipWeapon?.Id} mods={equipMods.Count}");
     if (equipWeapon is not null && equipMods.Count == 2)
     {
@@ -1860,6 +1889,26 @@ if (scenario == "equip")
         Check("equip: the red button \"unequip all\" (no slot, no mod) frees the equipped mods slot by slot",
             main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponModBelong>().Any(b => b.Slot == 2 && b.WeaponModId == 0));
         main.Send(new CS_GunWeaponModBelong { WeaponId = equipWeapon.Id, Slot = 2, WeaponModId = equipMods[0].Id });
+    // A-88: field 5 of a weapon is its skin (0 until one is chosen) and survives a new list
+    Check("equip: a weapon starts without a skin", equipWeapon is not null && equipWeapon.GunId == 0, $"skin={equipWeapon?.GunId}");
+    if (equipWeapon is not null)
+    {
+        main.Send(new CS_ReplaceGunWeaponSkin { Id = equipWeapon.Id, GunId = 3111593 });
+        Check("equip: replacing the skin is answered with weapon and skin", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReplaceGunWeaponSkin>().Any(r => r.Id == equipWeapon.Id && r.GunId == 3111593));
+        main.Send(new CS_GunWeapons());
+        var skinned = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(m => m.Weapons).FirstOrDefault(w => w.Id == equipWeapon.Id);
+        Check("equip: the chosen skin is kept in the weapon list", skinned?.GunId == 3111593, $"skin={skinned?.GunId}");
+        // A-89: the accessory skin of a slot travels in field 2 of the positional mod entries
+        main.Send(new CS_ReplaceGunWeaponModSkin { Id = equipWeapon.Id, GunId = 3211001, DPMKGPOCIOK = 2 });
+        Check("equip: replacing an accessory skin is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReplaceGunWeaponModSkin>().Any(r => r.Id == equipWeapon.Id && r.GunId == 3211001 && r.DPMKGPOCIOK == 2));
+        main.Send(new CS_GunWeapons());
+        var modSkinned = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(m => m.Weapons).FirstOrDefault(w => w.Id == equipWeapon.Id);
+        Check("equip: the accessory skin is kept in slot 2 of the weapon", modSkinned is not null && modSkinned.WeaponMods.Count >= 2 && modSkinned.WeaponMods[1].GunId == 3211001, $"mods={modSkinned?.WeaponMods.Count}");
+        main.Send(new CS_ReplaceGunWeaponModSkin { Id = equipWeapon.Id, GunId = 0, DPMKGPOCIOK = 2 });
+        main.ReadFor(TimeSpan.FromSeconds(1));
+        main.Send(new CS_ReplaceGunWeaponSkin { Id = equipWeapon.Id, GunId = 0 });
+        main.ReadFor(TimeSpan.FromSeconds(1));
+    }
         main.ReadFor(TimeSpan.FromSeconds(2));
     }
 
@@ -1870,8 +1919,8 @@ if (scenario == "equip")
     Check("equip: after a new login character 1017 still wears costume 1101701 with parts 273", gunAfter is not null && gunAfter.Costume == 1101701 && gunAfter.CostumeParts == 273,
         $"costume={gunAfter?.Costume} parts={gunAfter?.CostumeParts}");
     equipAgain.Send(new CS_GunWeapons());
-    var weaponAfter = equipAgain.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(w => w.Weapons).FirstOrDefault(w => w.GunId == 1017);
-    Check("equip: after a new login the weapon keeps exactly the mod put in slot 2", weaponAfter is not null && equipMods.Count == 2 && weaponAfter.WeaponMods.Count == 1 && weaponAfter.WeaponMods[0].Id == equipMods[0].Id,
+    var weaponAfter = equipAgain.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().SelectMany(m => m.Weapons.Where(w => m.FEDCFGGDNBN.GetValueOrDefault(w.Id) == 1017u)).FirstOrDefault();
+    Check("equip: after a new login the weapon keeps exactly the mod put in slot 2", weaponAfter is not null && equipMods.Count == 2 && weaponAfter.WeaponMods.Count == 2 && weaponAfter.WeaponMods[0].Id == 0 && weaponAfter.WeaponMods[1].Id == equipMods[0].Id,
         $"mods={weaponAfter?.WeaponMods.Count}");
     equipAgain.Dispose();
 }
