@@ -309,9 +309,9 @@ namespace Griffin.GameServer.Handlers
                 Info = new IGHEKKLGNLA()
                 {
                     IAPDLJKLLNM = 1,
-                    OpenTime = 1779500060,
+                    OpenTime = connection.GameClockSeconds() - 18800,
                     HNAKPBEGGFK = 3,
-                    HPABIPEOBKN = 1779518860,
+                    HPABIPEOBKN = connection.GameClockSeconds(),
                     IEHFGOMCBCN = false,
                     CJOINHJCPII = 0,
                     CheckinDone = false,
@@ -937,12 +937,12 @@ namespace Griffin.GameServer.Handlers
             // left until the guaranteed 5-star, the number the banner shows). Before this the counters restarted at every login.
             foreach (GachaData banner in tableService.GetTable<GachaData>())
             {
-                if (accountState.Get<GachaPity>(account.Uid, $"gacha.pity.{banner.Id}") is not { Total: > 0 } pity)
-                    continue;
-
-                scRecord.Limit[banner.Id] = (uint)pity.Total;
+                // A banner never pulled counts its whole pity (the banner showed "0 pulls to the guaranteed orange" because only used banners had an entry; A-100)
+                GachaPity? pity = accountState.Get<GachaPity>(account.Uid, $"gacha.pity.{banner.Id}");
+                if (pity is { Total: > 0 })
+                    scRecord.Limit[banner.Id] = (uint)pity.Total;
                 if (banner.SsrTimes > 0)
-                    scRecord.Guarantee[banner.Id] = (uint)Math.Max(0, (int)banner.SsrTimes - pity.SinceSsr);
+                    scRecord.Guarantee[banner.Id] = (uint)Math.Max(0, (int)banner.SsrTimes - (pity?.SinceSsr ?? 0));
             }
 
             connection.Send(scRecordStatisticUpdate);

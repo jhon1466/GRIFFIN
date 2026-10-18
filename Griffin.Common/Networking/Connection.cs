@@ -33,9 +33,15 @@ namespace Griffin.Common.Networking
             if (ServerTimeOverride is { } forced)
                 return forced >= 100_000_000_000L ? forced / 1000 : forced;
 
-            return GameClockBase + (long)(DateTime.UtcNow - ConnectedAtUtc).TotalSeconds;
+            // The REAL time by default (A-99): the clock was frozen at 2026-05-23 (GameClockBase), so the client, which decides what is open from its own tables
+            // and this clock, showed the events and banners of that date instead of the current ones. GRIFFIN_GAME_CLOCK_BASE (unix seconds) restores a frozen start.
+            if (long.TryParse(Environment.GetEnvironmentVariable("GRIFFIN_GAME_CLOCK_BASE"), out long frozen) && frozen > 0)
+                return frozen + (long)(DateTime.UtcNow - ConnectedAtUtc).TotalSeconds;
+
+            return DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         }
 
+        /// <summary>The old frozen start of the clock (2026-05-23); only the initial stamina refresh time still uses it.</summary>
         public const long GameClockBase = 1779518860;
 
         private readonly NetworkStream _stream = client.GetStream();
