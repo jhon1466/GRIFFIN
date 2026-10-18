@@ -1,5 +1,6 @@
 ﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
+using Griffin.Common.Table;
 using Griffin.Common.Protocol;
 using Griffin.Database.Entities;
 using Griffin.Database.Repositories;
@@ -15,14 +16,217 @@ namespace Griffin.GameServer.Handlers
         IWeaponProgressService progress,
         IWeaponModService weaponMods,
         IModProgressService modProgress,
-        IAccountStateService accountState) : GunWeaponHandlerBase
+        IAccountStateService accountState,
+        ITableService tableService,
+        IItemUseService itemUse) : GunWeaponHandlerBase
     {
-        // Mod polarization and the skin shop for weapons are not simulated: the answers are the client's own refusals.
-        public override void HandleGunWeaponModPolarization(CS_GunWeaponModPolarization request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsGunWeaponModPolarization, HNINDAOJCKP.GunWeaponModCanNotPolarity);
+        private const uint GoldItem = 2;
 
-        public override void HandleGunWeaponModContinuouslyPolarization(CS_GunWeaponModContinuouslyPolarization request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsGunWeaponModContinuouslyPolarization, HNINDAOJCKP.GunWeaponModContinuousLyPolarityCanNotStart);
+        /// <summary>
+        /// The only way the 4.0.5136 client levels a mod up (<c>CS_GunWeaponModLvUp</c> is never sent): fodder (mods in <c>materials</c>, upgrade items in
+        /// <c>items</c>) raises the level as before and <c>FKBCLPBCILC</c> = N amplifies N affixes of a mod at its last level (A-78): it costs N times the
+        /// amplification item and gold, rolls a polarity for N affixes, keeps a backup so that the player can redo or confirm it (<c>CS_WeaponModPolarityRollBack</c>)
+        /// and answers with the mod after the level push.
+        /// </summary>
+        public override void HandleGunWeaponModPolarization(CS_GunWeaponModPolarization request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                WeaponModEntity? mod = inventoryService.GetPlayerInventory<WeaponModEntity>(uid).FirstOrDefault(m => m.Id == request.Id);
+                if (mod is null)
+                {
+                    connection.Refuse(MsgId.MsgCsGunWeaponModPolarization, HNINDAOJCKP.GunWeaponModNotFound);
+                    return;
+                }
+
+                void Refuse(HNINDAOJCKP error) => connection.Refuse(MsgId.MsgCsGunWeaponModPolarization, error);
+                uint n = request.FKBCLPBCILC;
+                uint rank = ModPolarity.Rank(tableService, mod.WeaponModId);
+                if (!ModPolarity.CanPolarize(tableService, mod.WeaponModId))
+                {
+                    Refuse(HNINDAOJCKP.ThisRankModHaveNotPolarityItem);
+                    return;
+                }
+
+                int affixCount = ModPolarity.AffixCount(mod.Field7);
+                if (n > affixCount || affixCount == 0)
+                {
+                    Refuse(HNINDAOJCKP.ClientInputInvalid);
+                    return;
+                }
+
+                // The panel's button "精调" (client screenshot: material 5000/5000, gold 20000): the fodder has to reach 1500 (rank 4) or 5000 (rank 5) experience, which costs
+                // 3000 / 20000 gold (the community wiki: military 1500 + 3000, precision 5000 + 20000); N extra amplification items (N x 131002 + N x 8000 gold) are optional
+                long need = rank >= 5 ? 5000 : 1500;
+                long gold = rank >= 5 ? 20000 : 3000;
+                (uint item, uint count) = ModPolarity.AmplifyItem(tableService);
+                Dictionary<uint, int> extra = new() { [GoldItem] = (int)(gold + ModPolarity.AmplifyGold(tableService) * n) };
+                if (n > 0)
+                    extra[item] = (int)(count * n);
+                List<Google.Protobuf.IMessage> messages = [];
+                if (!modProgress.ConsumeFodder(uid, mod.Id, request.Materials, request.Items.ToDictionary(p => p.Key, p => p.Value), need, extra, messages))
+                {
+                    Refuse(modProgress.LastError);
+                    return;
+                }
+
+                // every roll is a random polarity for all the affixes; with N amplification items the better of N + 1 rolls is kept; the previous state is kept for "redo"
+                ModRefineState refine = ModPolarity.Get(accountState, uid, mod.Id);
+                refine.HasBackup = true;
+                refine.BackupPolarity = refine.Polarity;
+                refine.BackupCount = refine.Count;
+                ulong best = 0;
+                long bestSum = -1;
+                for (int roll = 0; roll <= n; roll++)
+                {
+                    ulong bits = ModPolarity.Roll(tableService, mod.WeaponModId, mod.Field7, affixCount, Random.Shared);
+                    long sum = Enumerable.Range(0, 4).Sum(slot => (long)ModPolarity.PermilleOf(bits, slot));
+                    if (sum > bestSum)
+                    {
+                        best = bits;
+                        bestSum = sum;
+                    }
+                }
+
+                refine.Polarity = best;
+                ModPolarity.Set(accountState, uid, mod.Id, refine);
+                weaponMods.Save();
+                // the client builds a NEW mod object from the answer (level 1): the level push goes AFTER it (A-82)
+                messages.Add(new SC_GunWeaponModPolarization { Id = mod.Id, Mod = ModPolarity.ToProto(tableService, accountState, uid, mod), FKBCLPBCILC = n });
+                messages.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
+                connection.SendAutoEncrypted(messages.ToArray());
+            }
+        }
+
+        /// <summary>
+        /// Continuous polarization (rank 5): every round of the request consumes its fodder and rolls one set of polarities for the mod; the polarity bits of every
+        /// round come back and the player keeps one of them with <c>ContinuouslyPolarizationSelect</c> (an index, -1 = none). A polarized mod re-rolls the polarity of the
+        /// affixes it already has, an unpolarized one polarizes the N affixes of the round. The experience a round needs is the one the mod is worth as a material (A-78).
+        /// </summary>
+        public override void HandleGunWeaponModContinuouslyPolarization(CS_GunWeaponModContinuouslyPolarization request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                WeaponModEntity? mod = inventoryService.GetPlayerInventory<WeaponModEntity>(uid).FirstOrDefault(m => m.Id == request.Id);
+                if (mod is null)
+                {
+                    connection.Refuse(MsgId.MsgCsGunWeaponModContinuouslyPolarization, HNINDAOJCKP.GunWeaponModNotFound);
+                    return;
+                }
+
+                void Refuse(HNINDAOJCKP error) => connection.Refuse(MsgId.MsgCsGunWeaponModContinuouslyPolarization, error);
+                if (ModPolarity.Rank(tableService, mod.WeaponModId) < 5 || !ModPolarity.CanPolarize(tableService, mod.WeaponModId))
+                {
+                    Refuse(HNINDAOJCKP.GunWeaponModContinuousLyPolarityLowRank);
+                    return;
+                }
+
+                if (request.JFMFOHAHOBL.Count == 0)
+                {
+                    Refuse(HNINDAOJCKP.ClientInputInvalid);
+                    return;
+                }
+
+                ModRefineState refine = ModPolarity.Get(accountState, uid, mod.Id);
+                bool polarized = ModPolarity.Polarized(refine.Polarity);
+                (uint amplifyItem, uint amplifyCount) = ModPolarity.AmplifyItem(tableService);
+                uint amplifyGold = ModPolarity.AmplifyGold(tableService);
+                long minExp = ModPolarity.BaseExp(tableService, mod.WeaponModId);
+                int affixCount = ModPolarity.AffixCount(mod.Field7);
+                ulong rolledAffixes = polarized ? PolarizedAffixes(refine.Polarity, mod.Field7) : mod.Field7;
+                List<Google.Protobuf.IMessage> messages = [];
+                List<ulong> candidates = [];
+                foreach (DDFNNIBCBND round in request.JFMFOHAHOBL)
+                {
+                    uint n = round.FKBCLPBCILC;
+                    if ((!polarized && n == 0) || n > affixCount)
+                    {
+                        Refuse(HNINDAOJCKP.ClientInputInvalid);
+                        return;
+                    }
+
+                    Dictionary<uint, int> extra = new() { [GoldItem] = (int)(minExp * modProgress.GoldPerExp() + amplifyGold * n) };
+                    if (n > 0)
+                        extra[amplifyItem] = (int)(amplifyCount * n);
+                    if (!modProgress.ConsumeFodder(uid, mod.Id, round.Materials, round.Items.ToDictionary(p => p.Key, p => p.Value), minExp, extra, messages))
+                    {
+                        // rounds already paid stay paid; the refusal only ends the series
+                        if (candidates.Count == 0)
+                        {
+                            Refuse(modProgress.LastError);
+                            return;
+                        }
+
+                        break;
+                    }
+
+                    candidates.Add(ModPolarity.Roll(tableService, mod.WeaponModId, rolledAffixes, polarized ? ModPolarity.AffixCount(rolledAffixes) : (int)n, Random.Shared));
+                }
+
+                refine.Candidates = candidates;
+                refine.CandidateBase = refine.Polarity;
+                ModPolarity.Set(accountState, uid, mod.Id, refine);
+                weaponMods.Save();
+                SC_GunWeaponModContinuouslyPolarization response = new() { Id = mod.Id };
+                response.GENGCMEPHFM.AddRange(candidates);
+                messages.Add(response);
+                connection.SendAutoEncrypted(messages.ToArray());
+            }
+        }
+
+        /// <summary>The affixes that carry polarity (their 16-bit slot of <paramref name="affixes"/>, the other slots empty) so that a re-roll keeps the same affixes.</summary>
+        private static ulong PolarizedAffixes(ulong polarity, ulong affixes)
+        {
+            ulong mask = 0;
+            for (int slot = 0; slot < 4; slot++)
+                if (((polarity >> (slot * 16)) & 0xFFF) != 0)
+                    mask |= 0xFFFFUL << (slot * 16);
+            return affixes & mask;
+        }
+
+        public override void HandleGunWeaponModContinuouslyPolarizationSelect(CS_GunWeaponModContinuouslyPolarizationSelect request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                WeaponModEntity? mod = inventoryService.GetPlayerInventory<WeaponModEntity>(uid).FirstOrDefault(m => m.Id == request.Id);
+                if (mod is null)
+                {
+                    connection.Refuse(MsgId.MsgCsGunWeaponModContinuouslyPolarizationSelect, HNINDAOJCKP.GunWeaponModNotFound);
+                    return;
+                }
+
+                ModRefineState refine = ModPolarity.Get(accountState, uid, mod.Id);
+                int index = request.LMLFNAACPPN;
+                if (refine.Candidates.Count == 0 || index >= refine.Candidates.Count)
+                {
+                    connection.Refuse(MsgId.MsgCsGunWeaponModContinuouslyPolarizationSelect, HNINDAOJCKP.GunWeaponModContinuousLyPolarityCanNotSelect);
+                    return;
+                }
+
+                if (index >= 0)
+                    refine.Polarity = refine.Candidates[index];
+                refine.Candidates = [];
+                ModPolarity.Set(accountState, uid, mod.Id, refine);
+                connection.SendAutoEncrypted<Google.Protobuf.IMessage>(
+                [
+                    new SC_GunWeaponModContinuouslyPolarizationSelect { Id = mod.Id, LMLFNAACPPN = index },
+                    new SC_WeaponModAdvanceEnhance { Mod = ModPolarity.ToProto(tableService, accountState, uid, mod) },
+                    new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 },
+                ]);
+            }
+        }
 
         public override void HandleBuyGunWeaponSkin(CS_BuyGunWeaponSkin request, Connection connection) =>
             connection.Refuse(MsgId.MsgCsBuyGunWeaponSkin, HNINDAOJCKP.WeaponSkinHasNoRequiredItem);
@@ -285,12 +489,17 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account == null) return;
 
-            WeaponModEntity[] mods = inventoryService.GetPlayerInventory<WeaponModEntity>(connection.Account.Uid);
+            // mods created before the affixes existed get them here too (the list is what the client builds its panels from)
+            WeaponModEntity[] mods = weaponMods.GetPlayerWeaponMods(connection.Account.Uid);
             SC_GunWeaponMods response = new SC_GunWeaponMods();
             foreach (WeaponModEntity mod in mods)
-                response.Mods.Add(mod.ToProtoWeaponMod());
+                response.Mods.Add(ModPolarity.ToProto(tableService, accountState, connection.Account.Uid, mod));
 
-            connection.SendAutoEncrypted(response);
+            // the client creates every mod at level 1 without experience (the list has no field for them) and takes the real ones from this push (A-74)
+            List<Google.Protobuf.IMessage> batch = [response];
+            foreach (WeaponModEntity mod in mods.Where(m => m.Level > 1 || m.Field6 > 0))
+                batch.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
+            connection.SendAutoEncrypted(batch.ToArray());
         }
 
         public override void HandleGunWeaponSkinItems(CS_GunWeaponSkinItems request, Connection connection)
@@ -308,17 +517,27 @@ namespace Griffin.GameServer.Handlers
             connection.Send(response);
         }
 
+        /// <summary>The pending continuous polarization (a mod with unchosen candidates), or an empty state.</summary>
         public override void HandleGunWeaponModGetContinuouslyPolarization(CS_GunWeaponModGetContinuouslyPolarization request, Connection connection)
         {
-                connection.Send(new SC_GunWeaponModGetContinuouslyPolarization
+            GEDLLJGMIED state = new();
+            if (connection.Account is not null)
+            {
+                uint uid = connection.Account.Uid;
+                foreach (WeaponModEntity mod in inventoryService.GetPlayerInventory<WeaponModEntity>(uid))
                 {
-                    NHJFCEMIPEO = new GEDLLJGMIED
-                    {
-                        AMKICOIHKPD = 0,
-                        DDGMKANMOLN = 0,
-                        GENGCMEPHFM = { },
-                    },
-                });
+                    ModRefineState refine = ModPolarity.Get(accountState, uid, mod.Id);
+                    if (refine.Candidates.Count == 0)
+                        continue;
+
+                    state.AMKICOIHKPD = mod.Id;
+                    state.DDGMKANMOLN = refine.CandidateBase;
+                    state.GENGCMEPHFM.AddRange(refine.Candidates);
+                    break;
+                }
+            }
+
+            connection.Send(new SC_GunWeaponModGetContinuouslyPolarization { NHJFCEMIPEO = state });
         }
 
         public override void HandleReplaceGunWeaponSkin(CS_ReplaceGunWeaponSkin request, Connection connection)
@@ -376,6 +595,23 @@ namespace Griffin.GameServer.Handlers
                     connection.Refuse(MsgId.MsgCsGunWeaponModBelong, HNINDAOJCKP.GunWeaponNotFound);
                     return;
                 }
+                if (request.Slot == 0)
+                {
+                    // "unequip everything" (the red button of the parts panel): the request carries no slot
+                    List<SC_GunWeaponModBelong> cleared = [];
+                    for (int index = 0; index < target.EquippedModIds.Length; index++)
+                        if (target.EquippedModIds[index] != 0)
+                        {
+                            Unequip(target, index);
+                            cleared.Add(new SC_GunWeaponModBelong { WeaponId = target.Id, Slot = (uint)index + 1, WeaponModId = 0 });
+                        }
+
+                    weaponRepository.SaveChanges();
+                    if (cleared.Count > 0)
+                        connection.SendAutoEncrypted(cleared.ToArray());
+                    return;
+                }
+
                 if (request.Slot is < 1 or > 8)
                 {
                     connection.Refuse(MsgId.MsgCsGunWeaponModBelong, HNINDAOJCKP.GunWeaponModNotMatchWithSlot);

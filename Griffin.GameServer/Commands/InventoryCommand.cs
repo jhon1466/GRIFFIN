@@ -8,7 +8,7 @@ using Griffin.GameServer.Services;
 namespace Griffin.GameServer.Commands;
 
 [Command("inventory", "Gestiona el inventario del jugador", "inventory addall [type] | inventory provision", CommandSource.Client)]
-public sealed class InventoryCommand(IInventoryService inventoryService, ITableService tableService, IProvisioningService provisioning) : ICommand
+public sealed class InventoryCommand(IInventoryService inventoryService, ITableService tableService, IProvisioningService provisioning, IAccountStateService accountState) : ICommand
 {
     private const int ItemsPerResponse = 7000;
 
@@ -310,7 +310,7 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
     {
         SC_GunWeaponMods response = new();
         foreach (WeaponModEntity mod in inventoryService.GetPlayerInventory<WeaponModEntity>(accountUid))
-            response.Mods.Add(mod.ToProtoWeaponMod());
+            response.Mods.Add(ModPolarity.ToProto(tableService, accountState, accountUid, mod));
 
         return response;
     }

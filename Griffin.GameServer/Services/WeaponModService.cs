@@ -19,14 +19,19 @@ namespace Griffin.GameServer.Services
 
             var newMods = modData
                 .Where(d => d.Id != 0 && !existingModIds.Contains(d.Id))
-                .Select(d => new WeaponModEntity
+                .Select(d =>
                 {
-                    WeaponModId = d.Id,
-                    Uid = GenerateUid(),
-                    Level = 0,
-                    Field5 = 0,
-                    Field6 = 0,
-                    Field7 = 0,
+                    ulong uid = GenerateUid();
+                    return new WeaponModEntity
+                    {
+                        WeaponModId = d.Id,
+                        Uid = uid,
+                        Level = 0,
+                        Field5 = 0,
+                        Field6 = 0,
+                        // the affixes of the mod (A-74): Field7 holds the four 16-bit pairs the client reads from GunWeaponMod field 3
+                        Field7 = ModAffixes.Roll(tableService, d.Id, uid),
+                    };
                 })
                 .ToList();
 
@@ -38,6 +43,10 @@ namespace Griffin.GameServer.Services
         {
             var account = accountService.GetByUid(accountUid)
                 ?? throw new InvalidOperationException($"Account with uid '{accountUid}' was not found.");
+            // mods created before the affixes existed get them now (once)
+            if (ModAffixes.Ensure(tableService, account.WeaponMods))
+                weaponModRepository.SaveChanges();
+
             return account.WeaponMods.ToArray();
         }
 

@@ -1,11 +1,12 @@
 ﻿using Griffin.Common.Proto;
 using Griffin.Database.Entities;
+using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Extensions;
 
 public static class ProtoExtensions
 {
-    public static Gun ToProtoGunCharacter(this GunEntity gun, IReadOnlyList<ulong>? pluginSlots = null)
+    public static Gun ToProtoGunCharacter(this GunEntity gun, IReadOnlyList<ulong>? pluginSlots = null, ulong foodBytes = 0)
     {
         ArgumentNullException.ThrowIfNull(gun);
 
@@ -32,12 +33,16 @@ public static class ProtoExtensions
             {
                 KFIAKLNJHMB = gun.LoveLevel,
                 ABOJJOJODME = gun.LoveExp,
+                // the vow (level 9): the client reads the flag (field 4) for the vow icon and its red dot, and the time (field 5) of the ceremony (A-73)
+                APPPIAJDHLD = gun.LoveLevel >= Handlers.LoveHandler.VowLevel,
+                PCPEAMOJPCF = gun.GunTalentConsume.GetValueOrDefault(Handlers.LoveHandler.VowTimeKey),
             },
         };
 
         // peak keys (峰位键) have their own slots in the middle of the wheel (field 52), not in the private ones (A-61)
         uint[] peakKeys = Services.TalentKeySlots.Normalize(gun);
         proto.NJKHKDCNJPK.AddRange(peakKeys);
+        proto.HEENBCJCHFG = foodBytes;   // the points of the dishes given to the character (field 61, A-76)
         proto.PrivateTalentSkillItems.AddRange(gun.PrivateTalentSkillItems);
         proto.PublicTalentSkillItems.AddRange(gun.PublicTalentSkillItems);
         proto.PublicTalentSkillItemsUid.AddRange(gun.PublicTalentSkillItemsUid);
@@ -102,7 +107,7 @@ public static class ProtoExtensions
         return proto;
     }
 
-    public static GunWeaponMod ToProtoWeaponMod(this WeaponModEntity weaponMod)
+    public static GunWeaponMod ToProtoWeaponMod(this WeaponModEntity weaponMod, ModRefineState? refine = null, uint power = 0)
     {
         ArgumentNullException.ThrowIfNull(weaponMod);
 
@@ -110,10 +115,15 @@ public static class ProtoExtensions
         {
             Id = weaponMod.Id,
             StcId = weaponMod.WeaponModId,
-            Level = weaponMod.Level,
-            Locked = weaponMod.Field5,
-            Exp = weaponMod.Field6,
-            Suit = weaponMod.Field7
+            // The names of this message come from an older build; the 4.0.5136 client (NHHPFBAEDAG) reads field 3 as the AFFIXES of the mod (four 16-bit
+            // pairs), field 5 as its polarity (non-zero = polarized), field 6 as flag bits (bit 0 = locked) and field 7 as the affixes of the polarization.
+            // The level and the experience are not in this message: they travel in SC_GunWeaponModLvUp (A-74).
+            Locked = weaponMod.Field7,
+            ModSuitPowerId = power,
+            // field 5 = refinement steps bought, field 7 = polarity bits of the affixes (A-78)
+            Level = refine?.Count ?? 0,
+            Exp = weaponMod.Field5 != 0 ? 1u : 0u,
+            Suit = refine?.Polarity ?? 0
         };
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
+using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Handlers
 {
@@ -106,6 +107,10 @@ namespace Griffin.GameServer.Handlers
                 },
             };
             foreach (uint group in tableService.GetTable<TutorialGroupData>().Select(row => row.Id))
+                info.TutorialInfo.Finished[group] = true;
+            // the system tutorials (SystemTutorialGroupData, e.g. 4301 of the weapon parts panel) are guided overlays that wait for a click on a highlighted button:
+            // left unfinished they block the panel ("the game freezes when a part is upgraded", client log 21:40)
+            foreach (uint group in tableService.GetTable<SystemTutorialGroupData>().Select(row => TableFields.U(row, 1)))
                 info.TutorialInfo.Finished[group] = true;
             connection.Send(2, info);
         }
