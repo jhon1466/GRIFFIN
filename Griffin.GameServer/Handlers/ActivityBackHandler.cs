@@ -16,9 +16,9 @@ namespace Griffin.GameServer.Handlers
                 Info = new IGHEKKLGNLA
                 {
                     IAPDLJKLLNM = 1,
-                    OpenTime = 1779500060,
+                    OpenTime = connection.GameClockSeconds() - 18800,
                     HNAKPBEGGFK = 3,
-                    HPABIPEOBKN = 1779518860,
+                    HPABIPEOBKN = connection.GameClockSeconds(),
                     IEHFGOMCBCN = false,
                     CJOINHJCPII = state.DaysClaimed,
                     CheckinDone = state.LastClaimDate == ActivityBackService.Today(),
