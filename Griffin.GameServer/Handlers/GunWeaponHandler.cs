@@ -492,8 +492,9 @@ namespace Griffin.GameServer.Handlers
             // mods created before the affixes existed get them here too (the list is what the client builds its panels from)
             WeaponModEntity[] mods = weaponMods.GetPlayerWeaponMods(connection.Account.Uid);
             SC_GunWeaponMods response = new SC_GunWeaponMods();
+            Dictionary<string, ModRefineState> allRefine = ModPolarity.All(accountState, connection.Account.Uid);
             foreach (WeaponModEntity mod in mods)
-                response.Mods.Add(ModPolarity.ToProto(tableService, accountState, connection.Account.Uid, mod));
+                response.Mods.Add(ModPolarity.ToProto(tableService, allRefine, mod));
 
             // the client creates every mod at level 1 without experience (the list has no field for them) and takes the real ones from this push (A-74)
             List<Google.Protobuf.IMessage> batch = [response];
@@ -524,9 +525,10 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account is not null)
             {
                 uint uid = connection.Account.Uid;
+                Dictionary<string, ModRefineState> allRefine = ModPolarity.All(accountState, uid);
                 foreach (WeaponModEntity mod in inventoryService.GetPlayerInventory<WeaponModEntity>(uid))
                 {
-                    ModRefineState refine = ModPolarity.Get(accountState, uid, mod.Id);
+                    ModRefineState refine = ModPolarity.From(allRefine, mod.Id);
                     if (refine.Candidates.Count == 0)
                         continue;
 
