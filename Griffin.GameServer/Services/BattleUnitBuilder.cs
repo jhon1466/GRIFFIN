@@ -118,7 +118,7 @@ namespace Griffin.GameServer.Services
                 output.WriteUInt32(pointId);
                 WriteBytes(output, 3, System.Text.Encoding.UTF8.GetBytes(rotation));
                 WriteBytes(output, 10, []);
-                WriteBytes(output, 11, SkillMessage(tables, gunId, character.Grade, weapon?.WeaponId ?? DefaultWeaponOf(tables, gunId), (uint)Math.Max(1, weapon?.BreakTimes ?? 1), CoreSkills(tables, inputs), KeySkills(tables, inputs), inputs?.ModSkills));
+                WriteBytes(output, 11, SkillMessage(tables, gunId, character.Grade, weapon?.WeaponId ?? DefaultWeaponOf(tables, gunId), (uint)Math.Max(1, weapon?.BreakTimes ?? 1), CoreSkills(tables, inputs), KeySkills(tables, inputs), inputs?.ModSkills, inputs?.Gun.PrivateTalentSkillItems));
                 WriteBytes(output, 12, []);
                 WriteBytes(output, 22, PropertyMap(StatsOf(tables, gunId, weapon, character.Level, character.GunClass, inputs)));
                 WriteBytes(output, 23, []);
@@ -514,14 +514,73 @@ namespace Griffin.GameServer.Services
             return skills;
         }
 
-        private static byte[] SkillMessage(ITableService tables, uint gunId, uint grade, uint weaponId = 0, uint breaks = 1, IReadOnlyList<uint>? coreSkills = null, IReadOnlyList<uint>? keySkills = null, IReadOnlyList<(uint Skill, int[] Values)>? accessories = null)
+        /// <summary>A list column of <c>ReplaceSkillData</c> (one value is stored as a plain number).</summary>
+        private static IReadOnlyList<uint> ReplaceList(ReplaceSkillData row, int column)
+        {
+            IReadOnlyList<uint> list = TableFields.List(row, column);
+            return list.Count > 0 ? list : TableFields.U(row, column) is var single and not 0 ? [single] : [];
+        }
+
+        private static byte[] SkillMessage(ITableService tables, uint gunId, uint grade, uint weaponId = 0, uint breaks = 1, IReadOnlyList<uint>? coreSkills = null, IReadOnlyList<uint>? keySkills = null, IReadOnlyList<(uint Skill, int[] Values)>? accessories = null, IReadOnlyList<uint>? privateKeys = null)
         {
             GunGradeData? gradeRow = tables.GetTable<GunGradeData>().FirstOrDefault(row => row.Id == gunId * 100 + grade + 1)
                 ?? tables.GetTable<GunGradeData>().FirstOrDefault(row => row.Id == gunId * 100 + 1);
+            // The character's skills as the client's own unit builder lists them (FJLGHAHLHML.OLANPMPHOJE, A-86): the basic attack (first skill of the first grade row), then
+            // for every grade row up to the current one the skills of GunGradeData column 4 ("abbr"; item / 100 is the skill slot and the highest version of each slot wins; 90909 is
+            // ignored), ordered by BattleSkillDisplayData column 7 and the id. Column 11 (the skills of the current grade) lacks the passive of the character
+            // (e.g. 10170801), so passives such as the poison zone of Besti never started.
             var skills = new List<uint>();
-            foreach (string part in (gradeRow is null ? string.Empty : TableFields.S(gradeRow, GradeSkillSetColumn)).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                if (uint.TryParse(part, out uint skill) && skill != 0 && !skills.Contains(skill))
+            GunGradeData? firstRow = tables.GetTable<GunGradeData>().FirstOrDefault(row => row.Id == gunId * 100 + 1);
+            if (firstRow is not null && uint.TryParse(TableFields.S(firstRow, GradeSkillSetColumn).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault(), out uint basicSkill) && basicSkill != 0)
+                skills.Add(basicSkill);
+
+            var bySlot = new Dictionary<uint, uint>();
+            for (uint index = 1; index <= grade + 1; index++)
+            {
+                GunGradeData? stepRow = tables.GetTable<GunGradeData>().FirstOrDefault(row => row.Id == gunId * 100 + index);
+                if (stepRow is null)
+                    continue;
+
+                foreach (uint item in TableFields.List(stepRow, 4))
+                    if (item != 90909 && (!bySlot.TryGetValue(item / 100, out uint known) || known < item))
+                        bySlot[item / 100] = item;
+            }
+
+            foreach (uint skill in bySlot.Values)
+                if (!skills.Contains(skill))
                     skills.Add(skill);
+
+            // when the table has no abbr list at all, fall back to the skills of the current grade row
+            if (skills.Count <= 1)
+                foreach (string part in (gradeRow is null ? string.Empty : TableFields.S(gradeRow, GradeSkillSetColumn)).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    if (uint.TryParse(part, out uint skill) && skill != 0 && !skills.Contains(skill))
+                        skills.Add(skill);
+
+            // Private keys of type 1 replace skills (client HFHFEIBOADO/OACGDMNAAFM, A-87): TalentKeyData column 14 names a ReplaceSkillData row whose four pairs of columns
+            // (2/3, 4/5, 6/7, 8/9) are "skills to remove" and "skills to put instead": when something was removed, the first skill of the second list is added.
+            foreach (uint key in privateKeys ?? [])
+            {
+                TalentKeyData? keyRow = key == 0 ? null : tables.GetTable<TalentKeyData>().FirstOrDefault(row => TableFields.U(row, 1) == key);
+                uint replaceId = keyRow is null || TableFields.U(keyRow, 2) != 1 ? 0 : TableFields.U(keyRow, 14);
+                ReplaceSkillData? replace = replaceId == 0 ? null : tables.GetTable<ReplaceSkillData>().FirstOrDefault(row => TableFields.U(row, 1) == replaceId);
+                if (replace is null)
+                    continue;
+
+                foreach (int column in new[] { 2, 4, 6, 8 })
+                {
+                    bool removed = false;
+                    foreach (uint old in ReplaceList(replace, column))
+                        removed |= skills.Remove(old);
+                    IReadOnlyList<uint> added = ReplaceList(replace, column + 1);
+                    if (removed && added.Count > 0)
+                        skills.Add(added[0]);
+                }
+            }
+
+            Dictionary<uint, uint> displayOrder = [];
+            foreach (BattleSkillDisplayData display in tables.GetTable<BattleSkillDisplayData>().Where(row => skills.Contains(TableFields.U(row, 1))))
+                displayOrder[TableFields.U(display, 1)] = TableFields.U(display, 7);
+            skills = skills.OrderBy(skill => displayOrder.GetValueOrDefault(skill)).ThenBy(skill => skill).ToList();
 
             // The grade passives (column 5 = add_abbr) follow the main skills: the client treats every id after the fifth as an extra
             // passive/active and they are what sets up the character's mechanics. Without them 莱妮 (1058) summoned a drone with mirage id 0
