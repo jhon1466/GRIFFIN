@@ -17,7 +17,8 @@ namespace Griffin.GameServer.Handlers
         IGunService gunService,
         IAccountStateService accountState,
         ITableService tableService,
-        IItemUseService itemUse) : GunHandlerBase
+        IItemUseService itemUse,
+        ILobbyCookingService cooking) : GunHandlerBase
     {
         // Remoulding plugins and cores: no plugin or core exists on the account (the list is empty), so acting on one is "not found".
         // A character has exactly one core (see RemouldingCores), so "belong" only confirms it.
@@ -36,7 +37,7 @@ namespace Griffin.GameServer.Handlers
             connection.Send(new SC_GunRemouldingCoreBelong { KCMKNJMDAIE = request.KCMKNJMDAIE, GunId = request.GunId });
         }
 
-        /// <summary>Raises the core of a character (free, see A-54). The client's field order (the proto names are swapped): core id, wanted level, character.</summary>
+        /// <summary>Raises the core of a character (A-54; it costs Data Links and gold since A-76). The client's field order (the proto names are swapped): core id, wanted level, character.</summary>
         public override void HandleGunRemouldingCoreLvUp(CS_GunRemouldingCoreLvUp request, Connection connection)
         {
             if (connection.Account is null)
@@ -58,9 +59,27 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
-                RemouldingCores.SetLevel(gun, request.Idx > level ? request.Idx : level + 1);
+                // Cost (A-76; the totals match the community wiki: level 2 = 750 Sardis Gold + 30 Data Links, level 60 = 120 000 + 32 760): the
+                // difference of the accumulated amounts of LevelUpData (column 2 = Data Links, item 49; column 6 = gold, item 2) between both levels.
+                uint wanted = Math.Min(RemouldingCores.MaxLevel, request.Idx > level ? request.Idx : level + 1);
+                Dictionary<uint, int> cost = [];
+                (uint links, uint gold) = RemouldingCores.CostBetween(tableService, level, wanted);
+                if (links > 0)
+                    cost[49] = (int)links;
+                if (gold > 0)
+                    cost[2] = (int)gold;
+
+                List<Google.Protobuf.IMessage> spent = [];
+                if (cost.Count > 0 && !itemUse.Spend(connection.Account.Uid, cost, spent))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingCoreLvUp, HNINDAOJCKP.ItemNotEnough);
+                    return;
+                }
+
+                RemouldingCores.SetLevel(gun, wanted);
                 gunService.Save();
-                connection.Send(new SC_GunRemouldingCoreLvUp { CoreLevel = request.CoreLevel, Idx = RemouldingCores.LevelOf(gun), GunId = request.GunId });
+                spent.Add(new SC_GunRemouldingCoreLvUp { CoreLevel = request.CoreLevel, Idx = RemouldingCores.LevelOf(gun), GunId = request.GunId });
+                connection.SendAutoEncrypted(spent.ToArray());
             }
         }
 
@@ -117,7 +136,7 @@ namespace Griffin.GameServer.Handlers
 
             foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(connection.Account.Uid))
             {
-                scGuns.Guns.Add(gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId)));
+                scGuns.Guns.Add(gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId), cooking.FoodBytes(connection.Account.Uid, gun.GunId)));
 
             }
 
@@ -262,7 +281,7 @@ namespace Griffin.GameServer.Handlers
             }
         }
 
-        private static SC_GunRemouldingPlugins PluginCatalog() =>
+        internal static SC_GunRemouldingPlugins PluginCatalog() =>
             new SC_GunRemouldingPlugins
                     {
                         RemouldingPlugins =

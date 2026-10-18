@@ -2,10 +2,11 @@
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
 using Griffin.GameServer.Extensions;
+using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class SupportHandler : SupportHandlerBase
+    public sealed class SupportHandler(IAccountStateService accountState) : SupportHandlerBase
     {
         public override void HandleSupportRoomUpgrade(CS_SupportRoomUpgrade request, Connection connection) =>
             connection.Refuse(MsgId.MsgCsSupportRoomUpgrade, HNINDAOJCKP.SupportRoomLevelNotFound);
@@ -18,7 +19,7 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleSupportRoomInfo(CS_SupportRoomInfo request, Connection connection)
         {
-                    connection.Send(1, new SC_SupportRoomInfo
+                    SC_SupportRoomInfo roomInfo = new SC_SupportRoomInfo
                     {
                         ABOENIKPJLH = new MIFHFBCEDCD
                         {
@@ -360,7 +361,22 @@ namespace Griffin.GameServer.Handlers
                     },
                             IFMGFOIGHNM = 1,
                         },
-                    });
+                    };
+
+                    // the core chips of each formation (A-77) and the formation used in battle
+                    if (connection.Account is not null)
+                    {
+                        uint uid = connection.Account.Uid;
+                        for (int index = 0; index < roomInfo.ABOENIKPJLH.KMPIHKFBAEP.Count; index++)
+                        {
+                            roomInfo.ABOENIKPJLH.KMPIHKFBAEP[index].ENFCKIOLJNM.Clear();
+                            roomInfo.ABOENIKPJLH.KMPIHKFBAEP[index].ENFCKIOLJNM.AddRange(SupportChips.FormationChips(accountState, uid, (uint)index + 1));
+                        }
+
+                        roomInfo.ABOENIKPJLH.IFMGFOIGHNM = SupportChips.BattleFormation(accountState, uid);   // field 9 = the formation used in battle (field 2 is the room level)
+                    }
+
+                    connection.Send(1, roomInfo);
         }
 
         public override void HandleSupportTeams(CS_SupportTeams request, Connection connection)
