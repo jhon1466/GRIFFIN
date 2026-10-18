@@ -3,7 +3,7 @@
 // It never touches the user's game client. Test account credentials come from args/env, never hardcoded secrets.
 //
 // Usage: dotnet run --project Griffin.ProtocolSmoke -- [--http https://127.0.0.1] [--tcp 127.0.0.1:7001]
-//            [--email smoke@local.test] [--password <pw>] [--scenario all|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
+//            [--email smoke@local.test] [--password <pw>] [--scenario all|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
 using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -1779,6 +1779,44 @@ if (scenario == "cooking")
     Check("cooking: only one coffee per day", !main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_LobbyCafeMakeCoffee));
     main.Send(new CS_LobbyGetCafeInfo());
     Check("cooking: the café info carries today's coffee", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyGetCafeInfo>().Any(c => c.FMICMDLIOJD == 1));
+}
+
+if (scenario == "bugs")
+{
+    // reported by the players (A-84): the central bedroom rebuild is kept after logging in again, and the reset event gives the character back its investment
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
+    main.ReadFor(TimeSpan.FromSeconds(6));
+    main.Send(new CS_LobbyBedRoomRebuildUnlock { FKDDKKFIKCA = 1002 });
+    Check("bedroom: a step whose previous step is not done is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -12332));
+    main.Send(new CS_LobbyBedRoomRebuildUnlock { FKDDKKFIKCA = 1001 });
+    Check("bedroom: step 1001 is unlocked", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyBedRoomRebuildUnlock>().Any(r => r.FKDDKKFIKCA == 1001));
+    main.Send(new CS_LobbyBedRoomRebuildUnlock { FKDDKKFIKCA = 1001 });
+    Check("bedroom: unlocking it twice is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any(e => e.ErrorNo == -12331));
+    main.Send(new CS_LobbyBedRoomRebuildUnlock { FKDDKKFIKCA = 1002 });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    var bedAgain = await Connect(true);
+    bedAgain.Send(new CS_LobbyGetBuildInfo());
+    var bedInfo = bedAgain.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_LobbyGetBuildInfo>().FirstOrDefault(i => i.KAFLIJKLBKO is not null);
+    Check("bedroom: after logging in again the build info lists the steps done (1001, 1002)", bedInfo?.KAFLIJKLBKO.HKCFCDNFCAE.Contains(1001u) == true && bedInfo.KAFLIJKLBKO.HKCFCDNFCAE.Contains(1002u), $"steps={string.Join(",", bedInfo?.KAFLIJKLBKO?.HKCFCDNFCAE ?? [])}");
+    bedAgain.Dispose();
+
+    main.Send(new CS_ClientDataGet());
+    var clientData = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ClientDataGet>().FirstOrDefault();
+    uint barrackSkip = 99;
+    if (clientData is not null)
+    {
+        var cr = new CodedInputStream(clientData.Data.ToByteArray()); uint ct;
+        while ((ct = cr.ReadTag()) != 0) { if ((ct >> 3) == 9 && (ct & 7) == 0) barrackSkip = cr.ReadUInt32(); else cr.SkipLastField(); }
+    }
+    Check("cutscene: the client data starts with the barrack animations set to \"always play\" (2), not \"skip\" (1)", barrackSkip == 2, $"BarrackSkipKey={barrackSkip}");
+    main.Send(new CS_GunLevelUp { GunId = 1017, Level = 20 });
+    main.ReadFor(TimeSpan.FromSeconds(3));
+    main.Send(new CS_ActicityResetWeaponOrGun { IKDMNOBMIFE = 1, GunId = 1017 });
+    var reset = main.ReadFor(TimeSpan.FromSeconds(3));
+    Check("reset: the reset event answers and pays back the experience and gold of the levels", reset.Any(p => p.Message is SC_ActicityResetWeaponOrGun { GunId: 1017 }) && reset.Any(p => p.Message is SC_ResourceUpdate or SC_Items));
+    main.Send(new CS_Guns());
+    var resetGun = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).FirstOrDefault(g => g.Id == 1017);
+    Check("reset: the character is back at level 1", resetGun is { Level: 1 }, $"level={resetGun?.Level}");
 }
 
 if (scenario == "equip")
