@@ -80,6 +80,7 @@ namespace Griffin.GameServer.Handlers
                 weaponMods.Save();
                 messages.Add(new SC_WeaponModAdvanceEnhance { Mod = ModPolarity.ToProto(tableService, accountState, uid, mod) });
                 messages.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
+                messages.AddRange(GunWeaponHandler.RefreshBatch(tableService, accountState, inventoryService, weaponMods, uid));
                 connection.SendAutoEncrypted(messages.ToArray());
             }
         }
@@ -120,12 +121,14 @@ namespace Griffin.GameServer.Handlers
                 refine.BackupPolarity = 0;
                 refine.BackupCount = 0;
                 ModPolarity.Set(accountState, uid, mod.Id, refine);
-                connection.SendAutoEncrypted<IMessage>(
+                List<IMessage> rollBack =
                 [
                     new SC_WeaponModAdvanceEnhance { Mod = ModPolarity.ToProto(tableService, accountState, uid, mod) },
                     new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 },
                     new SC_WeaponModPolarityRollBack(),
-                ]);
+                ];
+                rollBack.AddRange(GunWeaponHandler.RefreshBatch(tableService, accountState, inventoryService, weaponMods, uid));
+                connection.SendAutoEncrypted<IMessage>(rollBack.ToArray());
             }
         }
 
