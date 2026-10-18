@@ -222,6 +222,8 @@ namespace Griffin.GameServer.Handlers
         public override void HandleSupportChip(CS_SupportChip request, Connection connection)
         {
             SC_SupportChip reply = new();
+            foreach (SupportBaseChips.Chip baseChip in SupportBaseChips.All(tableService))
+                reply.CCGPCPEPBEA.Add(SupportBaseChips.ToProto(baseChip));
             if (connection.Account is not null)
                 foreach (SupportChips.ChipState chip in SupportChips.Chips(tableService, accountState, connection.Account.Uid))
                     reply.ENFCKIOLJNM.Add(SupportChips.ToProto(chip));
