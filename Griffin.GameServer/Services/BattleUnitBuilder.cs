@@ -127,6 +127,43 @@ namespace Griffin.GameServer.Services
         }
 
         /// <summary>
+        /// The oneof wrapper (<c>Support</c> case, field 5) of the support formation of the battle, laid out like the client's own builder (<c>MHMPCAEGFEC</c>): 1 = formation,
+        /// 2 = 0, 3 = the six stats <c>{1: map}</c>, 4 = the break rows of the core chips, 5 = one <c>{team, skill row, ammunition}</c> per slot, 6 = the load of the slots,
+        /// 7 = false, 8 = the player level (A-95).
+        /// </summary>
+        public static byte[] SupportUnit(SupportTeams.Battle battle, uint playerLevel)
+        {
+            byte[] unit = Encode(output =>
+            {
+                output.WriteTag(1, WireFormat.WireType.Varint);
+                output.WriteUInt32(battle.Formation);
+                output.WriteTag(2, WireFormat.WireType.Varint);
+                output.WriteUInt32(0);
+                Dictionary<int, int> stats = [];
+                for (int stat = 1; stat <= 6; stat++)
+                    stats[stat] = battle.Stats[stat];
+                WriteBytes(output, 3, PropertyMap(stats));
+                if (battle.ChipRows.Count > 0)
+                    WriteBytes(output, 4, Encode(packed => { foreach (uint row in battle.ChipRows) packed.WriteUInt32(row); }));
+                foreach (SupportTeams.BattleSlot slot in battle.Slots)
+                    WriteBytes(output, 5, Encode(entry =>
+                    {
+                        entry.WriteTag(1, WireFormat.WireType.Varint);
+                        entry.WriteUInt32(slot.Team);
+                        entry.WriteTag(2, WireFormat.WireType.Varint);
+                        entry.WriteUInt32(slot.SkillRow);
+                        entry.WriteTag(3, WireFormat.WireType.Varint);
+                        entry.WriteUInt32(slot.Ammunition);
+                    }));
+                output.WriteTag(6, WireFormat.WireType.Varint);
+                output.WriteUInt32(battle.Load);
+                output.WriteTag(8, WireFormat.WireType.Varint);
+                output.WriteUInt32(Math.Max(1, playerLevel));
+            });
+            return Encode(output => WriteBytes(output, 5, unit));
+        }
+
+        /// <summary>
         /// The client's battle unit factory dereferences parts of the character that the lobby list never needs (the 12:03 client log: a
         /// NullReferenceException in the unit factory right after the camp arrived; the client's own builder refuses a unit without
         /// "skin" or "weapon data"): the skin (<c>GunData</c> column 17 when the character has none) and <c>details_.weapon</c> /

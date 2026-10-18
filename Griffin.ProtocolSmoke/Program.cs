@@ -802,6 +802,58 @@ if (scenario == "stage")
     var chipList = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportChip>().FirstOrDefault();
     Check("support: the account owns 6 copies of each of the 63 core chips", chipList?.ENFCKIOLJNM.Count == 378, $"chips={chipList?.ENFCKIOLJNM.Count}");
     var chipIds = chipList?.ENFCKIOLJNM.Select(c => c.Id).Take(4).ToList() ?? [];
+    // A-93: the support teams of the "备勤区": the account owns them and the formation slots keep them
+    main.Send(new CS_SupportTeams());
+    var supportTeams = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportTeams>().FirstOrDefault();
+    Check("support: the account owns the 20 support teams", supportTeams is not null && supportTeams.NJMEBOGONKG.Count == 20 && supportTeams.NJMEBOGONKG.Contains(1001u), $"teams={supportTeams?.NJMEBOGONKG.Count}");
+    main.Send(new CS_SupportFormationModify { Id = 2, Slot = 1, COCHLPMJPOJ = 1001 });
+    var teamReply = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportFormationModify>().FirstOrDefault();
+    Check("support: a team goes into slot 1 of formation 2", teamReply is not null && teamReply.Id == 2 && teamReply.FOAHOCCEHMB.CDLNJHGCDMK[0].COCHLPMJPOJ == 1001);
+    main.Send(new CS_SupportFormationModify { Id = 2, Slot = 1, COCHLPMJPOJ = 1004 });
+    Check("support: a team of the other type is refused in slot 1", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+    main.Send(new CS_SupportRoomInfo());
+    var roomTeams = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SupportRoomInfo>().FirstOrDefault();
+    Check("support: the room shows the team of the slot", roomTeams?.ABOENIKPJLH.KMPIHKFBAEP[1].CDLNJHGCDMK[0].COCHLPMJPOJ == 1001);
+    // A-94: the room ("阵列规模") levels up for the material of SupportLevelData
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
+    main.ReadFor(TimeSpan.FromSeconds(6));
+    main.Send(new CS_SupportRoomUpgrade { JLHFICPMAEI = 2 });
+    var roomUp = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("support: the room goes to level 2", roomUp.OfType<SC_SupportRoomUpgrade>().Any(r => r.JLHFICPMAEI == 2), $"messages={string.Join(',', roomUp.Select(m => m.GetType().Name))}");
+    main.Send(new CS_SupportRoomInfo());
+    Check("support: the room info reports level 2", main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SupportRoomInfo>().FirstOrDefault()?.ABOENIKPJLH.HLCFEAGODDH == 2);
+    main.Send(new CS_SupportRoomUpgrade { JLHFICPMAEI = 6 });
+    Check("support: the dialog can pick a target several levels up (2 to 6 in one request)", main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SupportRoomUpgrade>().Any(r => r.JLHFICPMAEI == 6));
+    // A-96: "补给制造": the ammunition is made from the one of the tier below plus a material
+    main.Send(new CS_SupportAmmunitionCompose { Id = 2301501, BAGFCBNOMCO = 1 });
+    Check("support: the elite ammunition cannot be made without the ammunition of the tier below", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+    main.Send(new CS_SupportAmmunitionCompose { Id = 2301401, BAGFCBNOMCO = 2 });
+    var composeOne = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("support: two units of the first-tier ammunition are made from the material", composeOne.OfType<SC_SupportAmmunitionCompose>().Any(r => r.Id == 2301401 && r.Num == 2) && composeOne.OfType<SC_Items>().Any(i => i.Items.GetValueOrDefault(2301401u) >= 2), $"messages={string.Join(',', composeOne.Select(m => m.GetType().Name))}");
+    main.Send(new CS_SupportAmmunitionCompose { Id = 2301501, BAGFCBNOMCO = 1 });
+    Check("support: with two of the tier below the elite ammunition is made", main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SupportAmmunitionCompose>().Any(r => r.Id == 2301501 && r.Num == 1));
+    // A-97: the base chips of the "框架拓展" screen are owned and can be placed in a formation
+    var baseChipList = new List<uint>();
+    main.Send(new CS_SupportChip());
+    var allChips = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SupportChip>().FirstOrDefault();
+    Check("support: the account owns the 162 base chips twice (324) with their stat value", allChips is not null && allChips.CCGPCPEPBEA.Count == 324 && allChips.CCGPCPEPBEA.All(c => c.ACEIFDEGLMH.Count == 6 && c.ACEIFDEGLMH.Sum(v => (long)v) > 0), $"baseChips={allChips?.CCGPCPEPBEA.Count}");
+    if (allChips is not null && allChips.CCGPCPEPBEA.Count >= 2)
+    {
+        uint firstChip = allChips.CCGPCPEPBEA[0].Id, otherChip = allChips.CCGPCPEPBEA[2].Id;
+        var placeChips = new CS_SupportFormationModifyBaseChip { Id = 1 };
+        var slotsMsg = new DKIBNBANDLM(); slotsMsg.CCGPCPEPBEA.AddRange(new[] { firstChip, 0u, otherChip });
+        placeChips.JELCIHPBECA[1] = slotsMsg;
+        main.Send(placeChips);
+        Check("support: base chips are placed in a frame of a formation", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SupportFormationModifyBaseChip>().Any(r => r.Id == 1 && r.JELCIHPBECA.ContainsKey(1)));
+        main.Send(new CS_SupportRoomInfo());
+        var roomChips = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SupportRoomInfo>().FirstOrDefault();
+        Check("support: the room shows the base chips of the formation", roomChips?.ABOENIKPJLH.KMPIHKFBAEP[0].JELCIHPBECA.TryGetValue(1, out var shown) == true && shown.CCGPCPEPBEA.Contains(firstChip));
+        var placeTwice = new CS_SupportFormationModifyBaseChip { Id = 1 };
+        var twice = new DKIBNBANDLM(); twice.CCGPCPEPBEA.AddRange(new[] { firstChip, firstChip });
+        placeTwice.JELCIHPBECA[1] = twice;
+        main.Send(placeTwice);
+        Check("support: the same base chip twice is refused", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().Any());
+    }
     if (chipIds.Count == 4)
     {
         var formation = new CS_SupportFormationModifyCoreChip { Id = 1 };
@@ -827,6 +879,30 @@ if (scenario == "stage")
                 if (k == 30) chipLife = v;
             }
         Check("support: the core chips of the battle formation add to the stats of the characters (MaxHpPercent 30 = 20 with two chips)", chipLife >= 20, $"MaxHpPercent={chipLife}");
+        // A-95: the teams of the battle formation go into the battle as a Support unit (field 5 of the unit wrapper)
+        main.Send(new CS_SupportFormationModify { Id = 1, Slot = 1, COCHLPMJPOJ = 1001 });
+        main.ReadFor(TimeSpan.FromSeconds(1));
+        main.Send(new CS_SupportFormationModify { Id = 1, Slot = 2, COCHLPMJPOJ = 1004 });
+        main.ReadFor(TimeSpan.FromSeconds(1));
+        main.Send(new CS_StageStart { StcStageId = 10101 });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StageInto { Guns = { [1769499u] = 1017u, [1835035u] = 1008u } });
+        var supportBattle = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault()?.Stage;
+        var supportUnits = supportBattle?.Camps.Select(c => c.ToByteArray()).Where(c => StgSide(c) == 1).SelectMany(c => StgFields(c, 2)).Where(u => StgFields(u, 5).Count == 1).ToList() ?? [];
+        var supportInner = supportUnits.Count == 1 ? StgFields(supportUnits[0], 5)[0] : null;
+        var supportEntries = supportInner is null ? [] : StgFields(supportInner, 5);
+        Check("support: the battle carries one support unit with the formation, its six stats and one entry per team",
+            supportInner is not null && StgFields(supportInner, 3).Count == 1 && supportEntries.Count == 2, $"units={supportUnits.Count} entries={supportEntries.Count}");
+        Check("support: every entry names a team, a skill row and an ammunition", supportEntries.Count == 2 && supportEntries.All(entry =>
+        {
+            var er = new CodedInputStream(entry); uint team = 0, skillRow = 0, ammo = 0, tag;
+            while ((tag = er.ReadTag()) != 0) { if ((tag >> 3) == 1) team = er.ReadUInt32(); else if ((tag >> 3) == 2) skillRow = er.ReadUInt32(); else if ((tag >> 3) == 3) ammo = er.ReadUInt32(); else er.SkipLastField(); }
+            return team != 0 && skillRow != 0 && ammo != 0;
+        }));
+        main.Send(new CS_SupportFormationModify { Id = 1, Slot = 1, COCHLPMJPOJ = 0 });
+        main.ReadFor(TimeSpan.FromSeconds(1));
+        main.Send(new CS_SupportFormationModify { Id = 1, Slot = 2, COCHLPMJPOJ = 0 });
+        main.ReadFor(TimeSpan.FromSeconds(1));
         var tooMany = new CS_SupportFormationModifyCoreChip { Id = 1 };
         tooMany.JHCLPBBJDFH.AddRange(chipIds);
         main.Send(tooMany);

@@ -300,6 +300,10 @@ namespace Griffin.GameServer.Handlers
                 }
             }
 
+            // The support formation of the battle (A-95): the teams of the formation chosen in the 备勤区, laid out like the client's own builder
+            if (SupportTeams.ForBattle(tableService, accountState, account.Uid) is { } support)
+                playerUnits.Add(BattleUnitBuilder.SupportUnit(support, 60u));
+
             // The 4.0.5136 client's own StageBattle constructor initializes two camps (player side 1 and enemy side 2), then creates
             // stage enemies from its own StageConfig/StageEnemy tables. Mirror both descriptors. The player's missing action flow was
             // observed with the prior one-camp response; the empty second descriptor is a protocol-shape correction to verify in-client.

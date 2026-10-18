@@ -105,6 +105,24 @@ namespace Griffin.GameServer.Services
 
         public static uint BattleFormation(IAccountStateService state, uint uid) => state.Get<uint?>(uid, BattleKey) is { } id and > 0 ? id : 1;
 
+        /// <summary>The ids of the break rows (<c>SupportChipCoreChipBreakData</c>) of the core chips of the formation used in battle: the client's support unit lists them as its chip skills (A-95).</summary>
+        public static IReadOnlyList<uint> ActiveBreakRows(ITableService tables, IAccountStateService state, uint uid)
+        {
+            List<ChipState> chips = Chips(tables, state, uid);
+            List<uint> rows = [];
+            foreach (uint chipId in FormationChips(state, uid, BattleFormation(state, uid)))
+            {
+                ChipState? chip = chips.FirstOrDefault(c => c.Id == chipId);
+                SupportChipCoreChipData? data = chip is null ? null : tables.GetTable<SupportChipCoreChipData>().FirstOrDefault(row => TableFields.U(row, 1) == chip.StcId);
+                SupportChipCoreChipBreakByCoreChipData? breaks = data is null ? null : tables.GetTable<SupportChipCoreChipBreakByCoreChipData>().FirstOrDefault(row => TableFields.U(row, 1) == TableFields.U(data, 4));
+                IReadOnlyList<uint> breakRows = breaks is null ? [] : TableFields.List(breaks, 2);
+                if (chip is not null && chip.BreakTimes < breakRows.Count)
+                    rows.Add(breakRows[(int)chip.BreakTimes]);
+            }
+
+            return rows;
+        }
+
         /// <summary>The <c>PropertyData</c> rows of the core chips of the formation used in battle (empty when it has none).</summary>
         public static IReadOnlyList<uint> ActiveRows(ITableService tables, IAccountStateService state, uint uid)
         {
