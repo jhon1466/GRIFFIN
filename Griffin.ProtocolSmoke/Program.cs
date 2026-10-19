@@ -3,7 +3,7 @@
 // It never touches the user's game client. Test account credentials come from args/env, never hardcoded secrets.
 //
 // Usage: dotnet run --project Griffin.ProtocolSmoke -- [--http https://127.0.0.1] [--tcp 127.0.0.1:7001]
-//            [--email smoke@local.test] [--password <pw>] [--scenario all|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
+//            [--email smoke@local.test] [--password <pw>] [--scenario all|party|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
 using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -2107,11 +2107,11 @@ if (scenario is "all" or "restored")
     var talentItems = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_PublicTalentSkillItems>().FirstOrDefault();
     Check("restored: the item list reports which character wears the item", talentItems?.PublicSkillItems.FirstOrDefault(i => i.StcId == 91025)?.GunId == talentGun);
 
-    main.Send(new CS_LobbyPartyJoin { HCKMOMCKFEA = 5, DOGDHOGHFNH = new FCGCLLGILIJ { Id = 5, SectionId = 2 } });
+    main.Send(new CS_LobbyPartyJoin { HCKMOMCKFEA = 104 });
     var joined = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyPartyJoin>().FirstOrDefault();
     main.Send(new CS_LobbyPartyInfo());
     var partyNow = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_LobbyPartyInfo>().FirstOrDefault();
-    Check("restored: joining a party is answered and reflected by LobbyPartyInfo", joined?.HCKMOMCKFEA == 5 && partyNow?.LKIBNJBDDJI == 5 && partyNow.DOGDHOGHFNH?.SectionId == 2);
+    Check("restored: joining a party is answered and reflected by LobbyPartyInfo", joined?.HCKMOMCKFEA == 104 && partyNow?.LKIBNJBDDJI == 104 && partyNow.DOGDHOGHFNH is null);
     main.Send(new CS_LobbyPartyLeave());
     main.ReadFor(TimeSpan.FromSeconds(1));
     main.Send(new CS_LobbyPartyInfo());
@@ -2665,6 +2665,83 @@ if (scenario is "all" or "rouge")
     var loSettle = loFinish.OfType<SC_RougeFinish>().FirstOrDefault();
     Check("rouge (defeat): the settlement of a defeat is reported as a battle failure, clears the coins", loSettle is not null && loSettle.Reason == CDPCJHMOCPM.RougeFinishOptionBattleFailure
         && loFinish.OfType<SC_Items>().Any(i => i.Items.ContainsKey(9990101u) || i.Items.ContainsKey(9990102u)), string.Join(",", loFinish.Select(m => m.GetType().Name)));
+}
+
+if (scenario is "all" or "party")
+{
+    // lobby parties (影像图室 > 派对), A-128: progress from the tables, join, node commits, section rewards, persistence
+    main.ReadFor(TimeSpan.FromSeconds(1));
+    List<IMessage> PtSend(IMessage request, int ms = 700) { main.Send(request); return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => p.Message).ToList(); }
+    SC_LobbyPartyInfo? PtInfo() => PtSend(new CS_LobbyPartyInfo()).OfType<SC_LobbyPartyInfo>().FirstOrDefault();
+
+    var ptInfo = PtSend(new CS_LobbyPartyInfo(), 3000).OfType<SC_LobbyPartyInfo>().FirstOrDefault();
+    Check("party: the info lists the four parties, none played yet: each on its first section, no section or party done (no check in the album), no current party",
+        ptInfo is not null && new uint[] { 101, 102, 103, 104 }.All(id => ptInfo.AGCMHJFOGIH.ContainsKey(id)
+            && !ptInfo.AGCMHJFOGIH[id].AACANKHENII && ptInfo.AGCMHJFOGIH[id].HFKNLIGCIBP.Count == 0 && ptInfo.AGCMHJFOGIH[id].CGCCNPFFNHA is { } cur && cur.LDLCBHAEFHO.Count > 0)
+        && ptInfo.AGCMHJFOGIH[104].CGCCNPFFNHA!.SectionId == 10401 && ptInfo.AGCMHJFOGIH[101].CGCCNPFFNHA!.SectionId == 10101 && ptInfo.LKIBNJBDDJI == 0 && ptInfo.DOGDHOGHFNH is null,
+        $"party104 section={ptInfo?.AGCMHJFOGIH[104].CGCCNPFFNHA?.SectionId} open={ptInfo?.AGCMHJFOGIH[104].CGCCNPFFNHA?.LDLCBHAEFHO.Count}");
+
+    var ptJoin = PtSend(new CS_LobbyPartyJoin { HCKMOMCKFEA = 104 });
+    var ptJoined = PtInfo();
+    Check("party: starting the mission of 拾光筑愿 (the join request has only the party id) makes it the current party, with its state and WITHOUT the review message (the client takes one branch or the other)",
+        ptJoin.OfType<SC_LobbyPartyJoin>().Any() && ptJoined?.LKIBNJBDDJI == 104 && ptJoined.DOGDHOGHFNH is null && ptJoined.AGCMHJFOGIH[104].CGCCNPFFNHA is { SectionId: 10401 } room && room.LDLCBHAEFHO.Count > 0);
+
+    uint ptSection = 10401;
+    var ptNodes = ptJoined!.AGCMHJFOGIH[104].CGCCNPFFNHA!.LDLCBHAEFHO.Select(n => n.Id).ToList();
+    var ptRefused = PtSend(new CS_LobbyPartyNodeCommit { HCKMOMCKFEA = 104, SectionId = ptSection, JBEONCNOEEA = 1040201 });
+    Check("party: committing a node that is not of the current section is refused", ptRefused.OfType<SC_ReportError>().Any() && !ptRefused.OfType<SC_LobbyPartyNodeCommit>().Any());
+
+    int ptCommits = 0, ptSectionsDone = 0;
+    bool ptRewarded = false, ptRepeatOk = false;
+    for (int guard = 0; guard < 80; guard++)
+    {
+        var current = PtInfo()?.AGCMHJFOGIH[104];
+        if (current is null || current.AACANKHENII || current.CGCCNPFFNHA is null)
+            break;
+        var section = current.CGCCNPFFNHA;
+        var open = section.LDLCBHAEFHO.Select(n => n.Id).ToList();
+        if (open.Count == 0)
+            break;
+        var done = PtSend(new CS_LobbyPartyNodeCommit { HCKMOMCKFEA = 104, SectionId = section.SectionId, JBEONCNOEEA = open[0] }, 400);
+        var commit = done.OfType<SC_LobbyPartyNodeCommit>().FirstOrDefault();
+        if (commit is null)
+            break;
+        ptCommits++;
+        if (!ptRepeatOk)
+        {
+            var ptAgain = PtSend(new CS_LobbyPartyNodeCommit { HCKMOMCKFEA = 104, SectionId = section.SectionId, JBEONCNOEEA = open[0] }, 300);
+            ptRepeatOk = ptAgain.OfType<SC_LobbyPartyNodeCommit>().Any() && !ptAgain.OfType<SC_ResourceUpdate>().Any();
+        }
+
+        if (commit.NFBGCJPJMPJ)
+        {
+            ptSectionsDone++;
+            ptRewarded |= commit.GEINLPLCKNP.Count > 0;
+        }
+    }
+
+    Check("party: every node of the five sections can be committed in order (nodes open as their predecessors are done)", ptCommits >= 40 && ptSectionsDone == 5, $"commits={ptCommits} sections={ptSectionsDone}");
+    Check("party: a finished section pays its reward list and says so in the answer", ptRewarded);
+    Check("party: committing a done node again is harmless and pays nothing twice", ptRepeatOk);
+    var ptEnd = PtInfo();
+    Check("party: when the last section is done the party is finished, with its five sections completed, and survives asking again",
+        ptEnd?.AGCMHJFOGIH[104] is { AACANKHENII: true, CGCCNPFFNHA: null } finished && finished.HFKNLIGCIBP.Count == 5 && finished.HFKNLIGCIBP.Values.All(s => s.BAJHKMIBPDC && s.LGNOAHMHJHH.Count > 0));
+    PtSend(new CS_LobbyPartyLeave());
+    Check("party: leaving clears the current party", PtInfo()?.LKIBNJBDDJI == 0);
+    PtSend(new CS_LobbyPartyJoin { HCKMOMCKFEA = 104, DOGDHOGHFNH = new FCGCLLGILIJ { Id = 104, SectionId = 10401 } });
+    var ptReview = PtInfo();
+    Check("party: replaying a finished section puts the nodes to play in the join message and no current party id",
+        ptReview?.LKIBNJBDDJI == 0 && ptReview.DOGDHOGHFNH is { Id: 104, SectionId: 10401 } rv && rv.LHPFELEOEKI.Count >= 10);
+    PtSend(new CS_LobbyPartyLeave());
+
+    // story fight of a party node (PS-3-1, stage 43037): the client names the three lent characters by their GunPresetData ids (A-130)
+    PtSend(new CS_StageStart { StcStageId = 43037 }, 800);
+    var ptInto = PtSend(new CS_StageInto { Guns = { [1507353u] = 4303701u, [1441816u] = 4303702u, [1310743u] = 4303703u }, ActionSequence = { 1076u, 1070u, 1057u } }, 1000).OfType<SC_StageInto>().FirstOrDefault();
+    Check("party: a story fight whose units are named by preset id gets one unit per lent character (with one unit the turns ran out: 'turn limit exceeded')",
+        ptInto?.Stage?.StcStageId == 43037 && ptInto.Stage.Camps[0].LBJLMGIPOJA.Count >= 3, $"units={ptInto?.Stage?.Camps[0].LBJLMGIPOJA.Count}");
+    var ptWin = PtSend(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 }, 800);
+    Check("party: winning the story fight answers the result", ptWin.OfType<SC_StageResult>().Any(r => r.BattleResult == BattleResult.Win && r.StageId == 43037));
+    PtSend(new CS_StageUsableGuns { StageId = 10104 });
 }
 
 if (scenario == "campaign")
