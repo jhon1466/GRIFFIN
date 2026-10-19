@@ -207,7 +207,7 @@ namespace Griffin.GameServer.Handlers
             }
 
             // the squad of a 遗珍回收 battle names GunPresetData ids, not characters: it is not the player's own last team (A-123)
-            if (pending!.RougePlan == 0)
+            if (pending!.RougePlan == 0 && request.Guns.Values.All(id => id < 100000))
                 accountState.Set(connection.Account.Uid, "stage.lineup", new SavedLineup(request.Guns.Values.ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
                 pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan);
@@ -320,7 +320,17 @@ namespace Griffin.GameServer.Handlers
             {
                 foreach ((uint unitId, uint gunId) in requestedGuns.OrderBy(pair => pair.Key))
                 {
-                    if (!ownedGuns.TryGetValue(gunId, out GunEntity? gun))
+                    GunEntity? gun;
+                    // Stages that lend characters (story fights of the lobby parties, A-130) name each unit by its GunPresetData id, not by a character id:
+                    // the character fights with the level and grade of the preset (like the 遗珍回收 squad, A-123) and a preset is also used for characters the account lacks.
+                    if (ownedGuns.TryGetValue(gunId, out GunEntity? owned) && gunId < 100000)
+                        gun = owned;
+                    else if (tableService.GetTable<GunPresetData>().FirstOrDefault(row => row.Id == gunId) is { } preset)
+                    {
+                        uint source = TableFields.U(preset, 2);
+                        gun = RougeUnitOf(new RougeService.TeamGun(source, TableFields.U(preset, 16), gunId, TableFields.U(preset, 6)), ownedGuns.GetValueOrDefault(source));
+                    }
+                    else
                         continue;
                     playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
                 }

@@ -10,7 +10,7 @@ using System;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class LobbyHandler(ILobbyGardenService garden, ILobbyProgressService lobbyProgress, IAccountStateService accountState, IAccountService accountService, IRewardService rewardService, ITableService tableService, ILobbyCookingService cooking, IDailyQuestProgressService questProgress, IItemUseService itemUse, ILobbyHeatService heat, ILobbyMiniGameService miniGames) : LobbyHandlerBase
+    public sealed class LobbyHandler(ILobbyGardenService garden, ILobbyProgressService lobbyProgress, IAccountStateService accountState, IAccountService accountService, IRewardService rewardService, ITableService tableService, ILobbyCookingService cooking, IDailyQuestProgressService questProgress, IItemUseService itemUse, ILobbyHeatService heat, ILobbyMiniGameService miniGames, ILobbyPartyService parties) : LobbyHandlerBase
     {
         int lobbyGetBuildInfoCount;
 
@@ -2064,341 +2064,52 @@ namespace Griffin.GameServer.Handlers
         // 3d dorm lobby missing handler impl starts here
         public override void HandleLobbyPartyInfo(CS_LobbyPartyInfo request, Connection connection)
         {
-            SC_LobbyPartyInfo partyInfo = new SC_LobbyPartyInfo
-            {
-                AGCMHJFOGIH =
-                {
-                    [101] = new KEAKDAMCBMM
-                    {
-                        Id = 101,
-                        HFKNLIGCIBP =
-                        {
-                            [10101] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10101,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1010101] = new CIFKOJJBCHF { Id = 1010101, BAJHKMIBPDC = true },
-                                    [1010102] = new CIFKOJJBCHF { Id = 1010102, BAJHKMIBPDC = true },
-                                    [1010103] = new CIFKOJJBCHF { Id = 1010103, BAJHKMIBPDC = true },
-                                    [1010104] = new CIFKOJJBCHF { Id = 1010104, BAJHKMIBPDC = true },
-                                    [1010105] = new CIFKOJJBCHF { Id = 1010105, BAJHKMIBPDC = true },
-                                    [1010106] = new CIFKOJJBCHF { Id = 1010106, BAJHKMIBPDC = true },
-                                    [1010107] = new CIFKOJJBCHF { Id = 1010107, BAJHKMIBPDC = true },
-                                    [1010108] = new CIFKOJJBCHF { Id = 1010108, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10102] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10102,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1010201] = new CIFKOJJBCHF { Id = 1010201, BAJHKMIBPDC = true },
-                                    [1010202] = new CIFKOJJBCHF { Id = 1010202, BAJHKMIBPDC = true },
-                                    [1010203] = new CIFKOJJBCHF { Id = 1010203, BAJHKMIBPDC = true },
-                                    [1010204] = new CIFKOJJBCHF { Id = 1010204, BAJHKMIBPDC = true },
-                                    [1010205] = new CIFKOJJBCHF { Id = 1010205, BAJHKMIBPDC = true },
-                                    [1010206] = new CIFKOJJBCHF { Id = 1010206, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10103] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10103,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1010301] = new CIFKOJJBCHF { Id = 1010301, BAJHKMIBPDC = true },
-                                    [1010302] = new CIFKOJJBCHF { Id = 1010302, BAJHKMIBPDC = true },
-                                    [1010303] = new CIFKOJJBCHF { Id = 1010303, BAJHKMIBPDC = true },
-                                    [1010304] = new CIFKOJJBCHF { Id = 1010304, BAJHKMIBPDC = true },
-                                    [1010305] = new CIFKOJJBCHF { Id = 1010305, BAJHKMIBPDC = true },
-                                    [1010306] = new CIFKOJJBCHF { Id = 1010306, BAJHKMIBPDC = true },
-                                    [1010307] = new CIFKOJJBCHF { Id = 1010307, BAJHKMIBPDC = true },
-                                    [1010308] = new CIFKOJJBCHF { Id = 1010308, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10104] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10104,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1010401] = new CIFKOJJBCHF { Id = 1010401, BAJHKMIBPDC = true },
-                                    [1010402] = new CIFKOJJBCHF { Id = 1010402, BAJHKMIBPDC = true },
-                                    [1010403] = new CIFKOJJBCHF { Id = 1010403, BAJHKMIBPDC = true },
-                                    [1010404] = new CIFKOJJBCHF { Id = 1010404, BAJHKMIBPDC = true },
-                                    [1010405] = new CIFKOJJBCHF { Id = 1010405, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10105] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10105,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1010501] = new CIFKOJJBCHF { Id = 1010501, BAJHKMIBPDC = true },
-                                    [1010502] = new CIFKOJJBCHF { Id = 1010502, BAJHKMIBPDC = true },
-                                    [1010503] = new CIFKOJJBCHF { Id = 1010503, BAJHKMIBPDC = true },
-                                    [1010504] = new CIFKOJJBCHF { Id = 1010504, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                        },
-                        AACANKHENII = false,
-                        MLIJIDKIFGF = new KEMPBIAFGHB
-                        {
-                            HFJLFAEFENH =
-                            {
-                                [3700902] = 3700903,
-                                [3700908] = 3700909,
-                                [3700912] = 3700913,
-                                [3700917] = 3700919,
-                            },
-                        },
-                    },
-                    [102] = new KEAKDAMCBMM
-                    {
-                        Id = 102,
-                        HFKNLIGCIBP =
-                        {
-                            [10201] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10201,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1020101] = new CIFKOJJBCHF { Id = 1020101, BAJHKMIBPDC = true },
-                                    [1020102] = new CIFKOJJBCHF { Id = 1020102, BAJHKMIBPDC = true },
-                                    [1020103] = new CIFKOJJBCHF { Id = 1020103, BAJHKMIBPDC = true },
-                                    [1020104] = new CIFKOJJBCHF { Id = 1020104, BAJHKMIBPDC = true },
-                                    [1020105] = new CIFKOJJBCHF { Id = 1020105, BAJHKMIBPDC = true },
-                                    [1020106] = new CIFKOJJBCHF { Id = 1020106, BAJHKMIBPDC = true },
-                                    [1020107] = new CIFKOJJBCHF { Id = 1020107, BAJHKMIBPDC = true },
-                                    [1020108] = new CIFKOJJBCHF { Id = 1020108, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10202] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10202,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1020201] = new CIFKOJJBCHF { Id = 1020201, BAJHKMIBPDC = true },
-                                    [1020202] = new CIFKOJJBCHF { Id = 1020202, BAJHKMIBPDC = true },
-                                    [1020203] = new CIFKOJJBCHF { Id = 1020203, BAJHKMIBPDC = true },
-                                    [1020204] = new CIFKOJJBCHF { Id = 1020204, BAJHKMIBPDC = true },
-                                    [1020205] = new CIFKOJJBCHF { Id = 1020205, BAJHKMIBPDC = true },
-                                    [1020206] = new CIFKOJJBCHF { Id = 1020206, BAJHKMIBPDC = true },
-                                    [1020207] = new CIFKOJJBCHF { Id = 1020207, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10203] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10203,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1020301] = new CIFKOJJBCHF { Id = 1020301, BAJHKMIBPDC = true },
-                                    [1020302] = new CIFKOJJBCHF { Id = 1020302, BAJHKMIBPDC = true },
-                                    [1020303] = new CIFKOJJBCHF { Id = 1020303, BAJHKMIBPDC = true },
-                                    [1020304] = new CIFKOJJBCHF { Id = 1020304, BAJHKMIBPDC = true },
-                                    [1020305] = new CIFKOJJBCHF { Id = 1020305, BAJHKMIBPDC = true },
-                                    [1020306] = new CIFKOJJBCHF { Id = 1020306, BAJHKMIBPDC = true },
-                                    [1020307] = new CIFKOJJBCHF { Id = 1020307, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10204] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10204,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1020401] = new CIFKOJJBCHF { Id = 1020401, BAJHKMIBPDC = true },
-                                    [1020402] = new CIFKOJJBCHF { Id = 1020402, BAJHKMIBPDC = true },
-                                    [1020403] = new CIFKOJJBCHF { Id = 1020403, BAJHKMIBPDC = true },
-                                    [1020404] = new CIFKOJJBCHF { Id = 1020404, BAJHKMIBPDC = true },
-                                    [1020405] = new CIFKOJJBCHF { Id = 1020405, BAJHKMIBPDC = true },
-                                    [1020406] = new CIFKOJJBCHF { Id = 1020406, BAJHKMIBPDC = true },
-                                    [1020407] = new CIFKOJJBCHF { Id = 1020407, BAJHKMIBPDC = true },
-                                    [1020408] = new CIFKOJJBCHF { Id = 1020408, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10205] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10205,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1020501] = new CIFKOJJBCHF { Id = 1020501, BAJHKMIBPDC = true },
-                                    [1020502] = new CIFKOJJBCHF { Id = 1020502, BAJHKMIBPDC = true },
-                                    [1020503] = new CIFKOJJBCHF { Id = 1020503, BAJHKMIBPDC = true },
-                                    [1020504] = new CIFKOJJBCHF { Id = 1020504, BAJHKMIBPDC = true },
-                                    [1020505] = new CIFKOJJBCHF { Id = 1020505, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                        },
-                        AACANKHENII = false,
-                        MLIJIDKIFGF = new KEMPBIAFGHB
-                        {
-                            HFJLFAEFENH =
-                            {
-                                [3110908] = 3110909,
-                                [3110917] = 3110919,
-                                [3110924] = 3110925,
-                                [3110936] = 3110938,
-                                [3110939] = 3110941,
-                            },
-                        },
-                    },
-                    [103] = new KEAKDAMCBMM
-                    {
-                        Id = 103,
-                        HFKNLIGCIBP =
-                        {
-                            [10301] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10301,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1030101] = new CIFKOJJBCHF { Id = 1030101, BAJHKMIBPDC = true },
-                                    [1030102] = new CIFKOJJBCHF { Id = 1030102, BAJHKMIBPDC = true },
-                                    [1030103] = new CIFKOJJBCHF { Id = 1030103, BAJHKMIBPDC = true },
-                                    [1030104] = new CIFKOJJBCHF { Id = 1030104, BAJHKMIBPDC = true },
-                                    [1030105] = new CIFKOJJBCHF { Id = 1030105, BAJHKMIBPDC = true },
-                                    [1030106] = new CIFKOJJBCHF { Id = 1030106, BAJHKMIBPDC = true },
-                                    [1030107] = new CIFKOJJBCHF { Id = 1030107, BAJHKMIBPDC = true },
-                                    [1030108] = new CIFKOJJBCHF { Id = 1030108, BAJHKMIBPDC = true },
-                                    [1030109] = new CIFKOJJBCHF { Id = 1030109, BAJHKMIBPDC = true },
-                                    [1030110] = new CIFKOJJBCHF { Id = 1030110, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10302] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10302,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1030201] = new CIFKOJJBCHF { Id = 1030201, BAJHKMIBPDC = true },
-                                    [1030202] = new CIFKOJJBCHF { Id = 1030202, BAJHKMIBPDC = true },
-                                    [1030203] = new CIFKOJJBCHF { Id = 1030203, BAJHKMIBPDC = true },
-                                    [1030204] = new CIFKOJJBCHF { Id = 1030204, BAJHKMIBPDC = true },
-                                    [1030205] = new CIFKOJJBCHF { Id = 1030205, BAJHKMIBPDC = true },
-                                    [1030206] = new CIFKOJJBCHF { Id = 1030206, BAJHKMIBPDC = true },
-                                    [1030207] = new CIFKOJJBCHF { Id = 1030207, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10303] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10303,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1030301] = new CIFKOJJBCHF { Id = 1030301, BAJHKMIBPDC = true },
-                                    [1030302] = new CIFKOJJBCHF { Id = 1030302, BAJHKMIBPDC = true },
-                                    [1030303] = new CIFKOJJBCHF { Id = 1030303, BAJHKMIBPDC = true },
-                                    [1030304] = new CIFKOJJBCHF { Id = 1030304, BAJHKMIBPDC = true },
-                                    [1030305] = new CIFKOJJBCHF { Id = 1030305, BAJHKMIBPDC = true },
-                                    [1030306] = new CIFKOJJBCHF { Id = 1030306, BAJHKMIBPDC = true },
-                                    [1030307] = new CIFKOJJBCHF { Id = 1030307, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10304] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10304,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1030401] = new CIFKOJJBCHF { Id = 1030401, BAJHKMIBPDC = true },
-                                    [1030402] = new CIFKOJJBCHF { Id = 1030402, BAJHKMIBPDC = true },
-                                    [1030403] = new CIFKOJJBCHF { Id = 1030403, BAJHKMIBPDC = true },
-                                    [1030404] = new CIFKOJJBCHF { Id = 1030404, BAJHKMIBPDC = true },
-                                    [1030405] = new CIFKOJJBCHF { Id = 1030405, BAJHKMIBPDC = true },
-                                    [1030406] = new CIFKOJJBCHF { Id = 1030406, BAJHKMIBPDC = true },
-                                    [1030407] = new CIFKOJJBCHF { Id = 1030407, BAJHKMIBPDC = true },
-                                    [1030408] = new CIFKOJJBCHF { Id = 1030408, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                            [10305] = new BNNMKBFFNHJ
-                            {
-                                SectionId = 10305,
-                                BAJHKMIBPDC = true,
-                                LGNOAHMHJHH =
-                                {
-                                    [1030501] = new CIFKOJJBCHF { Id = 1030501, BAJHKMIBPDC = true },
-                                    [1030502] = new CIFKOJJBCHF { Id = 1030502, BAJHKMIBPDC = true },
-                                    [1030503] = new CIFKOJJBCHF { Id = 1030503, BAJHKMIBPDC = true },
-                                    [1030504] = new CIFKOJJBCHF { Id = 1030504, BAJHKMIBPDC = true },
-                                    [1030505] = new CIFKOJJBCHF { Id = 1030505, BAJHKMIBPDC = true },
-                                    [1030506] = new CIFKOJJBCHF { Id = 1030506, BAJHKMIBPDC = true },
-                                },
-                                LDLCBHAEFHO = { },
-                            },
-                        },
-                        AACANKHENII = false,
-                        MLIJIDKIFGF = new KEMPBIAFGHB
-                        {
-                            HFJLFAEFENH =
-                            {
-                                [3160910] = 3160911,
-                                [3160915] = 3160916,
-                                [3160919] = 3160920,
-                                [3160925] = 3160926,
-                                [3160936] = 3160937,
-                            },
-                        },
-                    },
-                },
-            };
+            if (connection.Account is null)
+                return;
 
-            // The party the player joined with LobbyPartyJoin (its id and progress) is reported back until LobbyPartyLeave.
-            if (connection.Account is not null
-                && PreferenceResponder.Recall<CS_LobbyPartyJoin>(accountState, connection.Account.Uid, "LobbyPartyJoin") is { } joined)
-            {
-                partyInfo.LKIBNJBDDJI = joined.HCKMOMCKFEA;
-                partyInfo.DOGDHOGHFNH = joined.DOGDHOGHFNH;
-            }
-
-            connection.Send(7, partyInfo);
+            connection.Send(7, parties.BuildInfo(connection.Account.Uid));
         }
 
-        /// <summary>Joins a party (an ASSUMPTION: the request is kept as it came, id and progress, and echoed; the server has no party rules).</summary>
+        /// <summary>
+        /// Joins a party (A-128): it becomes the current party of the account and the client, which only reads the answer to re-ask the info, finds in it the progress
+        /// of the party from the tables (sections, nodes done and open) instead of the empty room it got when the server just repeated the request.
+        /// </summary>
         public override void HandleLobbyPartyJoin(CS_LobbyPartyJoin request, Connection connection)
         {
             if (connection.Account is null)
                 return;
 
-            uint uid = connection.Account.Uid;
-            Dictionary<string, string> prefs = accountState.Get<Dictionary<string, string>>(uid, "prefs") ?? [];
-            prefs["LobbyPartyJoin"] = Convert.ToBase64String(Google.Protobuf.MessageExtensions.ToByteArray(request));
-            accountState.Set(uid, "prefs", prefs);
+            parties.Join(connection.Account.Uid, request.HCKMOMCKFEA, request.DOGDHOGHFNH?.SectionId ?? 0);
             connection.Send(new SC_LobbyPartyJoin { HCKMOMCKFEA = request.HCKMOMCKFEA, DOGDHOGHFNH = request.DOGDHOGHFNH });
+        }
+
+        public override void HandleLobbyPartyNodeCommit(CS_LobbyPartyNodeCommit request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            var messages = new List<Google.Protobuf.IMessage>();
+            if (!parties.Commit(connection.Account.Uid, request.HCKMOMCKFEA, request.SectionId, request.JBEONCNOEEA, messages, out SC_LobbyPartyNodeCommit? reply))
+            {
+                connection.Refuse(MsgId.MsgCsLobbyPartyNodeCommit, HNINDAOJCKP.ActivityMiniGameStatusInvalid);
+                return;
+            }
+
+            messages.Insert(0, reply!);
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
+        public override void HandleLobbyPartyAvgSelect(CS_LobbyPartyAvgSelect request, Connection connection)
+        {
+            if (connection.Account is not null)
+                parties.SaveAvgSelect(connection.Account.Uid, request.HCKMOMCKFEA, request.AvgId, request.NIFHINAFJJG);
+            connection.Send(new SC_LobbyPartyAvgSelect { HCKMOMCKFEA = request.HCKMOMCKFEA, AvgId = request.AvgId, NIFHINAFJJG = request.NIFHINAFJJG });
         }
 
         public override void HandleLobbyPartyLeave(CS_LobbyPartyLeave request, Connection connection)
         {
             if (connection.Account is not null)
-            {
-                uint uid = connection.Account.Uid;
-                Dictionary<string, string> prefs = accountState.Get<Dictionary<string, string>>(uid, "prefs") ?? [];
-                if (prefs.Remove("LobbyPartyJoin"))
-                    accountState.Set(uid, "prefs", prefs);
-            }
+                parties.Leave(connection.Account.Uid);
 
             connection.Send(new SC_LobbyPartyLeave());
         }
@@ -2747,7 +2458,5 @@ namespace Griffin.GameServer.Handlers
         public override void HandleLobbyHandwrittenGiftGetWords(CS_LobbyHandwrittenGiftGetWords request, Connection connection) =>
             connection.Send(new SC_LobbyHandwrittenGiftGetWords { IMABPMACCPJ = request.IMABPMACCPJ, MLOJEAFEBIF = string.Empty });
 
-        public override void HandleLobbyPartyNodeCommit(CS_LobbyPartyNodeCommit request, Connection connection) =>
-            connection.Send(new SC_LobbyPartyNodeCommit { NDMBKBDIIEG = new KEAKDAMCBMM { Id = request.HCKMOMCKFEA } });
     }
 }
