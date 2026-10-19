@@ -3,7 +3,7 @@
 // It never touches the user's game client. Test account credentials come from args/env, never hardcoded secrets.
 //
 // Usage: dotnet run --project Griffin.ProtocolSmoke -- [--http https://127.0.0.1] [--tcp 127.0.0.1:7001]
-//            [--email smoke@local.test] [--password <pw>] [--scenario all|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
+//            [--email smoke@local.test] [--password <pw>] [--scenario all|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
 using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -2243,6 +2243,428 @@ if (scenario == "probe")
             : string.Join(",", got.Select(p => p.Message is SC_ReportError e ? (e.ErrorNo == -10018 ? "BLOCKED(-10018)" : $"error{e.ErrorNo}") : p.MsgId.ToString().Replace("MsgSc", "")));
         Console.WriteLine($"PROBE {name}: {result}");
     }
+}
+
+if (scenario is "all" or "rouge")
+{
+    // 遗珍回收 "Rouge 1" (plan 600002): prepare (difficulty, trend, opening chip, squad) -> start -> open a battle node -> win -> finish (A-116..A-121).
+    const uint rougePlan = 600002;
+    // no Rouge error code has a text in the client: every refusal is sent as -10085 (A-125); the server log keeps the reason
+    static int RougeVisible(HNINDAOJCKP e) => (int)e is <= -14000 and >= -14099 ? (int)HNINDAOJCKP.ActivityMiniGameStatusInvalid : (int)e;
+    main.ReadFor(TimeSpan.FromSeconds(1));
+    main.Send(new CS_GetRougeInfo { PlanId = rougePlan });
+    var rgInfo0 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetRougeInfo>().FirstOrDefault()?.Info;
+    Check("rouge: a new account has the three trends of the season and nothing prepared", rgInfo0 is not null && rgInfo0.SeasonId == 2 && rgInfo0.FEALMJMPBHK.Count == 3 && rgInfo0.IFNEDNHKBJN == 0 && rgInfo0.NDKGOAHEAMJ.Count == 0, $"trends={rgInfo0?.FEALMJMPBHK.Count}");
+
+    main.Send(new CS_RougePrepare { PlanId = rougePlan, IFNEDNHKBJN = 1 });
+    var rgPrep1 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougePrepare>().FirstOrDefault()?.Info;
+    Check("rouge: Prepare with the difficulty keeps it and offers the trends", rgPrep1 is not null && rgPrep1.IFNEDNHKBJN == 1 && rgPrep1.FEALMJMPBHK.Count == 3);
+
+    main.Send(new CS_RougePrepare { PlanId = rougePlan, IFNEDNHKBJN = 3 });
+    var rgLocked = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: a locked difficulty is refused (RougePrepareDifficultyLocked)", rgLocked is not null && rgLocked.ErrorNo == RougeVisible(HNINDAOJCKP.RougePrepareDifficultyLocked), $"error={rgLocked?.ErrorNo}");
+
+    uint rgTrend = rgPrep1!.FEALMJMPBHK[0];
+    main.Send(new CS_RougePrepare { PlanId = rougePlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = rgTrend });
+    var rgPrep2 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougePrepare>().FirstOrDefault()?.Info;
+    Check("rouge: choosing the trend offers three opening chips", rgPrep2 is not null && rgPrep2.HIGHJLJPCPB == rgTrend && rgPrep2.PKOFBGMKLLC.Count == 3, $"chips={rgPrep2?.PKOFBGMKLLC.Count}");
+
+    uint rgChip = rgPrep2!.PKOFBGMKLLC[0];
+    main.Send(new CS_RougePrepare { PlanId = rougePlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = rgTrend, ODMEICDCEDP = rgChip });
+    var rgPrep3 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougePrepare>().FirstOrDefault()?.Info;
+    Check("rouge: choosing one of the offered chips keeps it", rgPrep3 is not null && rgPrep3.ODMEICDCEDP == rgChip);
+
+    main.Send(new CS_RougeStart { PlanId = rougePlan });
+    var rgNoGuns = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: Start without a squad is refused (RougeCreateMapNoGun)", rgNoGuns is not null && rgNoGuns.ErrorNo == RougeVisible(HNINDAOJCKP.RougeCreateMapNoGun), $"error={rgNoGuns?.ErrorNo}");
+
+    uint[] rgSquad = [1001, 1008, 1021, 1022];
+    var rgPrepare4 = new CS_RougePrepare { PlanId = rougePlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = rgTrend, ODMEICDCEDP = rgChip };
+    rgPrepare4.NDKGOAHEAMJ.AddRange(rgSquad);
+    main.Send(rgPrepare4);
+    var rgPrep4 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougePrepare>().FirstOrDefault()?.Info;
+    Check("rouge: the squad of four is kept with the grade of its preset", rgPrep4 is not null && rgPrep4.NDKGOAHEAMJ.Count == 4 && rgPrep4.NDKGOAHEAMJ.All(g => g.MNNKMKJFABP != 0),
+        $"guns={string.Join(",", rgPrep4?.NDKGOAHEAMJ.Select(g => $"{g.GunId}/{g.MNNKMKJFABP}") ?? [])}");
+
+    main.Send(new CS_RougeStart { PlanId = rougePlan });
+    var rgStart = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougeStart>().FirstOrDefault()?.Map;
+    var rgNodes = rgStart?.GILKCKNOBGM.FirstOrDefault()?.NNHPACALJEI.Values.OrderBy(n => n.KCIMLBLCCHP).ToList() ?? [];
+    Check("rouge: Start answers the whole map (a layer per column) with nodes, no current node and the squad", rgStart is not null && rgStart.BCCLAJIJJOA == 1 && rgStart.NOIMLDFHELK == 0 && rgStart.GILKCKNOBGM.Count >= 4
+        && rgNodes.Count >= 5 && rgStart.NDKGOAHEAMJ.Count == 4 && rgStart.AMMLMKFDGDK.Contains(rgChip), $"nodes={rgNodes.Count}");
+    Check("rouge: every node of the map has a type and a content", rgNodes.Count > 0 && rgNodes.All(n => n.AIODFHGMBME != 0 && n.ANJHKELIAFF != 0));
+
+    main.Send(new CS_GetRougeMapInfo { PlanId = rougePlan });
+    var rgMap = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+    Check("rouge: GetRougeMapInfo returns the saved map", rgMap is not null && rgMap.GILKCKNOBGM[0].NNHPACALJEI.Count == rgNodes.Count);
+
+    var rgBattle = rgNodes.First(n => n.AIODFHGMBME == 1);
+    var rgLater = rgNodes.Last();
+    main.Send(new CS_RougeNodeOpen { Id = rgLater.KCIMLBLCCHP, PlanId = rougePlan });
+    var rgBadOpen = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: a node that is not on the first section cannot be opened first", rgBadOpen is not null && rgBadOpen.ErrorNo == RougeVisible(HNINDAOJCKP.RougeNodeOpenNotSecton1), $"error={rgBadOpen?.ErrorNo}");
+
+    main.Send(new CS_RougeNodePreview { Id = rgBattle.KCIMLBLCCHP, PlanId = rougePlan });
+    var rgPreview = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougeNodePreview>().FirstOrDefault();
+    Check("rouge: NodePreview returns the node", rgPreview?.GCMADDJNGMI is { } pn && pn.KCIMLBLCCHP == rgBattle.KCIMLBLCCHP && pn.ANJHKELIAFF == rgBattle.ANJHKELIAFF);
+
+    main.Send(new CS_RougeNodeOpen { Id = rgBattle.KCIMLBLCCHP, PlanId = rougePlan });
+    var rgOpen = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougeNodeOpen>().FirstOrDefault();
+    Check("rouge: NodeOpen of the first battle node answers the node", rgOpen?.GCMADDJNGMI is { } on && on.KCIMLBLCCHP == rgBattle.KCIMLBLCCHP && !on.JONLCAGBGJE);
+
+    main.Send(new CS_StageStart { StcStageId = rgBattle.ANJHKELIAFF + 1, Other = new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = rgBattle.KCIMLBLCCHP, PlanId = rougePlan } } });
+    var rgWrongStage = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: StageStart with a stage the node does not hold is refused", rgWrongStage is not null);
+
+    main.Send(new CS_StageStart { StcStageId = rgBattle.ANJHKELIAFF, Other = new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = rgBattle.KCIMLBLCCHP, PlanId = rougePlan } } });
+    var rgStageStart = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageStart>().FirstOrDefault();
+    Check("rouge: StageStart of the node's stage answers the battle with the rouge info", rgStageStart?.Stage is { } rb && rb.StcStageId == rgBattle.ANJHKELIAFF && rgStageStart.Other?.Rouge?.PMFFONMEDCP == rgBattle.KCIMLBLCCHP);
+
+    // the real client names each unit by the GunPresetData id of the squad member (log of 2026-10-18 23:07), not by the character
+    main.Send(new CS_StageInto { Guns = { [1310739u] = 1001u, [1376275u] = 1008u, [1441811u] = 1021u, [1507347u] = 1022u } });
+    var rgInto = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault();
+    Check("rouge: StageInto composes the whole preset squad (one unit per member, not one for the whole team)", rgInto?.Stage?.Camps.Count == 2 && rgInto.Other?.Rouge?.PlanId == rougePlan
+        && rgInto.Stage.Camps[0].LBJLMGIPOJA.Count >= 4, $"units={rgInto?.Stage?.Camps[0].LBJLMGIPOJA.Count}");
+    main.Send(new CS_StageUsableGuns { StageId = 10104 });
+    var rgLineup = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_StageUsableGuns>().FirstOrDefault();
+    Check("rouge: the preset squad is not remembered as the player's own last team", rgLineup is not null && rgLineup.Lineup.All(id => id == 0));
+
+    main.Send(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 });
+    var rgResult = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("rouge: the win is answered with the result and the finished node", rgResult.OfType<SC_StageResult>().Any(r => r.BattleResult == BattleResult.Win && r.StageOther?.Rouge?.PlanId == rougePlan)
+        && rgResult.OfType<SC_RougeNodeInteract>().Any(r => r.GCMADDJNGMI?.KCIMLBLCCHP == rgBattle.KCIMLBLCCHP && r.GCMADDJNGMI.JONLCAGBGJE));
+
+    main.Send(new CS_GetRougeMapInfo { PlanId = rougePlan });
+    var rgMap2 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+    Check("rouge: the saved map has the node finished and as the current node", rgMap2 is not null && rgMap2.NOIMLDFHELK == rgBattle.KCIMLBLCCHP
+        && rgMap2.GILKCKNOBGM[0].NNHPACALJEI[rgBattle.KCIMLBLCCHP].JONLCAGBGJE);
+
+    main.Send(new CS_RougeNodeInteract { Id = rgBattle.KCIMLBLCCHP, PlanId = rougePlan });
+    var rgAgain = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: interacting with a finished node is refused (RougeNodeInteractFinished)", rgAgain is not null && rgAgain.ErrorNo == RougeVisible(HNINDAOJCKP.RougeNodeInteractFinished), $"error={rgAgain?.ErrorNo}");
+
+    // ---- the rest of the run: every layer, every node type (A-124, A-125) ----
+    int rgLayerCount = rgStart!.GILKCKNOBGM.Count;
+    Check("rouge: the map has one layer per column of the map table (a whole run, not one layer)", rgLayerCount >= 4, $"layers={rgLayerCount}");
+    var rgTypesPlayed = new SortedSet<uint> { rgBattle.AIODFHGMBME };
+    bool rgShopTested = false, rgEventBadOption = false, rgSkipRefused = false, rgChipPackSeen = false, rgSupplyTried = false, rgGunNodeSeen = false, rgLayerAdvanced = false, rgPackRefreshRefused = false;
+    string rgStall = "";
+
+    List<IMessage> RgSend(IMessage request, int ms = 700)
+    {
+        main.Send(request);
+        return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => p.Message).ToList();
+    }
+
+    void RgPickChipIfOffered(List<IMessage> replies)
+    {
+        var pack = replies.OfType<SC_RougePackOp>().LastOrDefault(r => r.IELOGFIINGN is not null && r.IELOGFIINGN.PKOFBGMKLLC.Count > 0)?.IELOGFIINGN;
+        if (pack is null)
+            return;
+        rgChipPackSeen = true;
+        if (!rgPackRefreshRefused)
+        {
+            rgPackRefreshRefused = true;
+            var refused = RgSend(new CS_RougePackOp { CJJJLMCADGM = CS_RougePackOp.Types.AAOPFMBDJHO.OpTypeRefresh, IHLNPPPJELG = CS_RougePackOp.Types.JAJGPMKINOD.OpTargetChip, PlanId = rougePlan }, 500);
+            Check("rouge: refreshing the plugin choice without the talent is refused", refused.OfType<SC_ReportError>().Any());
+        }
+
+        var chosen = RgSend(new CS_RougePackOp { CJJJLMCADGM = CS_RougePackOp.Types.AAOPFMBDJHO.OpTypePick, IHLNPPPJELG = CS_RougePackOp.Types.JAJGPMKINOD.OpTargetChip, BEKLEGCIKCI = (int)pack.PKOFBGMKLLC[0], PlanId = rougePlan }, 500);
+        Check("rouge: picking a plugin of the choice adds it to the plugin list and closes the choice",
+            chosen.OfType<SC_RougeMapChipList>().Any(l => l.AMMLMKFDGDK.Contains(pack.PKOFBGMKLLC[0])) && chosen.OfType<SC_RougePackOp>().Any(r => r.IELOGFIINGN is null));
+    }
+
+    void RgFightNode(ODFMONHCBIO step)
+    {
+        RgSend(new CS_StageStart { StcStageId = step.ANJHKELIAFF, Other = new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = step.KCIMLBLCCHP, PlanId = rougePlan } } }, 400);
+        RgSend(new CS_StageInto { Guns = { [1310739u] = 1001u, [1376275u] = 1008u, [1441811u] = 1021u, [1507347u] = 1022u } }, 400);
+        var won = RgSend(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 }, 700);
+        Check($"rouge: winning the type {step.AIODFHGMBME} node finishes it and pays coins and terminals", won.OfType<SC_RougeNodeInteract>().Any(r => r.GCMADDJNGMI?.KCIMLBLCCHP == step.KCIMLBLCCHP && r.GCMADDJNGMI.JONLCAGBGJE)
+            && (step.AIODFHGMBME == 4 || won.OfType<SC_Items>().Any()), string.Join(",", won.Select(m => m.GetType().Name)));
+        RgPickChipIfOffered(won);
+    }
+
+    void RgPlayNode(ODFMONHCBIO step, List<IMessage> opened)
+    {
+        rgTypesPlayed.Add(step.AIODFHGMBME);
+        switch (step.AIODFHGMBME)
+        {
+            case 1 or 2 or 3 or 4 or 8:
+                if (!rgSkipRefused && step.AIODFHGMBME == 1)
+                {
+                    rgSkipRefused = true;
+                    var skip = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, PlanId = rougePlan }, 500);
+                    Check("rouge: the quick finish of a battle is refused without its talent", skip.OfType<SC_ReportError>().Any());
+                }
+
+                RgFightNode(step);
+                break;
+            case 9:
+            {
+                var gunPack = opened.OfType<SC_RougePackOp>().FirstOrDefault()?.HIOLNHOOLOE;
+                Check("rouge: opening the gun node offers three characters of its pool", gunPack is not null && gunPack.HFEIPLDDHIN.Count == 3, $"offered={gunPack?.HFEIPLDDHIN.Count}");
+                if (!rgGunNodeSeen)
+                {
+                    rgGunNodeSeen = true;
+                    var refused = RgSend(new CS_RougePackOp { CJJJLMCADGM = CS_RougePackOp.Types.AAOPFMBDJHO.OpTypeRefresh, IHLNPPPJELG = CS_RougePackOp.Types.JAJGPMKINOD.OpTargetGun, PlanId = rougePlan }, 500);
+                    Check("rouge: refreshing the character choice without the talent is refused", refused.OfType<SC_ReportError>().Any());
+                }
+
+                var picked = RgSend(new CS_RougePackOp { CJJJLMCADGM = CS_RougePackOp.Types.AAOPFMBDJHO.OpTypePick, IHLNPPPJELG = CS_RougePackOp.Types.JAJGPMKINOD.OpTargetGun, BEKLEGCIKCI = (int)gunPack!.HFEIPLDDHIN[0].GunId, PlanId = rougePlan }, 600);
+                Check("rouge: picking a character finishes the gun node and clears the pack", picked.OfType<SC_RougeNodeInteract>().Any(r => r.GCMADDJNGMI?.JONLCAGBGJE == true) && picked.OfType<SC_RougePackOp>().Any(r => r.HIOLNHOOLOE is null));
+                break;
+            }
+            case 5:
+            {
+                if (!rgEventBadOption)
+                {
+                    rgEventBadOption = true;
+                    var bad = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = 7, PlanId = rougePlan }, 500);
+                    Check("rouge: an event option that does not exist is refused", bad.OfType<SC_ReportError>().Any());
+                }
+
+                var option = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = (uint)Random.Shared.Next(1, 4), PlanId = rougePlan }, 700);
+                Check("rouge: choosing an event option finishes the node", option.OfType<SC_RougeNodeInteract>().Any(r => r.GCMADDJNGMI?.JONLCAGBGJE == true), string.Join(",", option.Select(m => m.GetType().Name)));
+                break;
+            }
+            case 7:
+            {
+                if (!rgSupplyTried)
+                {
+                    rgSupplyTried = true;
+                    var reinforce = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = 1001, PlanId = rougePlan }, 600);
+                    Check("rouge: a limited reinforcement raises the grade of a character (or is refused for lack of terminals)",
+                        reinforce.OfType<SC_RougeMapGunModify>().Any(g => g.Gun?.GunId == 1001) || reinforce.OfType<SC_ReportError>().Any(), string.Join(",", reinforce.Select(m => m.GetType().Name)));
+                }
+
+                var leave = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, KBJHHBCEPLB = 2, PlanId = rougePlan }, 600);
+                Check("rouge: leaving the supply node finishes it", leave.OfType<SC_RougeNodeInteract>().Any(r => r.GCMADDJNGMI?.JONLCAGBGJE == true));
+                break;
+            }
+            case 6:
+            {
+                var openedShop = opened.OfType<SC_RougeNodeOpen>().First().GCMADDJNGMI;
+                if (!rgShopTested && openedShop?.Content?.Shop is { } rgShop)
+                {
+                    rgShopTested = true;
+                    Check("rouge: the merchant's shop node opens with goods to buy", rgShop.BIOFMBAOLJO.Count > 0 && rgShop.BIOFMBAOLJO.All(g => g.LJJEFHEDHLB == 1), $"goods={rgShop.BIOFMBAOLJO.Count}");
+                    var badSell = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = 999999, KBJHHBCEPLB = 3, PlanId = rougePlan }, 500);
+                    Check("rouge: selling a plugin the squad does not have is refused", badSell.OfType<SC_ReportError>().Any());
+                    var sold = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = rgChip, KBJHHBCEPLB = 3, PlanId = rougePlan }, 600);
+                    Check("rouge: selling the opening plugin pays coins and sends the new plugin list", sold.OfType<SC_RougeNodeInteract>().Any() && sold.OfType<SC_Items>().Any(i => i.Items.ContainsKey(9990102u))
+                        && sold.OfType<SC_RougeMapChipList>().FirstOrDefault() is { } list && !list.AMMLMKFDGDK.Contains(rgChip), string.Join(",", sold.Select(m => m.GetType().Name)));
+                    uint bought = 0;
+                    foreach (var good in rgShop.BIOFMBAOLJO)
+                    {
+                        var buy = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = good.Id, PlanId = rougePlan }, 500);
+                        if (buy.OfType<SC_RougeNodeInteract>().FirstOrDefault()?.GCMADDJNGMI?.Content?.Shop is { } after)
+                        {
+                            bought = good.Id;
+                            Check("rouge: buying a plugin charges the coins, marks it sold and adds it to the plugin list",
+                                after.BIOFMBAOLJO.First(g => g.Id == good.Id).LJJEFHEDHLB == 0 && buy.OfType<SC_Items>().Any() && buy.OfType<SC_RougeMapChipList>().Any());
+                            break;
+                        }
+                    }
+
+                    Check("rouge: at least one plugin of the shop could be bought with the coins", bought != 0);
+                    var twice = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = bought, PlanId = rougePlan }, 500);
+                    Check("rouge: a plugin cannot be bought twice", twice.OfType<SC_ReportError>().Any());
+                    var refresh = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, KBJHHBCEPLB = 1, PlanId = rougePlan }, 500);
+                    Check("rouge: refreshing the shop without the talent is refused", refresh.OfType<SC_ReportError>().Any());
+                    var points = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = 5, KBJHHBCEPLB = 4, PlanId = rougePlan }, 600);
+                    Check("rouge: selling reinforcement terminals pays coins (or is refused if the account has none)", points.OfType<SC_RougeNodeInteract>().Any() || points.OfType<SC_ReportError>().Any());
+                }
+
+                var leave = RgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, KBJHHBCEPLB = 2, PlanId = rougePlan }, 700);
+                Check("rouge: leaving the shop finishes the node", leave.OfType<SC_RougeNodeInteract>().Any(r => r.GCMADDJNGMI?.JONLCAGBGJE == true));
+                break;
+            }
+        }
+    }
+
+    // play layer after layer: the nodes are tried in id order, an unreachable one is simply refused, so the player's choice between branches is the first reachable one
+    for (int layerPass = 0; layerPass < rgLayerCount + 1; layerPass++)
+    {
+        var current = RgSend(new CS_GetRougeMapInfo { PlanId = rougePlan }, 600).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+        if (current is null)
+            break;
+        uint layerNow = current.BCCLAJIJJOA;
+        var layerNodes = current.GILKCKNOBGM[(int)layerNow - 1].NNHPACALJEI.Values.OrderBy(n => n.KCIMLBLCCHP).ToList();
+        for (int pass = 0; pass < 8; pass++)
+        {
+            bool progressed = false;
+            foreach (var step in layerNodes)
+            {
+                var opened = RgSend(new CS_RougeNodeOpen { Id = step.KCIMLBLCCHP, PlanId = rougePlan }, 500);
+                if (opened.OfType<SC_RougeNodeOpen>().FirstOrDefault()?.GCMADDJNGMI is not { JONLCAGBGJE: false })
+                    continue;
+                progressed = true;
+                int before = (int)layerNow;
+                RgPlayNode(step, opened);
+                var check = RgSend(new CS_GetRougeMapInfo { PlanId = rougePlan }, 500).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+                if (check is not null && check.BCCLAJIJJOA != before)
+                {
+                    rgLayerAdvanced = true;
+                    break;
+                }
+            }
+
+            var after = RgSend(new CS_GetRougeMapInfo { PlanId = rougePlan }, 400).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+            if (after is null || after.BCCLAJIJJOA != layerNow || !progressed)
+                break;
+        }
+    }
+
+    var rgEnd = RgSend(new CS_GetRougeMapInfo { PlanId = rougePlan }, 600).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+    Check("rouge: the run reached the last layer and finished its last node", rgEnd is not null && rgEnd.BCCLAJIJJOA == rgLayerCount
+        && rgEnd.GILKCKNOBGM[^1].NNHPACALJEI.Values.Any(n => n.JONLCAGBGJE), $"layer={rgEnd?.BCCLAJIJJOA}/{rgLayerCount} stall={rgStall}");
+    Check("rouge: the layer changed during the run", rgLayerAdvanced);
+    Check("rouge: battle, gun, event, supply and shop nodes were all played in the run (types seen: " + string.Join(",", rgTypesPlayed) + ")", rgTypesPlayed.IsSupersetOf(new uint[] { 1, 5, 6, 9 }) && rgChipPackSeen);
+
+    main.Send(new CS_RougeFinish { PlanId = rougePlan, Reason = CDPCJHMOCPM.RougeFinishOptionManualQuit });
+    var rgFinish = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougeFinish>().FirstOrDefault();
+    Check("rouge: Finish settles the run (score and the rows of the finished nodes)", rgFinish is not null && rgFinish.Score > 0 && rgFinish.PLDHFBFAKDI.Count > 0 && rgFinish.PlanId == rougePlan && rgFinish.Reason == CDPCJHMOCPM.RougeFinishReasonSuccessQuit, $"score={rgFinish?.Score} reason={rgFinish?.Reason}");
+
+    main.Send(new CS_GetRougeMapInfo { PlanId = rougePlan });
+    var rgMap3 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetRougeMapInfo>().FirstOrDefault();
+    main.Send(new CS_GetRougeInfo { PlanId = rougePlan });
+    var rgInfo3 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetRougeInfo>().FirstOrDefault()?.Info;
+    Check("rouge: after Finish there is no map, the preparation is cleared and the experience is kept", rgMap3 is not null && rgMap3.Map is null && rgInfo3 is not null
+        && rgInfo3.NDKGOAHEAMJ.Count == 0 && rgInfo3.HIGHJLJPCPB == 0 && (rgInfo3.Exp > 0 || rgInfo3.Level > 0), $"exp={rgInfo3?.Exp} level={rgInfo3?.Level}");
+
+    // talents (A-122): 32 per season, prerequisites, cost 9990101, kept in the info
+    main.Send(new CS_RougeUnlockTalent { PlanId = rougePlan, TalentId = 54 });
+    var rgTalLocked = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: a talent whose prerequisites are not active is refused (RougeUnlockTalentLocked)", rgTalLocked is not null && rgTalLocked.ErrorNo == RougeVisible(HNINDAOJCKP.RougeUnlockTalentLocked), $"error={rgTalLocked?.ErrorNo}");
+    main.Send(new CS_RougeUnlockTalent { PlanId = rougePlan, TalentId = 3 });
+    var rgTalOther = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: a talent of another season is refused (RougeUnlockTalentSeasonCfg)", rgTalOther is not null && rgTalOther.ErrorNo == RougeVisible(HNINDAOJCKP.RougeUnlockTalentSeasonCfg), $"error={rgTalOther?.ErrorNo}");
+    main.Send(new CS_RougeUnlockTalent { PlanId = rougePlan, TalentId = 50 });
+    var rgTal1 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    // a fresh account has no special-intel points (9990101): the charge is then refused; with AUTO_PROV=1 the chain below runs
+    bool rgPoints = rgTal1.OfType<SC_RougeUnlockTalent>().Any();
+    Check("rouge: a talent without prerequisites is activated and charged (or refused for lack of points)", rgPoints
+        ? rgTal1.OfType<SC_RougeUnlockTalent>().First().MMIKNJIBMBA.SequenceEqual(new uint[] { 50 }) && rgTal1.Any(m => m is SC_ResourceUpdate or SC_Items)
+        : rgTal1.OfType<SC_ReportError>().Any(e => e.ErrorNo == (int)HNINDAOJCKP.ItemNotEnough), string.Join(",", rgTal1.Select(m => m.GetType().Name)));
+    if (rgPoints)
+    {
+        main.Send(new CS_RougeUnlockTalent { PlanId = rougePlan, TalentId = 51 });
+        var rgTal2 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougeUnlockTalent>().FirstOrDefault();
+        Check("rouge: the next talent of the tree is activated once its prerequisite is", rgTal2 is not null && rgTal2.MMIKNJIBMBA.SequenceEqual(new uint[] { 50, 51 }));
+        main.Send(new CS_RougeUnlockTalent { PlanId = rougePlan, TalentId = 51 });
+        var rgTalTwice = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+        Check("rouge: a talent cannot be activated twice (RougeUnlockTalentUnlocked)", rgTalTwice is not null && rgTalTwice.ErrorNo == RougeVisible(HNINDAOJCKP.RougeUnlockTalentUnlocked), $"error={rgTalTwice?.ErrorNo}");
+        main.Send(new CS_GetRougeInfo { PlanId = rougePlan });
+        var rgInfoTal = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetRougeInfo>().FirstOrDefault()?.Info;
+        Check("rouge: the active talents are in the info (the 2/32 counter)", rgInfoTal is not null && rgInfoTal.MMIKNJIBMBA.OrderBy(x => x).SequenceEqual(new uint[] { 50, 51 }));
+    }
+    main.Send(new CS_RougeFinish { PlanId = rougePlan, Reason = CDPCJHMOCPM.RougeFinishOptionManualQuit });
+    var rgNoMap = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge: a second Finish is refused (RougeFinishNoMap)", rgNoMap is not null && rgNoMap.ErrorNo == RougeVisible(HNINDAOJCKP.RougeFinishNoMap), $"error={rgNoMap?.ErrorNo}");
+}
+
+if (scenario is "all" or "rouge")
+{
+    // plan 600003 (season 3): the same preparation and a map of several layers, then a manual quit
+    const uint plan3 = 600003;
+    main.ReadFor(TimeSpan.FromMilliseconds(500));
+    main.Send(new CS_RougePrepare { PlanId = plan3, IFNEDNHKBJN = 1 });
+    var p3a = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougePrepare>().FirstOrDefault()?.Info;
+    Check("rouge (season 3): the three trends of the season are offered", p3a is not null && p3a.SeasonId == 3 && p3a.FEALMJMPBHK.Count == 3);
+    main.Send(new CS_RougePrepare { PlanId = plan3, IFNEDNHKBJN = 1, HIGHJLJPCPB = p3a!.FEALMJMPBHK[0] });
+    var p3b = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougePrepare>().FirstOrDefault()?.Info;
+    var prepare3 = new CS_RougePrepare { PlanId = plan3, IFNEDNHKBJN = 1, HIGHJLJPCPB = p3a.FEALMJMPBHK[0], ODMEICDCEDP = p3b!.PKOFBGMKLLC[0] };
+    prepare3.NDKGOAHEAMJ.AddRange(new uint[] { 1001, 1008, 1021, 1022 });
+    main.Send(prepare3);
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_RougeStart { PlanId = plan3 });
+    var p3Map = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougeStart>().FirstOrDefault()?.Map;
+    Check("rouge (season 3): Start answers a map of several layers", p3Map is not null && p3Map.GILKCKNOBGM.Count >= 4 && p3Map.GILKCKNOBGM.All(l => l.NNHPACALJEI.Count > 0));
+    main.Send(new CS_RougeFinish { PlanId = plan3, Reason = CDPCJHMOCPM.RougeFinishOptionManualQuit });
+    var p3Fin = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RougeFinish>().FirstOrDefault();
+    Check("rouge (season 3): quitting settles the run as a quit, not a success", p3Fin is not null && p3Fin.Reason == CDPCJHMOCPM.RougeFinishOptionManualQuit);
+    main.Send(new CS_RougeTakeGradeReward { PlanId = plan3, MMADAMIMGCM = { 999999u } });
+    var p3Grade = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ReportError>().FirstOrDefault();
+    Check("rouge (season 3): a grade reward that is not in the table is refused", p3Grade is not null);
+}
+
+if (scenario is "roguelegacy" or "roguemigrate")
+{
+    // A run saved by the one-layer build (A-126). Phase 1 (server started with GRIFFIN_ROUGE_LEGACY_MAP=1): play the whole first layer. Phase 2 (normal server, same account
+    // and database): loading the saved run must bring it to layer 2. Run with ACCOUNT_EMAIL=<same> and AUTO_PROV=1 for both phases.
+    const uint legacyPlan = 600002;
+    main.ReadFor(TimeSpan.FromSeconds(1));
+    List<IMessage> LgSend(IMessage request, int ms = 600) { main.Send(request); return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => p.Message).ToList(); }
+    if (scenario == "roguelegacy")
+    {
+        var lgInfo = LgSend(new CS_RougePrepare { PlanId = legacyPlan, IFNEDNHKBJN = 1 }).OfType<SC_RougePrepare>().First().Info;
+        var lgTrend = lgInfo.FEALMJMPBHK[0];
+        var lgChips = LgSend(new CS_RougePrepare { PlanId = legacyPlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = lgTrend }).OfType<SC_RougePrepare>().First().Info.PKOFBGMKLLC;
+        var lgPrepare = new CS_RougePrepare { PlanId = legacyPlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = lgTrend, ODMEICDCEDP = lgChips[0] };
+        lgPrepare.NDKGOAHEAMJ.AddRange(new uint[] { 1001, 1008, 1021, 1022 });
+        LgSend(lgPrepare);
+        var lgMap = LgSend(new CS_RougeStart { PlanId = legacyPlan }).OfType<SC_RougeStart>().FirstOrDefault()?.Map;
+        Check("rouge legacy: the one-layer build makes a one-layer map", lgMap is not null && lgMap.GILKCKNOBGM.Count == 1);
+        foreach (var step in lgMap!.GILKCKNOBGM[0].NNHPACALJEI.Values.OrderBy(n => n.KCIMLBLCCHP))
+            for (int pass = 0; pass < 2; pass++)
+            {
+                var opened = LgSend(new CS_RougeNodeOpen { Id = step.KCIMLBLCCHP, PlanId = legacyPlan }, 400);
+                if (opened.OfType<SC_RougeNodeOpen>().FirstOrDefault()?.GCMADDJNGMI is not { JONLCAGBGJE: false })
+                    break;
+                if (step.AIODFHGMBME is 1 or 2 or 3 or 4 or 8)
+                {
+                    LgSend(new CS_StageStart { StcStageId = step.ANJHKELIAFF, Other = new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = step.KCIMLBLCCHP, PlanId = legacyPlan } } }, 300);
+                    LgSend(new CS_StageInto { Guns = { [1310739u] = 1001u, [1376275u] = 1008u, [1441811u] = 1021u, [1507347u] = 1022u } }, 300);
+                    LgSend(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 }, 500);
+                }
+                else if (step.AIODFHGMBME == 9)
+                {
+                    var pack = opened.OfType<SC_RougePackOp>().FirstOrDefault()?.HIOLNHOOLOE;
+                    LgSend(new CS_RougePackOp { CJJJLMCADGM = CS_RougePackOp.Types.AAOPFMBDJHO.OpTypeGiveup, IHLNPPPJELG = CS_RougePackOp.Types.JAJGPMKINOD.OpTargetGun, PlanId = legacyPlan });
+                }
+                else
+                    LgSend(new CS_RougeNodeInteract { Id = step.KCIMLBLCCHP, LJJEFHEDHLB = step.AIODFHGMBME == 5 ? 1u : 0u, KBJHHBCEPLB = 2, PlanId = legacyPlan });
+                break;
+            }
+
+        var lgDone = LgSend(new CS_GetRougeMapInfo { PlanId = legacyPlan }).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+        Check("rouge legacy: the saved run has its last node finished on the only layer", lgDone is not null && lgDone.BCCLAJIJJOA == 1 && lgDone.GILKCKNOBGM.Count == 1 && lgDone.GILKCKNOBGM[0].NNHPACALJEI.Values.Any(n => n.JONLCAGBGJE && n.AIODFHGMBME == 6));
+    }
+    else
+    {
+        var mgMap = LgSend(new CS_GetRougeMapInfo { PlanId = legacyPlan }).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+        Check("rouge migrate: a run saved with one finished layer is brought to the whole map and to layer 2", mgMap is not null && mgMap.GILKCKNOBGM.Count >= 4 && mgMap.BCCLAJIJJOA == 2 && mgMap.NOIMLDFHELK == 0,
+            $"layers={mgMap?.GILKCKNOBGM.Count} layer={mgMap?.BCCLAJIJJOA} node={mgMap?.NOIMLDFHELK}");
+        var mgFirst = mgMap!.GILKCKNOBGM[1].NNHPACALJEI.Values.OrderBy(n => n.KCIMLBLCCHP).First();
+        var mgOpen = LgSend(new CS_RougeNodeOpen { Id = mgFirst.KCIMLBLCCHP, PlanId = legacyPlan }).OfType<SC_RougeNodeOpen>().FirstOrDefault();
+        Check("rouge migrate: the first node of layer 2 opens", mgOpen?.GCMADDJNGMI?.KCIMLBLCCHP == mgFirst.KCIMLBLCCHP);
+        main.Send(new CS_RougeFinish { PlanId = legacyPlan, Reason = CDPCJHMOCPM.RougeFinishOptionManualQuit });
+        Check("rouge migrate: the run can be settled", main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_RougeFinish));
+    }
+}
+
+if (scenario is "all" or "rouge")
+{
+    // defeat: a second run of plan 600002 lost in its first battle (A-127)
+    const uint losePlan = 600002;
+    List<IMessage> LoSend(IMessage request, int ms = 600) { main.Send(request); return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => p.Message).ToList(); }
+    var loTrend = LoSend(new CS_RougePrepare { PlanId = losePlan, IFNEDNHKBJN = 1 }).OfType<SC_RougePrepare>().First().Info.FEALMJMPBHK[0];
+    var loChip = LoSend(new CS_RougePrepare { PlanId = losePlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = loTrend }).OfType<SC_RougePrepare>().First().Info.PKOFBGMKLLC[0];
+    var loPrepare = new CS_RougePrepare { PlanId = losePlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = loTrend, ODMEICDCEDP = loChip };
+    loPrepare.NDKGOAHEAMJ.AddRange(new uint[] { 1001, 1008, 1021, 1022 });
+    LoSend(loPrepare);
+    var loMap = LoSend(new CS_RougeStart { PlanId = losePlan }).OfType<SC_RougeStart>().FirstOrDefault()?.Map;
+    var loNode = loMap!.GILKCKNOBGM[0].NNHPACALJEI.Values.OrderBy(n => n.KCIMLBLCCHP).First(n => n.AIODFHGMBME == 1);
+    LoSend(new CS_RougeNodeOpen { Id = loNode.KCIMLBLCCHP, PlanId = losePlan });
+    LoSend(new CS_StageStart { StcStageId = loNode.ANJHKELIAFF, Other = new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = loNode.KCIMLBLCCHP, PlanId = losePlan } } }, 400);
+    LoSend(new CS_StageInto { Guns = { [1310739u] = 1001u, [1376275u] = 1008u, [1441811u] = 1021u, [1507347u] = 1022u } }, 400);
+    var lost = LoSend(new CS_StageResult { BattleResult = BattleResult.Lose, Count = 1 }, 700);
+    var loAfter = LoSend(new CS_GetRougeMapInfo { PlanId = losePlan }).OfType<SC_GetRougeMapInfo>().FirstOrDefault()?.Map;
+    Check("rouge (defeat): losing a battle node answers the result and leaves the node unfinished", lost.OfType<SC_StageResult>().Any(r => r.BattleResult == BattleResult.Lose)
+        && !lost.OfType<SC_RougeNodeInteract>().Any() && loAfter is not null && !loAfter.GILKCKNOBGM[0].NNHPACALJEI[loNode.KCIMLBLCCHP].JONLCAGBGJE);
+    var loFinish = LoSend(new CS_RougeFinish { PlanId = losePlan, Reason = CDPCJHMOCPM.RougeFinishOptionBattleFailure });
+    var loSettle = loFinish.OfType<SC_RougeFinish>().FirstOrDefault();
+    Check("rouge (defeat): the settlement of a defeat is reported as a battle failure, clears the coins", loSettle is not null && loSettle.Reason == CDPCJHMOCPM.RougeFinishOptionBattleFailure
+        && loFinish.OfType<SC_Items>().Any(i => i.Items.ContainsKey(9990101u) || i.Items.ContainsKey(9990102u)), string.Join(",", loFinish.Select(m => m.GetType().Name)));
 }
 
 if (scenario == "campaign")

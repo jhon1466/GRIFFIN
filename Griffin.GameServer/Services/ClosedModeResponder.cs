@@ -27,7 +27,7 @@ namespace Griffin.GameServer.Services
             (new Regex("^StoreCartGoodSelected", RegexOptions.Compiled), HNINDAOJCKP.StoreCartGoodNotExist),
             (new Regex("^GunWeaponEvolution", RegexOptions.Compiled), HNINDAOJCKP.GunWeaponEvolutionValid),
             (new Regex("^GunWeaponModCalibration", RegexOptions.Compiled), HNINDAOJCKP.CalibrationFunctionClosed),
-            (new Regex("^GetCareRewards", RegexOptions.Compiled), HNINDAOJCKP.ActivityNotOpenOrClosed),
+            (new Regex("^GetCareRewards", RegexOptions.Compiled), HNINDAOJCKP.CmdIdIsBanned),
             (new Regex("^GachaGetPhaseReward", RegexOptions.Compiled), HNINDAOJCKP.GachaPhaseRewardCountNotReach),
             (new Regex("^GetBattlepassRewardTimeLimit", RegexOptions.Compiled), HNINDAOJCKP.BattlepassRewardLock),
             (new Regex("^(DarkZone)", RegexOptions.Compiled), HNINDAOJCKP.DarkZoneNotStart),
@@ -47,7 +47,7 @@ namespace Griffin.GameServer.Services
             (new Regex("^Jigsaw", RegexOptions.Compiled), HNINDAOJCKP.JigsawNotOpen),
             (new Regex("^OperationMiniGame", RegexOptions.Compiled), HNINDAOJCKP.OperationActivityNotOpen),
             (new Regex("^Collection", RegexOptions.Compiled), HNINDAOJCKP.CollectionNotStart),
-            (new Regex("^(Geopolitic|SandBox|RichMan|Monopoly|Rouge|SimCafe|KittyCafe|Bingo|OpenBingoCard|TakeBingo|OpenGrid|InteractWithGrid|FreeSkin|EventEndlessTower|Activity|TakeActivity|ActicityReset|TakeWarmUp|UnlockAdvancedReward|GainIndividualScore|GainGuildScore|RubyShop|EnterDungeon|GetDispatchReward)", RegexOptions.Compiled), HNINDAOJCKP.ActivityNotOpenOrClosed),
+            (new Regex("^(Geopolitic|SandBox|RichMan|Monopoly|Rouge|SimCafe|KittyCafe|Bingo|OpenBingoCard|TakeBingo|OpenGrid|InteractWithGrid|FreeSkin|EventEndlessTower|Activity|TakeActivity|ActicityReset|TakeWarmUp|UnlockAdvancedReward|GainIndividualScore|GainGuildScore|RubyShop|EnterDungeon|GetDispatchReward)", RegexOptions.Compiled), HNINDAOJCKP.CmdIdIsBanned),
             (new Regex("^(ActiveInspiration|AddInspirationOrder|ExchangeInspiration|RefreshInspirationOrder|ConfirmExchange)", RegexOptions.Compiled), HNINDAOJCKP.InspirationOrderNotFound),
         ];
 

@@ -19,7 +19,8 @@ namespace Griffin.GameServer.Handlers
         IDailyQuestProgressService questProgress,
         IAchievementService achievements,
         IGunService gunService,
-        ILoveService love) : StageResultHandlerBase
+        ILoveService love,
+        IRougeService rouge) : StageResultHandlerBase
     {
         /// <summary>
         /// Winning the together-battle of an affection event (<c>LoveEventData</c> type 2, levels 5 to 7) completes it: the level rises and the
@@ -168,6 +169,12 @@ namespace Griffin.GameServer.Handlers
             }
 
             bool won = battleResult == BattleResult.Win;
+            if (pending is { RougePlan: not 0 })
+            {
+                ResolveRouge(connection, uid, pending, stage, battleResult);
+                return;
+            }
+
             var response = new SC_StageResult
             {
                 StageId = stage.Id,
@@ -272,6 +279,28 @@ namespace Griffin.GameServer.Handlers
             if (announce)
                 accountState.Set<StageHandler.PendingStage?>(uid, "stage.pending", null);
             Log.Information("Stage result resolved for account {Uid}, stage {StageId}: {Result}, first clear={FirstClear}.", uid, stage.Id, battleResult, won && (prior is null || prior.FirstPassTime == 0));
+        }
+
+        /// <summary>
+        /// The end of a battle node of the 遗珍回收 map (A-121): a win finishes the node of the run. The stage is a repeatable run stage, so it keeps no
+        /// stage record, first-clear reward or daily-quest progress. The client is told the finished node with the message of an interaction (it redraws
+        /// the map from it) after the result.
+        /// </summary>
+        private void ResolveRouge(Connection connection, uint uid, StageHandler.PendingStage pending, StageData stage, BattleResult battleResult)
+        {
+            bool won = battleResult == BattleResult.Win;
+            var extra = new List<Google.Protobuf.IMessage>();
+            rouge.EndBattle(uid, pending.RougePlan, pending.RougeNode, won, extra);
+            connection.Send(new SC_StageResult
+            {
+                StageId = stage.Id,
+                BattleResult = battleResult,
+                StageOther = new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = pending.RougeNode, PlanId = pending.RougePlan } },
+            });
+            if (extra.Count > 0)
+                connection.SendAutoEncrypted(extra.ToArray());
+            accountState.Set<StageHandler.PendingStage?>(uid, "stage.pending", null);
+            Log.Information("Rouge: account {Uid} {Result} node {Node} (stage {Stage}) of plan {Plan}.", uid, battleResult, pending.RougeNode, stage.Id, pending.RougePlan);
         }
 
         /// <summary>Bit j set = the j-th objective of <c>StageData.challenge_list</c> (col 14) was met.</summary>
