@@ -20,6 +20,7 @@ namespace Griffin.GameServer.Handlers
         IResourceService resourceService,
         IStaminaService staminaService,
         IDailyQuestProgressService questProgress,
+        IRougeService rouge,
         StageResultHandler results) : StageHandlerBase
     {
         public override void HandleStageUsableGuns(CS_StageUsableGuns request, Connection connection)
@@ -155,9 +156,25 @@ namespace Griffin.GameServer.Handlers
                     questProgress.AddCondition(connection.Account.Uid, conditionClass: 2, link: "1000", amount: costAmount);
             }
 
+            // a battle node of the 遗珍回收 map (A-121): the node has to be the open, unfinished battle node that holds this stage
+            GPNFHGOODHA? rougeOther = request.Other?.Rouge;
+            if (rougeOther is not null && rougeOther.PlanId != 0)
+            {
+                if (rouge.BeginBattle(connection.Account.Uid, rougeOther.PlanId, rougeOther.PMFFONMEDCP, stage.Id) is { } rougeError)
+                {
+                    connection.RefuseRouge(MsgId.MsgCsStageStart, rougeError);
+                    return;
+                }
+            }
+            else
+            {
+                rougeOther = null;
+            }
+
             StageBattle battle = CreateBattle(stage, request.IsAuto);
             accountState.Set(connection.Account.Uid, "stage.pending",
-                new PendingStage(stage.Id, request.IsAuto, battle.Id, battle.RandomSeed, request.Other?.Together?.GunId ?? 0, request.Other?.Together?.KFIAKLNJHMB ?? 0));
+                new PendingStage(stage.Id, request.IsAuto, battle.Id, battle.RandomSeed, request.Other?.Together?.GunId ?? 0, request.Other?.Together?.KFIAKLNJHMB ?? 0,
+                    rougeOther?.PlanId ?? 0, rougeOther?.PMFFONMEDCP ?? 0));
             if (resourceUpdate is not null)
                 connection.SendAutoEncrypted(resourceUpdate);
             // a plot-only stage (dialogue, no battle) is passed by playing it: the client plays the AVG by itself and reports nothing at the end (A-63).
@@ -189,9 +206,11 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            accountState.Set(connection.Account.Uid, "stage.lineup", new SavedLineup(request.Guns.Values.ToList(), request.ActionSequence.ToList()));
+            // the squad of a 遗珍回收 battle names GunPresetData ids, not characters: it is not the player's own last team (A-123)
+            if (pending!.RougePlan == 0)
+                accountState.Set(connection.Account.Uid, "stage.lineup", new SavedLineup(request.Guns.Values.ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
-                pending.BattleId, pending.RandomSeed, pending.TogetherGun);
+                pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan);
             if (pending.BattleId == 0 || pending.RandomSeed == 0)
             {
                 // Migrate an in-flight battle created by an older server build without
@@ -203,7 +222,9 @@ namespace Griffin.GameServer.Handlers
             connection.Send(new SC_StageInto
             {
                 Stage = battle,
-                Other = pending.TogetherGun == 0 ? new StageOther() : new StageOther { Together = new CKAOJMGCFFF { GunId = pending.TogetherGun, KFIAKLNJHMB = pending.TogetherLevel } },
+                Other = pending.RougePlan != 0
+                    ? new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = pending.RougeNode, PlanId = pending.RougePlan } }
+                    : pending.TogetherGun == 0 ? new StageOther() : new StageOther { Together = new CKAOJMGCFFF { GunId = pending.TogetherGun, KFIAKLNJHMB = pending.TogetherLevel } },
             });
         }
 
@@ -218,7 +239,7 @@ namespace Griffin.GameServer.Handlers
 
         private StageBattle CreateBattle(StageData stage, bool isAuto,
             Google.Protobuf.Collections.MapField<uint, uint>? requestedGuns = null,
-            Connection? connection = null, long battleId = 0, long randomSeed = 0, uint togetherGun = 0)
+            Connection? connection = null, long battleId = 0, long randomSeed = 0, uint togetherGun = 0, uint rougePlan = 0)
         {
             uint battleLevel = Math.Max(1u, stage.RecommandedPlayerlevel);
             var battle = new StageBattle
@@ -274,7 +295,28 @@ namespace Griffin.GameServer.Handlers
                     .Select(k => (k.StcId, PublicTalentHandler.AffixesOf(accountState, account.Uid, k.Id))).ToList(),
                 PluginAffixesOf(account.Uid, gun.GunId), cooking.FoodRows(account.Uid, gun.GunId), supportRows,
                 ModSkillsOf(WeaponOf(gun)?.EquippedModIds ?? [], mods));
-            if (requestedGuns is { Count: > 0 })
+            // The squad of a 遗珍回收 battle (A-121; the client names each unit by its GunPresetData id, A-123) is the preset squad of the map, not the account's own characters: a character the account
+            // does not own (or owns at another level) fights with the level and grade of its preset (GunPresetData col 6 / 16).
+            IReadOnlyList<RougeService.TeamGun> rougeTeam = rougePlan == 0 ? [] : rouge.Team((uint)uid, rougePlan);
+            if (rougeTeam.Count > 0)
+            {
+                var chosen = requestedGuns is { Count: > 0 }
+                    ? requestedGuns.OrderBy(pair => pair.Key).Select(pair => (Unit: pair.Key, Gun: rougeTeam.FirstOrDefault(t => t.PresetId == pair.Value || t.GunId == pair.Value))).Where(e => e.Gun is not null).ToList()
+                    : [];
+                if (chosen.Count == 0)
+                {
+                    uint[] points = config.DefaultGuns.Split('|', StringSplitOptions.RemoveEmptyEntries).Select(row => row.Split(':')[0])
+                        .Where(f => uint.TryParse(f, out _)).Select(uint.Parse).Distinct().ToArray();
+                    chosen = rougeTeam.Take(points.Length).Select((t, i) => (Unit: points[i], Gun: (RougeService.TeamGun?)t)).ToList();
+                }
+
+                foreach ((uint unitId, RougeService.TeamGun? member) in chosen)
+                {
+                    GunEntity gun = RougeUnitOf(member!, ownedGuns.GetValueOrDefault(member!.GunId));
+                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
+                }
+            }
+            else if (requestedGuns is { Count: > 0 })
             {
                 foreach ((uint unitId, uint gunId) in requestedGuns.OrderBy(pair => pair.Key))
                 {
@@ -326,6 +368,25 @@ namespace Griffin.GameServer.Handlers
             return battle;
         }
 
+        /// <summary>The character of a 遗珍回收 preset: the account's own entry (its weapon, costume...) with the level and grade of the preset, or a bare entry when it does not own the character.</summary>
+        private GunEntity RougeUnitOf(RougeService.TeamGun member, GunEntity? owned) => new()
+        {
+            Id = owned?.Id ?? 0,
+            GunId = member.GunId,
+            Level = (int)Math.Max(1u, member.Level),
+            Grade = member.Grade,
+            GunClass = owned?.GunClass ?? 1,
+            CostumeId = owned?.CostumeId ?? 0,
+            CostumeParts = owned?.CostumeParts ?? 0,
+            WeaponId = owned?.WeaponId ?? 0,
+            LoveLevel = owned?.LoveLevel ?? 1,
+            TimeCreated = owned?.TimeCreated ?? DateTime.UtcNow,
+            PrivateTalentSkillItems = owned?.PrivateTalentSkillItems ?? [0, 0, 0],
+            PublicTalentSkillItems = owned?.PublicTalentSkillItems ?? [0, 0, 0],
+            PublicTalentSkillItemsUid = owned?.PublicTalentSkillItemsUid ?? [0, 0, 0],
+            TalentTree = owned?.TalentTree ?? [],
+        };
+
         /// <summary>The powers of the mods a weapon carries (A-78): one skill each with the numbers of its rank; two mods with the same power give the larger numbers once.</summary>
         private IReadOnlyList<(uint Skill, int[] Values)> ModSkillsOf(IEnumerable<uint> equippedIds, WeaponModEntity[] mods)
         {
@@ -346,7 +407,7 @@ namespace Griffin.GameServer.Handlers
         }
 
         /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>.</summary>
-        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0);
+        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0, uint RougePlan = 0, uint RougeNode = 0);
         internal sealed record SavedLineup(List<uint> Lineup, List<uint> Sequence);
 
 
