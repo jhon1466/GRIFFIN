@@ -566,6 +566,12 @@ namespace Griffin.GameServer.Handlers
             foreach (WeaponModEntity mod in mods)
                 response.Mods.Add(ModPolarity.ToProto(tableService, allRefine, mod));
 
+            // field 2 = which weapon holds each mod (mod id -> weapon id): the client takes the owner shown on the accessory card from it, so without it the character disappeared from the card after logging in (A-114)
+            foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid))
+                foreach (uint equipped in weapon.EquippedModIds ?? [])
+                    if (equipped != 0)
+                        response.OKPBGHGHPCH[equipped] = weapon.Id;
+
             // the client creates every mod at level 1 without experience (the list has no field for them) and takes the real ones from this push (A-74)
             List<Google.Protobuf.IMessage> batch = [response];
             foreach (WeaponModEntity mod in mods.Where(m => m.Level > 1 || m.Field6 > 0))
