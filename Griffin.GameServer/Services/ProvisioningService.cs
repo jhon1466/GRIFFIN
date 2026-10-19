@@ -23,7 +23,8 @@ namespace Griffin.GameServer.Services
     /// </summary>
     public interface IProvisioningService : IGameService
     {
-        ProvisionReport Provision(uint uid);
+        /// <summary>With <paramref name="refill"/> every balance below the amount of its category is raised to it (<c>/inventory addall</c>), not only the ones at 0 (A-113).</summary>
+        ProvisionReport Provision(uint uid, bool refill = false);
 
         /// <summary>Provisions once per account (login); returns null when it already ran or is disabled.</summary>
         ProvisionReport? ProvisionOnce(uint uid);
@@ -55,7 +56,7 @@ namespace Griffin.GameServer.Services
             [175] = 1, [176] = 1, [177] = 1, [179] = 1, [181] = 1, [182] = 1, [183] = 1, [184] = 1, [186] = 1,
         };
 
-        public ProvisionReport Provision(uint uid)
+        public ProvisionReport Provision(uint uid, bool refill = false)
         {
             lock (Gate)
             {
@@ -72,8 +73,14 @@ namespace Griffin.GameServer.Services
 
                     if (data.Type == ResourceService.ResourceItemType)
                     {
-                        if (!ExcludedResources.Contains(data.Id) && resourceService.GetBalance(uid, data.Id) <= 0)
-                            resourceGains[data.Id] = ResourceAmount;
+                        if (!ExcludedResources.Contains(data.Id))
+                        {
+                            long balance = resourceService.GetBalance(uid, data.Id);
+                            if (balance <= 0)
+                                resourceGains[data.Id] = ResourceAmount;
+                            else if (refill && balance < ResourceAmount)
+                                resourceGains[data.Id] = (int)(ResourceAmount - balance);
+                        }
                         continue;
                     }
 
@@ -88,7 +95,7 @@ namespace Griffin.GameServer.Services
                         changed[data.Id] = amount;
                         added++;
                     }
-                    else if (row.Count <= 0)
+                    else if (row.Count <= 0 || (refill && row.Count < amount))
                     {
                         row.Count = amount;
                         row.Type = data.Type;

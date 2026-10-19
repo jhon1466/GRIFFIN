@@ -64,7 +64,7 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
 
         if (Provision || ctx.RawArgs.ContainsKey("provision"))
         {
-            ProvisionReport report = provisioning.Provision(accountUid);
+            ProvisionReport report = provisioning.Provision(accountUid, refill: false);
             if (report.ResourceUpdate is not null)
                 ctx.Connection.SendAutoEncrypted(report.ResourceUpdate);
             SendInventoryResponses(ctx, [InventoryType.Item]);
@@ -89,6 +89,17 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
             }
 
             inventoryType = resolvedType;
+        }
+
+        // addall refills the objects and resources too (A-113): everything below the amount of its category goes back up to it
+        if (requestedType is null || inventoryType == InventoryType.Item)
+        {
+            ProvisionReport refill = provisioning.Provision(accountUid, refill: true);
+            if (refill.ResourceUpdate is not null)
+                ctx.Connection.SendAutoEncrypted(refill.ResourceUpdate);
+            ctx.Reply($"Recursos y objetos rellenados: {refill.ItemsAdded} añadidos, {refill.ItemsRepaired} subidos, {refill.ResourcesRepaired} recurso(s) subidos.");
+            // the client keeps the balances it was sent: without this the screens kept showing the old amounts until the next login
+            SendInventoryResponses(ctx, [InventoryType.Item]);
         }
 
         if (requestedType is null)
