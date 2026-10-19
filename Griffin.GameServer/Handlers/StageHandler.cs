@@ -191,7 +191,7 @@ namespace Griffin.GameServer.Handlers
 
             accountState.Set(connection.Account.Uid, "stage.lineup", new SavedLineup(request.Guns.Values.ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
-                pending.BattleId, pending.RandomSeed);
+                pending.BattleId, pending.RandomSeed, pending.TogetherGun);
             if (pending.BattleId == 0 || pending.RandomSeed == 0)
             {
                 // Migrate an in-flight battle created by an older server build without
@@ -218,7 +218,7 @@ namespace Griffin.GameServer.Handlers
 
         private StageBattle CreateBattle(StageData stage, bool isAuto,
             Google.Protobuf.Collections.MapField<uint, uint>? requestedGuns = null,
-            Connection? connection = null, long battleId = 0, long randomSeed = 0)
+            Connection? connection = null, long battleId = 0, long randomSeed = 0, uint togetherGun = 0)
         {
             uint battleLevel = Math.Max(1u, stage.RecommandedPlayerlevel);
             var battle = new StageBattle
@@ -284,6 +284,16 @@ namespace Griffin.GameServer.Handlers
                 }
             }
 
+            // A together battle (affection event, A-55/A-106): the client sends no characters, its stage names the partner in StageOther.together and the first default point of the
+            // configuration has no character ("1507348:(0.0, 0.0, 0.0)::false"): that is where the partner fights. Without it the camp held only the support unit and the
+            // battle ended with a NullReference in the client's end-of-battle coroutine, so the victory animation never came.
+            if (playerUnits.Count == 0 && togetherGun != 0 && ownedGuns.TryGetValue(togetherGun, out GunEntity? partner))
+            {
+                string firstRow = config.DefaultGuns.Split('|', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+                if (uint.TryParse(firstRow.Split(':')[0], out uint partnerPoint))
+                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, partnerPoint, partner.GunId, partner.ToProtoGunCharacter(), WeaponOf(partner), RotationOf(partnerPoint), InputsOf(partner)));
+            }
+
             // The first tutorial may omit the selection map. Its own table defines the starter
             // deployment; include only characters actually present in this account.
             if (playerUnits.Count == 0)
@@ -301,7 +311,7 @@ namespace Griffin.GameServer.Handlers
             }
 
             // The support formation of the battle (A-95): the teams of the formation chosen in the 备勤区, laid out like the client's own builder
-            if (SupportTeams.ForBattle(tableService, accountState, account.Uid) is { } support)
+            if (togetherGun == 0 && SupportTeams.ForBattle(tableService, accountState, account.Uid) is { } support)
                 playerUnits.Add(BattleUnitBuilder.SupportUnit(support, 60u));
 
             // The 4.0.5136 client's own StageBattle constructor initializes two camps (player side 1 and enemy side 2), then creates

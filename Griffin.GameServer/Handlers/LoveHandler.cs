@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -30,10 +30,39 @@ namespace Griffin.GameServer.Handlers
         IItemUseService itemUse,
         ILoveService love) : LoveHandlerBase
     {
+        private readonly long maxExpInit = MaxExp = love.Threshold(love.Cap);
+
         public const uint VowLevel = 9;
+
+        /// <summary>The character has made the vow: level 9 (completed) or the vow time kept by <see cref="HandleLoveVow"/> (A-105).</summary>
+        public static bool IsVowed(GunEntity gun) => gun.LoveLevel >= VowLevel || gun.GunTalentConsume.GetValueOrDefault(VowTimeKey) != 0;
+
+        /// <summary>Experience that completes the last level that has a bar (level 8); set when the handler is created.</summary>
+        public static long MaxExp { get; private set; } = 41500;
+
+        /// <summary>
+        /// A vowed character whose bar of level 8 is full goes on to level 9 (A-111): the client has no button or event for that step (its events end at level 7 and level 9 has
+        /// no experience), so the server completes it. Returns true when the level changed.
+        /// </summary>
+        public static bool PromoteIfMaxed(GunEntity gun)
+        {
+            if (gun.LoveLevel >= VowLevel - 1 && gun.LoveLevel < VowLevel && gun.LoveExp >= MaxExp && gun.GunTalentConsume.GetValueOrDefault(VowTimeKey) != 0)
+            {
+                gun.LoveLevel = VowLevel;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Love level from which the vow can be made: <c>LoveConfigData</c> column 5 (the client enables the ring and the "誓约" scene at that level, not at the cap).</summary>
+        private uint VowStartLevel() => tableService.GetTable<LoveConfigData>().Select(row => TableFields.U(row, 5)).FirstOrDefault(level => level > 0) is var configured and > 0 ? configured : 5;
 
         /// <summary>Key of <c>GunEntity.GunTalentConsume</c> that keeps the time of the vow (never sent as consumption).</summary>
         public const uint VowTimeKey = 0xFFFF0040;
+
+        /// <summary>Key that marks the level-9 reward (the vow ring) as already paid to the character (A-112).</summary>
+        public const uint RingPaidKey = 0xFFFF0041;
 
         public override void HandleLoveSendGift(CS_LoveSendGift request, Connection connection)
         {
@@ -85,8 +114,12 @@ namespace Griffin.GameServer.Handlers
 
             long gained = (long)Math.Round(gainedExact, MidpointRounding.AwayFromZero);
             love.AddExperience(gun, gained);
+            uint beforeGift = gun.LoveLevel;
+            bool promoted = PromoteIfMaxed(gun);
             gunService.Save();
             List<IMessage> bundle = [spent];
+            if (promoted)
+                GrantLevelRewards(uid, beforeGift, gun.LoveLevel, bundle);
             questProgress.AddCondition(uid, conditionClass: 1303, link: "4015", amount: (uint)spend.Values.Sum());
             Log.Information("LoveSendGift: account {Uid} gun {Gun} +{Gained} -> level {Level} exp {Exp}.", uid, gun.GunId, gained, gun.LoveLevel, gun.LoveExp);
             bundle.Add(new SC_LoveSendGift
@@ -151,20 +184,31 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            if (gun.LoveLevel != LevelCap() || gun.LoveExp < Threshold(gun.LoveLevel))
+            // The vow has TWO moments (A-105/A-107): from love level 5 (LoveConfigData column 5) it is made once and kept as a flag, the level goes on; at level 8 with the full bar
+            // ("铭契时刻" button, pending event 9999) it completes the affection and the character goes to level 9. Before A-105 only the second one existed.
+            bool atCap = gun.LoveLevel == LevelCap() && gun.LoveExp >= Threshold(gun.LoveLevel);
+            bool flagged = gun.GunTalentConsume.GetValueOrDefault(VowTimeKey) != 0;
+            if (!atCap && (flagged || gun.LoveLevel < VowStartLevel()))
             {
-                Log.Information("LoveVow: gun {Gun} is not at the maximum love ({Level}/{Exp}).", gun.GunId, gun.LoveLevel, gun.LoveExp);
-                connection.Refuse(MsgId.MsgCsLoveVow, HNINDAOJCKP.LoveLevelCanNotVow);
+                Log.Information("LoveVow: gun {Gun} cannot vow now (level {Level}/{Exp}, already made: {Flagged}).", gun.GunId, gun.LoveLevel, gun.LoveExp, flagged);
+                connection.Refuse(MsgId.MsgCsLoveVow, flagged ? HNINDAOJCKP.LoveAlreadyVowed : HNINDAOJCKP.LoveLevelCanNotVow);
                 return;
             }
 
             uint beforeVow = gun.LoveLevel;
-            gun.LoveLevel = VowLevel;
-            gun.GunTalentConsume[VowTimeKey] = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            uint voteTime = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (!flagged)
+                gun.GunTalentConsume[VowTimeKey] = voteTime;
+            if (atCap)
+                gun.LoveLevel = VowLevel;
             gunService.Save();
             List<IMessage> vow = [];
-            GrantLevelRewards(connection.Account.Uid, beforeVow, VowLevel, vow);
-            vow.Add(new SC_LoveVow { GunId = gun.GunId, PCPEAMOJPCF = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+            if (atCap)
+                GrantLevelRewards(connection.Account.Uid, beforeVow, VowLevel, vow);
+            vow.Add(new SC_LoveVow { GunId = gun.GunId, PCPEAMOJPCF = gun.GunTalentConsume.GetValueOrDefault(VowTimeKey) });
+            // the client takes the new level from SC_LoveLevelUpdate (the vow answer only marks the vow): without it the character stayed at 8 on screen until the next login (A-108)
+            if (atCap)
+                vow.Add(new SC_LoveLevelUpdate { GunId = gun.GunId, JLHFICPMAEI = gun.LoveLevel });
             connection.SendAutoEncrypted(vow.ToArray());
         }
 

@@ -276,7 +276,7 @@ namespace Griffin.GameServer.Services
                 }
 
                 // the vow (level 9) adds the row LoveConfigData column 10 (the client's IIEJCPCDKOC), flat and as percentage
-                if (inputs.Gun.LoveLevel >= Handlers.LoveHandler.VowLevel
+                if (Handlers.LoveHandler.IsVowed(inputs.Gun)
                     && tables.GetTable<LoveConfigData>().FirstOrDefault() is { } loveConfig && Row(TableFields.U(loveConfig, 10)) is { } vowStats)
                     extraRows.Add(vowStats);
 

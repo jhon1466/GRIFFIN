@@ -212,8 +212,23 @@ namespace Griffin.GameServer.Handlers
             SC_Guns scGuns = new SC_Guns();
             Dictionary<string, uint> savedParts = SavedParts(connection.Account.Uid);
 
+            List<Google.Protobuf.IMessage> ringMessages = [];
             foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(connection.Account.Uid))
             {
+                // level 9 completed by the server (A-111): pay the reward of that level (the vow ring) once (A-112)
+                if (LoveHandler.PromoteIfMaxed(gun) || (gun.LoveLevel >= LoveHandler.VowLevel && gun.GunTalentConsume.GetValueOrDefault(LoveHandler.RingPaidKey) == 0))
+                {
+                    if (gun.GunTalentConsume.GetValueOrDefault(LoveHandler.RingPaidKey) == 0)
+                    {
+                        gun.GunTalentConsume[LoveHandler.RingPaidKey] = 1;
+                        if (tableService.GetTable<LoveLevelData>().FirstOrDefault(l => TableFields.U(l, 1) == LoveHandler.VowLevel) is { } row)
+                            foreach ((uint item, uint count) in TableFields.Map(row, 7))
+                                rewardService.Grant(connection.Account.Uid, item, (int)count, ringMessages);
+                    }
+
+                    gunService.Save();
+                }
+
                 Gun reported = gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId), cooking.FoodBytes(connection.Account.Uid, gun.GunId));
                 // the parts saved for the costume the character wears win over the copy kept in the character row (A-103: the preparation room "forgot" them at login)
                 if (savedParts.TryGetValue(PartsKey(reported.Costume, BAGPCFGACEF.Types.GCBADMLINMA.Barrack), out uint savedBarrack))
@@ -237,6 +252,8 @@ namespace Griffin.GameServer.Handlers
             //scGuns.Guns.Add(CreateNewGunCharacter(1063, 20));
             
             connection.SendAutoEncrypted(scGuns);
+            if (ringMessages.Count > 0)
+                connection.SendAutoEncrypted(ringMessages.ToArray());
         }
 
         public override void HandleGunLevelUp(CS_GunLevelUp request, Connection connection)

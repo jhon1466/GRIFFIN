@@ -1,4 +1,4 @@
-﻿using Griffin.Common.Proto;
+using Griffin.Common.Proto;
 using Griffin.Database.Entities;
 using Griffin.GameServer.Services;
 
@@ -9,6 +9,7 @@ public static class ProtoExtensions
     public static Gun ToProtoGunCharacter(this GunEntity gun, IReadOnlyList<ulong>? pluginSlots = null, ulong foodBytes = 0)
     {
         ArgumentNullException.ThrowIfNull(gun);
+        Handlers.LoveHandler.PromoteIfMaxed(gun);
 
         var proto = new Gun
         {
@@ -34,7 +35,7 @@ public static class ProtoExtensions
                 KFIAKLNJHMB = gun.LoveLevel,
                 ABOJJOJODME = gun.LoveExp,
                 // the vow (level 9): the client reads the flag (field 4) for the vow icon and its red dot, and the time (field 5) of the ceremony (A-73)
-                APPPIAJDHLD = gun.LoveLevel >= Handlers.LoveHandler.VowLevel,
+                APPPIAJDHLD = Handlers.LoveHandler.IsVowed(gun),
                 PCPEAMOJPCF = gun.GunTalentConsume.GetValueOrDefault(Handlers.LoveHandler.VowTimeKey),
             },
         };

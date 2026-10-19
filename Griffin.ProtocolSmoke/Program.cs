@@ -702,7 +702,7 @@ if (scenario == "stage")
     main.Send(new CS_Sync());
     var stgSync = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Sync>().FirstOrDefault();
     Check("lobby: SC_Sync carries the game clock in SECONDS (login time + elapsed), not milliseconds (ms made the client date jump and reopen the daily notice popup)",
-        stgSync is not null && stgSync.Timestamp >= 1779518860 && stgSync.Timestamp < 1779518860 + 3600, $"timestamp={stgSync?.Timestamp}");
+        stgSync is not null && Math.Abs((long)stgSync.Timestamp - DateTimeOffset.UtcNow.ToUnixTimeSeconds()) < 3600, $"timestamp={stgSync?.Timestamp}");
 
     main.Send(new CS_SystemUnlocks());
     var stgUnlocks = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_SystemUnlocks>().FirstOrDefault();
@@ -919,6 +919,13 @@ if (scenario == "stage")
                 if (k == 30) chipLife = v;
             }
         Check("support: the core chips of the battle formation add to the stats of the characters (MaxHpPercent 30 = 20 with two chips)", chipLife >= 20, $"MaxHpPercent={chipLife}");
+        // A-106: a together battle (affection event) puts the partner at the first default point and carries no support unit
+        main.Send(new CS_StageStart { StcStageId = 42025, Other = new StageOther { Together = new CKAOJMGCFFF { GunId = 1017, KFIAKLNJHMB = 5 } } });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StageInto());
+        var togetherBattle = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault()?.Stage;
+        var togetherUnits = togetherBattle?.Camps.Select(c => c.ToByteArray()).Where(c => StgSide(c) == 1).SelectMany(c => StgFields(c, 2)).ToList() ?? [];
+        Check("stage: a together battle has the partner (Gun unit) and no support unit", togetherUnits.Count == 1 && StgFields(togetherUnits[0], 1).Count == 1 && StgFields(togetherUnits[0], 5).Count == 0, $"units={togetherUnits.Count}");
         // A-95: the teams of the battle formation go into the battle as a Support unit (field 5 of the unit wrapper)
         main.Send(new CS_SupportFormationModify { Id = 1, Slot = 1, COCHLPMJPOJ = 1001 });
         main.ReadFor(TimeSpan.FromSeconds(1));
