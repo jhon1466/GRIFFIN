@@ -222,6 +222,23 @@ namespace Griffin.Common.Networking
             Send(new MainMessage(sendSequence, MainMessageHeader.ComputeEncryptionByte(bodyLength), packet));
         }
 
+        /// <summary>
+        /// One reply made of packets whose proto types are not usable by the server (raw id + raw payload, written by hand where the checked-in proto is stale)
+        /// followed by ordinary messages, all in the same message of the stream like <see cref="SendAutoEncrypted{T}"/> does.
+        /// </summary>
+        public void SendRawPacketsWith(IReadOnlyList<(ushort MsgId, byte[] Payload)> raw, params IMessage[] messages)
+        {
+            var packets = new List<BasePacket>();
+            foreach ((ushort msgId, byte[] payload) in raw)
+                packets.Add(BasePacket.FromIMessageBytes(msgId, payload));
+            packets.AddRange(BuildBasePackets(messages));
+            if (packets.Count == 0)
+                return;
+
+            ushort bodyLength = checked((ushort)packets.Sum(packet => BasePacketHeader.HeaderLength + packet.Header.IMessageLength));
+            Send(new MainMessage(sendSequence, MainMessageHeader.ComputeEncryptionByte(bodyLength), packets.ToArray()));
+        }
+
         public void SendPacketList(ushort sequenceId, byte encryptionByte, params IMessage[] messages)
         {
             ArgumentNullException.ThrowIfNull(messages);

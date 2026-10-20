@@ -19,7 +19,8 @@ namespace Griffin.GameServer.Handlers
         IAccountStateService accountState,
         IDailyQuestProgressService questProgress,
         IRewardService rewardService,
-        IAchievementService achievements) : CommonQuestHandlerBase
+        IAchievementService achievements,
+        ISimCombatWeekService week) : CommonQuestHandlerBase
     {
         private const string StateKey = "quest.daily.claims";
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, object> AccountLocks = new();
@@ -42,6 +43,22 @@ namespace Griffin.GameServer.Handlers
 
                 achievementMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { taken } });
                 connection.SendAutoEncrypted(achievementMessages.ToArray());
+                return;
+            }
+
+            if (request.Type == CommonQuestCounters.Types.Type.WeeklyChallenge)
+            {
+                // the mission objectives of 要塞伯爵 (A-136): complete ones are paid once
+                List<IMessage> weekMessages = [];
+                List<uint> takenWeek = week.ClaimQuests(connection.Account.Uid, request.QuestId, weekMessages);
+                if (takenWeek.Count == 0)
+                {
+                    connection.Refuse(MsgId.MsgCsCommonQuestTakeReward, HNINDAOJCKP.QuestCondNotMatch);
+                    return;
+                }
+
+                weekMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenWeek } });
+                connection.SendAutoEncrypted(weekMessages.ToArray());
                 return;
             }
 

@@ -20,7 +20,8 @@ namespace Griffin.GameServer.Handlers
         IAchievementService achievements,
         IGunService gunService,
         ILoveService love,
-        IRougeService rouge) : StageResultHandlerBase
+        IRougeService rouge,
+        ISimCombatWeekService week) : StageResultHandlerBase
     {
         /// <summary>
         /// Winning the together-battle of an affection event (<c>LoveEventData</c> type 2, levels 5 to 7) completes it: the level rises and the
@@ -175,6 +176,12 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            if (pending is { Weekly: true })
+            {
+                ResolveWeekly(connection, uid, pending, stage, battleResult, stageProgress);
+                return;
+            }
+
             var response = new SC_StageResult
             {
                 StageId = stage.Id,
@@ -301,6 +308,45 @@ namespace Griffin.GameServer.Handlers
                 connection.SendAutoEncrypted(extra.ToArray());
             accountState.Set<StageHandler.PendingStage?>(uid, "stage.pending", null);
             Log.Information("Rouge: account {Uid} {Result} node {Node} (stage {Stage}) of plan {Plan}.", uid, battleResult, pending.RougeNode, stage.Id, pending.RougePlan);
+        }
+
+        /// <summary>
+        /// The end of a battle of the weekly mode 要塞伯爵 (A-131): a win scores the squad and moves the attempt to the next one; like the 遗珍回收 stages the stage keeps no
+        /// stage record, first-clear reward or daily-quest progress. The score is told with the push of the mode after the result.
+        /// </summary>
+        private void ResolveWeekly(Connection connection, uint uid, StageHandler.PendingStage pending, StageData stage, BattleResult battleResult, StageProgress? stageProgress)
+        {
+            bool won = battleResult == BattleResult.Win;
+            var extra = new List<Google.Protobuf.IMessage>();
+            uint score;
+            if (pending.WeeklyBoss != 0)
+            {
+                week.EndBossBattle(uid, pending.WeeklyBoss, won, SimCombatWeekService.PhaseFacts.FromProgress(stageProgress), extra);
+                score = week.BossOf(uid, pending.WeeklyBoss).Score;
+            }
+            else
+            {
+                week.EndBattle(uid, won, SimCombatWeekService.PhaseFacts.FromProgress(stageProgress).Score, [], extra);
+                score = week.ViewOf(uid).Score;
+            }
+
+            // the objectives this win completed reach the client BEFORE the result: the result screen reads them from the common quest counters when it opens (A-136)
+            SC_CommonQuestCountUpdate[] questUpdates = extra.OfType<SC_CommonQuestCountUpdate>().ToArray();
+            extra.RemoveAll(m => m is SC_CommonQuestCountUpdate);
+            if (questUpdates.Length > 0)
+                connection.SendAutoEncrypted(questUpdates);
+            connection.Send(new SC_StageResult
+            {
+                StageId = stage.Id,
+                BattleResult = battleResult,
+                StageOther = new StageOther { Weekly = new AEMFCIEIHLK { Id = pending.WeeklyId, Status = pending.WeeklyBoss != 0 ? SimCombatWeekly.Types.Status.Final : SimCombatWeekly.Types.Status.StepB, KNPHEBDLFFP = pending.WeeklyBoss, Score = score } },
+            });
+            // the result screen shows the objective of the fight ("kill the boss once in phase 3") from the entry of the boss in the info: it is sent again with the answer, so the
+            // objective that this win completed is already marked when the screen reads it (A-135)
+            (ushort infoId, byte[] infoPayload) = week.BuildInfo(uid, extra);
+            connection.SendRawPacketsWith([(infoId, infoPayload)], extra.ToArray());
+            accountState.Set<StageHandler.PendingStage?>(uid, "stage.pending", null);
+            Log.Information("SimCombatWeek: account {Uid} {Result} stage {Stage}: score {Score}.", uid, battleResult, stage.Id, score);
         }
 
         /// <summary>Bit j set = the j-th objective of <c>StageData.challenge_list</c> (col 14) was met.</summary>

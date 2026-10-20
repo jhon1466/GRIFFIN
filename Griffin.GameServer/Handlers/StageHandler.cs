@@ -21,6 +21,7 @@ namespace Griffin.GameServer.Handlers
         IStaminaService staminaService,
         IDailyQuestProgressService questProgress,
         IRougeService rouge,
+        ISimCombatWeekService week,
         StageResultHandler results) : StageHandlerBase
     {
         public override void HandleStageUsableGuns(CS_StageUsableGuns request, Connection connection)
@@ -33,7 +34,13 @@ namespace Griffin.GameServer.Handlers
             var response = new SC_StageUsableGuns { StageId = request.StageId };
             // The deployment screen preselects `lineup` (field 2, one gun id per slot, 0 = empty) and orders the turns by `sequence` (field 4): the team the
             // player took into their last battle, remembered from CS_StageInto (A-90). Characters the account no longer owns are left out.
-            if (connection.Account is not null && accountState.Get<SavedLineup>(connection.Account.Uid, "stage.lineup") is { } saved)
+            // The battle of the weekly mode 要塞伯爵 deploys the squad chosen for it: the deployment screen takes its limit and its characters from this reply (A-132)
+            if (connection.Account is not null && week.SquadFor(connection.Account.Uid, request.StageId) is { Count: > 0 } weekSquad)
+            {
+                response.Lineup.AddRange(weekSquad);
+                response.Sequence.AddRange(weekSquad);
+            }
+            else if (connection.Account is not null && accountState.Get<SavedLineup>(connection.Account.Uid, "stage.lineup") is { } saved)
             {
                 HashSet<uint> owned = gunService.GetPlayerGuns(connection.Account.Uid).Select(g => g.GunId).ToHashSet();
                 response.Lineup.AddRange(saved.Lineup.Select(id => owned.Contains(id) ? id : 0u));
@@ -171,10 +178,20 @@ namespace Griffin.GameServer.Handlers
                 rougeOther = null;
             }
 
+            // a battle of the weekly mode 要塞伯爵 (A-131): the attempt has to be started and the stage has to be the one of the level
+            AEMFCIEIHLK? weeklyOther = request.Other?.Weekly;
+            if (weeklyOther is not null && (weeklyOther.Status == SimCombatWeekly.Types.Status.Final
+                    ? week.BeginBossBattle(connection.Account.Uid, weeklyOther.KNPHEBDLFFP, stage.Id)
+                    : week.BeginBattle(connection.Account.Uid, stage.Id)) is { } weekError)
+            {
+                connection.Refuse(MsgId.MsgCsStageStart, weekError);
+                return;
+            }
+
             StageBattle battle = CreateBattle(stage, request.IsAuto);
             accountState.Set(connection.Account.Uid, "stage.pending",
                 new PendingStage(stage.Id, request.IsAuto, battle.Id, battle.RandomSeed, request.Other?.Together?.GunId ?? 0, request.Other?.Together?.KFIAKLNJHMB ?? 0,
-                    rougeOther?.PlanId ?? 0, rougeOther?.PMFFONMEDCP ?? 0));
+                    rougeOther?.PlanId ?? 0, rougeOther?.PMFFONMEDCP ?? 0, weeklyOther is not null, weeklyOther?.Id ?? 0, weeklyOther?.Status == SimCombatWeekly.Types.Status.Final ? weeklyOther.KNPHEBDLFFP : 0));
             if (resourceUpdate is not null)
                 connection.SendAutoEncrypted(resourceUpdate);
             // a plot-only stage (dialogue, no battle) is passed by playing it: the client plays the AVG by itself and reports nothing at the end (A-63).
@@ -207,7 +224,7 @@ namespace Griffin.GameServer.Handlers
             }
 
             // the squad of a 遗珍回收 battle names GunPresetData ids, not characters: it is not the player's own last team (A-123)
-            if (pending!.RougePlan == 0 && request.Guns.Values.All(id => id < 100000))
+            if (pending!.RougePlan == 0 && !pending.Weekly && request.Guns.Values.All(id => id < 100000))
                 accountState.Set(connection.Account.Uid, "stage.lineup", new SavedLineup(request.Guns.Values.ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
                 pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan);
@@ -222,7 +239,9 @@ namespace Griffin.GameServer.Handlers
             connection.Send(new SC_StageInto
             {
                 Stage = battle,
-                Other = pending.RougePlan != 0
+                Other = pending.Weekly
+                    ? new StageOther { Weekly = new AEMFCIEIHLK { Id = pending.WeeklyId, Status = pending.WeeklyBoss != 0 ? SimCombatWeekly.Types.Status.Final : SimCombatWeekly.Types.Status.StepB, KNPHEBDLFFP = pending.WeeklyBoss } }
+                    : pending.RougePlan != 0
                     ? new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = pending.RougeNode, PlanId = pending.RougePlan } }
                     : pending.TogetherGun == 0 ? new StageOther() : new StageOther { Together = new CKAOJMGCFFF { GunId = pending.TogetherGun, KFIAKLNJHMB = pending.TogetherLevel } },
             });
@@ -417,7 +436,7 @@ namespace Griffin.GameServer.Handlers
         }
 
         /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>.</summary>
-        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0, uint RougePlan = 0, uint RougeNode = 0);
+        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0, uint RougePlan = 0, uint RougeNode = 0, bool Weekly = false, uint WeeklyId = 0, uint WeeklyBoss = 0);
         internal sealed record SavedLineup(List<uint> Lineup, List<uint> Sequence);
 
 

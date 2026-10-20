@@ -37,7 +37,7 @@ namespace Griffin.GameServer.Services
         IResourceService resourceService,
         IAccountStateService accountState) : IProvisioningService
     {
-        private const string FlagKey = "provision.auto.v2"; // v2: tipo 304 (tienda ES) añadido; se vuelve a ejecutar una vez por cuenta (no toca saldos positivos)
+        private const string FlagKey = "provision.auto.v3"; // v3: ticket 304 del modo semanal; v2: tipo 304 (tienda ES) añadido; se vuelve a ejecutar una vez por cuenta (no toca saldos positivos)
         private const int ResourceAmount = 99999;
         private static readonly uint[] ExcludedResources = [44];
         private static readonly object Gate = new();
@@ -55,6 +55,13 @@ namespace Griffin.GameServer.Services
             [161] = 1, [164] = 1, [165] = 1, [166] = 1, [167] = 1, [168] = 1, [169] = 1,  // lobby furniture and recipes
             [175] = 1, [176] = 1, [177] = 1, [179] = 1, [181] = 1, [182] = 1, [183] = 1, [184] = 1, [186] = 1,
         };
+
+        /// <summary>
+        /// Single items of a type that must not be given as a whole: 304 is the ticket of the weekly mode 要塞伯爵 (ItemData type 33 "challenge count", of which only this one
+        /// is used by a mode the server runs). The week tops it up to <see cref="SimCombatWeekService.WeeklyTickets"/>; a provisioned account gets 5 times that so that nothing
+        /// blocks the mode while testing (A-131).
+        /// </summary>
+        public static readonly IReadOnlyDictionary<uint, int> ExtraItems = new Dictionary<uint, int> { [304] = SimCombatWeekService.WeeklyTickets * 20 };
 
         public ProvisionReport Provision(uint uid, bool refill = false)
         {
@@ -84,7 +91,7 @@ namespace Griffin.GameServer.Services
                         continue;
                     }
 
-                    if (!Amounts.TryGetValue((uint)data.Type, out int amount))
+                    if (!Amounts.TryGetValue((uint)data.Type, out int amount) && !ExtraItems.TryGetValue(data.Id, out amount))
                         continue;
 
                     if (!rows.TryGetValue(data.Id, out ItemEntity? row))

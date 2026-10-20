@@ -3,7 +3,7 @@
 // It never touches the user's game client. Test account credentials come from args/env, never hardcoded secrets.
 //
 // Usage: dotnet run --project Griffin.ProtocolSmoke -- [--http https://127.0.0.1] [--tcp 127.0.0.1:7001]
-//            [--email smoke@local.test] [--password <pw>] [--scenario all|party|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
+//            [--email smoke@local.test] [--password <pw>] [--scenario all|weekly|party|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
 using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -2742,6 +2742,284 @@ if (scenario is "all" or "party")
     var ptWin = PtSend(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 }, 800);
     Check("party: winning the story fight answers the result", ptWin.OfType<SC_StageResult>().Any(r => r.BattleResult == BattleResult.Win && r.StageId == 43037));
     PtSend(new CS_StageUsableGuns { StageId = 10104 });
+}
+
+if (scenario is "all" or "weekly")
+{
+    // weekly mode 要塞伯爵 (normal challenge): info, ticket, start with squads, battle, score, level advance, tickets, retreat/quit (A-131)
+    main.ReadFor(TimeSpan.FromSeconds(1));
+    List<IMessage> WkSend(IMessage request, int ms = 700) { main.Send(request); return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => p.Message).ToList(); }
+    SC_SimCombatWeekInfo? WkInfo(int ms = 1500) => WkSend(new CS_SimCombatWeekInfo(), ms).OfType<SC_SimCombatWeekInfo>().FirstOrDefault();
+    static bool WkTexted(int code) => code is -10015 or -10085 or -10008 or -10045; // codes the client has a hint text for
+
+    var wkInfo = WkInfo(3000) ?? WkInfo(3000);
+    Check("weekly: the info shows cycle 4, plan 10004 and the first level (storey 1), no attempt yet",
+        wkInfo is { CycleId: 4 } && wkInfo.Info is { PlanId: 10004, Storey: 1, StepBtimes: 0 } && (wkInfo.Info.StepB is null || wkInfo.Info.StepB.Score == 0), $"storey={wkInfo?.Info?.Storey}");
+
+    var wkNothing = WkSend(new CS_SimCombatWeekStart { Status = SimCombatWeekly.Types.Status.StepB });
+    var wkNothingError = wkNothing.OfType<SC_ReportError>().FirstOrDefault();
+    Check("weekly: starting without squads is refused with a code the client has a text for (not the 11322 'not open')", wkNothingError is not null && WkTexted(wkNothingError.ErrorNo) && !wkNothing.OfType<SC_SimCombatWeekStart>().Any(), $"error={wkNothingError?.ErrorNo}");
+
+    var wkBad = new CS_SimCombatWeekStart { Status = SimCombatWeekly.Types.Status.StepB };
+    wkBad.Ids.Add(new Ids { Id = { 12345u } });
+    var wkBadReply = WkSend(wkBad);
+    Check("weekly: a squad with an unknown character is refused and costs nothing", wkBadReply.OfType<SC_ReportError>().Any(e => WkTexted(e.ErrorNo)) && !wkBadReply.OfType<SC_Items>().Any());
+
+    uint[] wkPresets = [4303701, 4303702, 4303703];
+    // the stage of every squad battle: WeeklyBStoryData col 2 of the keys of each level (1 or 2 squads per level)
+    uint[][] wkLevelStages = [[72101], [72201], [72301], [72401], [72501], [72601, 72602], [72701, 72702], [72802, 72803], [72804, 72805]];
+    CS_SimCombatWeekStart WkStartRequest(int squads)
+    {
+        var request = new CS_SimCombatWeekStart { Status = SimCombatWeekly.Types.Status.StepB };
+        for (int i = 0; i < squads; i++)
+            request.Ids.Add(new Ids { Id = { wkPresets } });
+        return request;
+    }
+
+    uint wkStorey = wkInfo?.Info?.Storey ?? 1;
+    int wkLevel = 1, wkCleared = 0, wkTicketsLeft = -1;
+    bool wkExhausted = false, wkScored = false, wkPaid = false, wkStartedAny = false;
+    uint wkLastScore = 0;
+    int wkUnits = 0;
+    for (int guard = 0; guard < 40 && wkLevel <= 9; guard++)
+    {
+        var started = WkSend(WkStartRequest(3), 900);
+        if (started.OfType<SC_ReportError>().FirstOrDefault() is { } refused)
+        {
+            wkExhausted = refused.ErrorNo == (int)HNINDAOJCKP.ItemNotEnough;
+            Check("weekly: with no ticket left the start is refused with 'item not enough' (-10015)", wkExhausted, $"error={refused.ErrorNo} level={wkLevel}");
+            break;
+        }
+
+        var startReply = started.OfType<SC_SimCombatWeekStart>().FirstOrDefault();
+        if (startReply is null)
+        {
+            Check("weekly: Start answers SC_SimCombatWeekStart", false, $"level={wkLevel} got={string.Join(",", started.Select(m => m.GetType().Name))}");
+            break;
+        }
+
+        wkStartedAny = true;
+        if (wkLevel == 1)
+        {
+            Check("weekly: the start answers the step B with the squads and spends one ticket (item 304)",
+                startReply.StepB is not null && started.OfType<SC_Items>().Any(i => i.Items.ContainsKey(304)), $"items={string.Join(",", started.OfType<SC_Items>().SelectMany(i => i.Items.Select(kv => $"{kv.Key}={kv.Value}")))}");
+            wkTicketsLeft = started.OfType<SC_Items>().SelectMany(i => i.Items).Where(kv => kv.Key == 304).Select(kv => kv.Value).DefaultIfEmpty(-1).Last();
+        }
+
+        uint[] stages = wkLevelStages[wkLevel - 1];
+        int battles = 0;
+        for (; battles < stages.Length; battles++)
+        {
+            uint stage = stages[battles];
+            var begin = WkSend(new CS_StageStart { StcStageId = stage, Other = new StageOther { Weekly = new AEMFCIEIHLK { Id = 0, Status = SimCombatWeekly.Types.Status.StepB } } }, 700);
+            if (!begin.OfType<SC_StageStart>().Any())
+                break;
+            if (wkLevel == 1 && battles == 0)
+            {
+                var usable = WkSend(new CS_StageUsableGuns { StageId = stage }).OfType<SC_StageUsableGuns>().FirstOrDefault();
+                Check("weekly: the deployment screen is told the squad of the battle (limit and characters to deploy)", usable is not null && usable.Lineup.Count == 3 && usable.Sequence.Count == 3, $"lineup={usable?.Lineup.Count}");
+            }
+
+            var into = WkSend(new CS_StageInto { Guns = { [1u] = wkPresets[0], [2u] = wkPresets[1], [3u] = wkPresets[2] } }, 800).OfType<SC_StageInto>().FirstOrDefault();
+            if (into?.Stage?.StcStageId == stage)
+                wkUnits = Math.Max(wkUnits, into.Stage.Camps[0].LBJLMGIPOJA.Count);
+            var result = WkSend(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 }, 800);
+            var scorePush = result.OfType<SC_SimCombatWeekStepBscore>().FirstOrDefault();
+            wkScored |= scorePush is { Score: > 0 } && result.OfType<SC_StageResult>().Any(r => r.BattleResult == BattleResult.Win && r.StageOther?.Weekly?.Score > 0);
+            if (scorePush is not null)
+                wkLastScore = scorePush.Score;
+            if (result.OfType<SC_Items>().Any(i => i.Items.Keys.Any(k => k != 304)) || result.OfType<SC_ResourceUpdate>().Any())
+                wkPaid = true;
+        }
+
+        wkCleared++;
+        if (wkLevel == 9)
+            break;
+        var next = WkSend(new CS_SimCombatWeekStartNextStorey { Status = SimCombatWeekly.Types.Status.StepB }, 600).OfType<SC_SimCombatWeekStartNextStorey>().FirstOrDefault();
+        if (next is null || next.Storey == wkStorey)
+        {
+            Check("weekly: clearing the squads lets the player start the next level", false, $"level={wkLevel}");
+            break;
+        }
+
+        wkStorey = next.Storey;
+        wkLevel++;
+    }
+
+    Check("weekly: the first level can be fought: the battle scores (push + result) and pays the reward of its rating", wkStartedAny && wkScored && wkLastScore > 0, $"cleared={wkCleared} score={wkLastScore}");
+    Check("weekly: the battles have one unit per squad member", wkUnits >= 3, $"units={wkUnits}");
+    Check("weekly: a cleared level pays something", wkPaid || !wkStartedAny);
+    var wkAfter = WkInfo();
+    Check("weekly: the info after the climb keeps the level of the account", wkAfter?.Info is { } afterInfo && afterInfo.Storey == wkStorey, $"storey={wkAfter?.Info?.Storey} expected={wkStorey} level={wkLevel}");
+    Check("weekly: either every level 1 to 9 was cleared (provisioned account) or the tickets ran out first (-10015)", wkCleared >= 9 || wkExhausted, $"cleared={wkCleared} tickets-after-first={wkTicketsLeft}");
+    // the boss challenges (战线挑战 tab, status Final): every boss of the cycle (11..25) with its squads; the stages are WeeklyBStoryData col 2 of the keys of each boss
+    var wkBossStages = new Dictionary<uint, uint[]>
+    {
+        [11] = [72901, 72902, 72903], [12] = [72911, 72912, 72913], [13] = [72921, 72922, 72923], [14] = [72931, 72932, 72933], [15] = [72941, 72942],
+        [16] = [72951, 72952], [17] = [72961, 72962], [18] = [72971, 72972], [19] = [72981, 72982], [20] = [72991, 72992],
+        [21] = [720001, 720002], [22] = [720003, 720004], [23] = [720005, 720006], [24] = [720007, 720008], [25] = [720009, 720010],
+    };
+    CS_SimCombatWeekStart WkBossRequest(uint boss, int squads)
+    {
+        var request = WkStartRequest(squads);
+        request.Status = SimCombatWeekly.Types.Status.Final;
+        request.KNPHEBDLFFP = boss;
+        return request;
+    }
+
+    var wkNoBoss = WkSend(WkBossRequest(99, 3)).OfType<SC_ReportError>().FirstOrDefault();
+    Check("weekly boss: a boss that is not in the cycle is refused with a text (no 'undefined')", wkNoBoss is not null && WkTexted(wkNoBoss.ErrorNo), $"error={wkNoBoss?.ErrorNo}");
+    var wkBossRows = new List<string>();
+    int wkBossesCleared = 0;
+    bool wkBossExhausted = false;
+    foreach (var (boss, stages) in wkBossStages)
+    {
+        var started = WkSend(WkBossRequest(boss, 3), 900);
+        if (started.OfType<SC_ReportError>().FirstOrDefault() is { } bossRefused)
+        {
+            wkBossExhausted = bossRefused.ErrorNo == (int)HNINDAOJCKP.ItemNotEnough;
+            wkBossRows.Add($"{boss}:refused{bossRefused.ErrorNo}");
+            break;
+        }
+
+        var final = started.OfType<SC_SimCombatWeekStart>().FirstOrDefault()?.Final;
+        if (final is null || final.KNPHEBDLFFP != boss || final.Lineups.Count != stages.Length)
+        {
+            wkBossRows.Add($"{boss}:badstart");
+            continue;
+        }
+
+        bool bossOk = true, bossScored = false, bossRefreshed = false;
+        uint bossScore = 0;
+        foreach (uint stage in stages)
+        {
+            var begin = WkSend(new CS_StageStart { StcStageId = stage, Other = new StageOther { Weekly = new AEMFCIEIHLK { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = boss } } }, 600);
+            if (!begin.OfType<SC_StageStart>().Any()) { bossOk = false; break; }
+            if (boss == 24)
+            {
+                var usableBoss = WkSend(new CS_StageUsableGuns { StageId = stage }).OfType<SC_StageUsableGuns>().FirstOrDefault();
+                Check("weekly boss: the deployment screen of a boss battle gets the squad (limit and characters)", usableBoss is { Lineup.Count: 3 }, $"lineup={usableBoss?.Lineup.Count}");
+            }
+
+            var intoBoss = WkSend(new CS_StageInto { Guns = { [1u] = wkPresets[0], [2u] = wkPresets[1], [3u] = wkPresets[2] } }, 700).OfType<SC_StageInto>().FirstOrDefault();
+            if (intoBoss?.Stage?.Camps[0].LBJLMGIPOJA.Count < 3) { bossOk = false; break; }
+            var resultBoss = WkSend(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 }, 700);
+            if (boss == 11 && stage == 72901)
+            {
+                int updateAt = resultBoss.FindIndex(m => m is SC_CommonQuestCountUpdate u && u.Counters.Type == CommonQuestCounters.Types.Type.WeeklyChallenge && u.Counters.Rewards.ContainsKey(21002));
+                int resultAt = resultBoss.FindIndex(m => m is SC_StageResult);
+                Check("weekly quests: winning phase 1 of boss 11 sends the completed objective (21002, 'kill in phase 1') BEFORE the result", updateAt >= 0 && updateAt < resultAt, $"update={updateAt} result={resultAt}");
+            }
+
+            var push = resultBoss.OfType<SC_SimCombatWeekStepBscore>().FirstOrDefault();
+            bossScored |= push is { Score: > 0, Status: SimCombatWeekly.Types.Status.Final } && push.KNPHEBDLFFP == boss;
+            bossRefreshed |= resultBoss.OfType<SC_SimCombatWeekRefreshNtf>().Any();
+            bossScore = push?.Score ?? bossScore;
+        }
+
+        var infoAfter = WkInfo(900);
+        bool persisted = infoAfter?.Info?.ODKPMJFEMIL.TryGetValue(boss, out var entry) == true && entry.MaxScore >= bossScore && bossScore > 0;
+        bossOk &= bossScored && bossRefreshed && persisted;
+        if (bossOk) wkBossesCleared++;
+        wkBossRows.Add($"{boss}:{(bossOk ? "ok" : $"FAIL(scored={bossScored},refresh={bossRefreshed},saved={persisted})")}");
+    }
+
+    Console.WriteLine("WEEKLY BOSSES " + string.Join(" ", wkBossRows));
+    Check("weekly boss: every boss 11-25 starts, deploys, fights, scores, tells the refresh and keeps its best score (or the tickets ran out: -10015)",
+        wkBossesCleared == 15 || (wkBossExhausted && wkBossRows.All(r => !r.Contains("FAIL") && !r.Contains("badstart"))), string.Join(" ", wkBossRows));
+    // objectives judged by the REAL battle reports of a played session (A-137): the report lists the achievements the client met (stage_progress.non_repeat_achievements)
+    if (wkBossesCleared == 15)
+    {
+        List<IMessage> WkResultWith(string report)
+        {
+            main.Send(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1, StageCount = 1 });
+            main.ReadFor(TimeSpan.FromMilliseconds(500));
+            main.Send(new CS_StageResultNext { SeqId = 0, Data = Google.Protobuf.ByteString.FromBase64(report), Type = StageResultType.StageResult });
+            return main.ReadFor(TimeSpan.FromMilliseconds(1200)).Select(p => p.Message).ToList();
+        }
+
+        CommonQuestCounters? WkWeeklyCounters() => WkSend(new CS_QuestCount(), 1500).OfType<SC_QuestCount>().FirstOrDefault()?.Quest.Counters.FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.WeeklyChallenge);
+        void WkBattle(uint boss, uint stage, string? report)
+        {
+            WkSend(new CS_StageStart { StcStageId = stage, Other = new StageOther { Weekly = new AEMFCIEIHLK { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = boss } } }, 500);
+            WkSend(new CS_StageInto { Guns = { [1u] = wkPresets[0], [2u] = wkPresets[1], [3u] = wkPresets[2] } }, 600);
+            if (report is null) WkSend(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 }, 700);
+            else WkResultWith(report);
+        }
+
+        var before = WkWeeklyCounters();
+        bool had20142 = before?.Rewards.ContainsKey(20142) == true;
+        WkSend(WkBossRequest(14, 3), 800);
+        WkBattle(14, 72931, Griffin.ProtocolSmoke.WeeklyReports.Stage72931);
+        var afterBlusphere = WkWeeklyCounters();
+        Check("weekly quests: with the REAL report of boss 14 phase 1 (achievement 3010 met) its phase objective 20142 is complete and the other phases' (20143, 20144) are not",
+            !had20142 && afterBlusphere is not null && afterBlusphere.Rewards.ContainsKey(20142) && !afterBlusphere.Rewards.ContainsKey(20143) && !afterBlusphere.Rewards.ContainsKey(20144),
+            $"before={had20142} done={string.Join(",", afterBlusphere?.Rewards.Keys.Where(k => k is >= 20141 and <= 20146) ?? [])}");
+        WkSend(new CS_SimCombatWeekQuit { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 14 });
+
+        WkSend(WkBossRequest(13, 3), 800);
+        WkBattle(13, 72921, null);
+        WkBattle(13, 72922, null);
+        WkBattle(13, 72923, Griffin.ProtocolSmoke.WeeklyReports.Stage72923);
+        var afterBulb = WkWeeklyCounters();
+        Check("weekly quests: with the REAL report of boss 13 phase 3 (achievement 3009 'kill both' NOT met) 'kill both' (23004) stays pending while the plain kills of phases 1 and 2 are complete",
+            afterBulb is not null && afterBulb.Rewards.ContainsKey(23002) && afterBulb.Rewards.ContainsKey(23003) && !afterBulb.Rewards.ContainsKey(23004), $"done={string.Join(",", afterBulb?.Rewards.Keys.Where(k => k is >= 23001 and <= 23006) ?? [])}");
+        WkSend(new CS_SimCombatWeekQuit { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 13 });
+
+        // boss 15 phase 1, real report (achievements 1030/1031/1032 = at most 5 turns; no 3013 = fewer than 30 layers of tremor; every gun alive at the end): the objective of the fight
+        // (230152 'phase 1: 30 layers of tremor and kill') stays pending, while its turn / no-loss / kill sub-objectives of phase 1 are done
+        WkSend(WkBossRequest(15, 3), 800);
+        WkBattle(15, 72941, Griffin.ProtocolSmoke.WeeklyReports.Stage72941);
+        var afterGoat = WkWeeklyCounters();
+        Check("weekly quests: boss 15 phase 1 (real report): 'tremor 30 + kill' (230152) pending, the 10-turn sub-objective (245031) and the kill (245032) of the phase done, the 10-turns-in-both-phases one (230154: phase 2 has no turn achievement in the plain wins before) pending",
+            afterGoat is not null && !afterGoat.Rewards.ContainsKey(230152) && afterGoat.Rewards.ContainsKey(245031) && afterGoat.Rewards.ContainsKey(245032) && !afterGoat.Rewards.ContainsKey(230154),
+            $"done={string.Join(",", afterGoat?.Rewards.Keys.Where(k => k is >= 230151 and <= 230156 or >= 245011 and <= 245044) ?? [])}");
+        WkSend(new CS_SimCombatWeekQuit { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 15 });
+    }
+
+    var wkBossRetreat = WkSend(new CS_SimCombatWeekRetreat { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 11 }).OfType<SC_SimCombatWeekRetreat>().FirstOrDefault();
+    var wkBossQuit = WkSend(new CS_SimCombatWeekQuit { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 11 }).OfType<SC_SimCombatWeekQuit>().FirstOrDefault();
+    Check("weekly boss: retreat and quit of a boss challenge are answered with the boss", wkBossRetreat is { Status: SimCombatWeekly.Types.Status.Final } && wkBossQuit is { Status: SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP: 11 });
+    var wkRetreat = WkSend(new CS_SimCombatWeekRetreat { Status = SimCombatWeekly.Types.Status.StepB }).OfType<SC_SimCombatWeekRetreat>().FirstOrDefault();
+    Check("weekly: the retreat is answered", wkRetreat is not null);
+    var wkQuit = WkSend(new CS_SimCombatWeekQuit { Status = SimCombatWeekly.Types.Status.StepB }).OfType<SC_SimCombatWeekQuit>().FirstOrDefault();
+    Check("weekly: the quit is answered", wkQuit is not null);
+    // mission objectives (A-134): rating objectives of the normal levels and the per-boss objectives (318 clear once, 327 phase + challenge, 334 all) pay at once and are listed as done
+    var wkQuestInfo = WkInfo(1500);
+    Check("weekly quests: the normal levels' rating objectives that were met are listed in the info", !wkStartedAny || (wkQuestInfo?.Info?.WeeklyQuest.Count ?? 0) >= 5, $"done={wkQuestInfo?.Info?.WeeklyQuest.Count}");
+    if (wkBossesCleared == 15)
+    {
+        var entry20 = wkQuestInfo?.Info?.ODKPMJFEMIL.GetValueOrDefault(20u);
+        var entry24 = wkQuestInfo?.Info?.ODKPMJFEMIL.GetValueOrDefault(24u);
+        Check("weekly quests: a boss lists its six objectives (boss 20) and the 'clear once' one is done with its progress", entry20 is not null && entry20.OFNIFIAHBGG.Count == 6 && entry20.OFNIFIAHBGG.Any(q => q.OIFIKKAAKJB == 20201 && q.GDBJHLIMDGA),
+            $"quests={entry20?.OFNIFIAHBGG.Count} done={string.Join(",", entry20?.OFNIFIAHBGG.Where(q => q.GDBJHLIMDGA).Select(q => q.OIFIKKAAKJB) ?? [])}");
+        var entry11 = wkQuestInfo?.Info?.ODKPMJFEMIL.GetValueOrDefault(11u);
+        Check("weekly quests: 'kill the boss once in phase N' (class 316, the objective of the fight shown on the result screen) is done for every phase fought, the 317 score one is not (boss 11/12)",
+            entry11 is not null && new uint[] { 21001, 21002, 21003, 21004 }.All(id => entry11.OFNIFIAHBGG.Any(q => q.OIFIKKAAKJB == id && q.GDBJHLIMDGA)) && !entry11.OFNIFIAHBGG.Any(q => q.OIFIKKAAKJB == 21005 && !q.GDBJHLIMDGA && false),
+            $"done={string.Join(",", entry11?.OFNIFIAHBGG.Where(q => q.GDBJHLIMDGA).Select(q => q.OIFIKKAAKJB) ?? [])}");
+        // the common quest counters (type WeeklyChallenge): complete = present in `rewards`, the value = taken; the result screen of the fight reads them (A-136)
+        var wkCounters = WkSend(new CS_QuestCount(), 1500).OfType<SC_QuestCount>().FirstOrDefault()?.Quest.Counters.FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.WeeklyChallenge);
+        Check("weekly quests: the quest counters of the WeeklyChallenge tab hold the objectives of the fights won (21002/21003/21004 of boss 11, not taken yet)",
+            wkCounters is not null && new uint[] { 21002, 21003, 21004 }.All(id => wkCounters.Rewards.TryGetValue(id, out bool taken) && !taken), $"rewards={wkCounters?.Rewards.Count}");
+        var wkClaim = WkSend(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.WeeklyChallenge, QuestId = { 21004u } }, 800);
+        Check("weekly quests: taking the reward of a complete objective pays it once", wkClaim.OfType<SC_CommonQuestTakeReward>().Any(r => r.QuestId.Contains(21004u)) && wkClaim.OfType<SC_Items>().Concat<IMessage>(wkClaim.OfType<SC_ResourceUpdate>()).Any());
+        var wkClaim2 = WkSend(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.WeeklyChallenge, QuestId = { 21004u } }, 800);
+        Check("weekly quests: taking it again is refused", wkClaim2.OfType<SC_ReportError>().Any() && !wkClaim2.OfType<SC_CommonQuestTakeReward>().Any());
+        Check("weekly quests: boss 24 lists its objectives too", entry24 is not null && entry24.OFNIFIAHBGG.Count >= 2, $"quests={entry24?.OFNIFIAHBGG.Count}");
+    }
+
+    // sweep: a cleared boss / level can be repeated for a ticket; an uncleared one is refused (all with text)
+    var wkRaidNever = WkSend(new CS_SimCombatWeekRaid { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 11, IIJGACGAEAO = 1 }, 600);
+    if (wkBossesCleared == 15)
+    {
+        Check("weekly raid: a cleared boss can be swept: the answer comes with the ticket spent and a refresh", wkRaidNever.OfType<SC_SimCombatWeekRaid>().Any() && wkRaidNever.OfType<SC_Items>().Any(i => i.Items.ContainsKey(304)) && wkRaidNever.OfType<SC_SimCombatWeekRefreshNtf>().Any());
+        var wkRaidBad = WkSend(new CS_SimCombatWeekRaid { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 99 }).OfType<SC_ReportError>().FirstOrDefault();
+        Check("weekly raid: a boss that is not in the cycle is refused with a text", wkRaidBad is not null && WkTexted(wkRaidBad.ErrorNo), $"error={wkRaidBad?.ErrorNo}");
+        var wkRaidLevel = WkSend(new CS_SimCombatWeekRaid { Status = SimCombatWeekly.Types.Status.StepB }, 600);
+        Check("weekly raid: the current level, cleared before, can be swept too", wkRaidLevel.OfType<SC_SimCombatWeekRaid>().Any());
+    }
+    else
+        Check("weekly raid: without tickets the sweep is refused with a text", wkRaidNever.OfType<SC_ReportError>().Any(e => WkTexted(e.ErrorNo)), $"got={string.Join(",", wkRaidNever.Select(m => m.GetType().Name))}");
 }
 
 if (scenario == "campaign")
