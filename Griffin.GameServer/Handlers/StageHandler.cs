@@ -40,6 +40,18 @@ namespace Griffin.GameServer.Handlers
                 response.Lineup.AddRange(weekSquad);
                 response.Sequence.AddRange(weekSquad);
             }
+            else if (connection.Account is not null && accountState.Get<PendingStage>(connection.Account.Uid, "stage.pending") is { RougePlan: not 0 } rougePending)
+            {
+                // a battle of the 遗珍回收 run (A-141): the dolls of the previous battle of the run are preselected again (the squad names GunPresetData ids, not characters);
+                // the first battle of a run preselects the whole squad
+                IReadOnlyList<RougeService.TeamGun> team = rouge.Team(connection.Account.Uid, rougePending.RougePlan);
+                SavedLineup? last = accountState.Get<SavedLineup>(connection.Account.Uid, $"rouge.lineup.{rougePending.RougePlan}");
+                List<uint> ids = last is null ? team.Select(t => t.PresetId).ToList() : last.Lineup.Where(id => team.Any(t => t.PresetId == id || t.GunId == id)).ToList();
+                if (ids.Count == 0)
+                    ids = team.Select(t => t.PresetId).ToList();
+                response.Lineup.AddRange(ids);
+                response.Sequence.AddRange(last is null ? ids : last.Sequence.Where(id => team.Any(t => t.PresetId == id || t.GunId == id)));
+            }
             else if (connection.Account is not null && accountState.Get<SavedLineup>(connection.Account.Uid, "stage.lineup") is { } saved)
             {
                 HashSet<uint> owned = gunService.GetPlayerGuns(connection.Account.Uid).Select(g => g.GunId).ToHashSet();
@@ -226,6 +238,9 @@ namespace Griffin.GameServer.Handlers
             // the squad of a 遗珍回收 battle names GunPresetData ids, not characters: it is not the player's own last team (A-123)
             if (pending!.RougePlan == 0 && !pending.Weekly && request.Guns.Values.All(id => id < 100000))
                 accountState.Set(connection.Account.Uid, "stage.lineup", new SavedLineup(request.Guns.Values.ToList(), request.ActionSequence.ToList()));
+            else if (pending.RougePlan != 0 && request.Guns.Count > 0)
+                // the dolls fielded in a battle of the run are remembered for the next one (A-141)
+                accountState.Set(connection.Account.Uid, $"rouge.lineup.{pending.RougePlan}", new SavedLineup(request.Guns.OrderBy(p => p.Key).Select(p => p.Value).ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
                 pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan);
             if (pending.BattleId == 0 || pending.RandomSeed == 0)

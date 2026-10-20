@@ -19,7 +19,7 @@ namespace Griffin.Common.Utils
         // Each can be overridden with an GRIFFIN_* environment variable without rebuilding.
         public static readonly string ClientVersion = Env("GRIFFIN_CLIENT_VERSION", "4.0.5136.0.0");
 
-        public static readonly string AbResourceVersion = Env("GRIFFIN_AB_RESOURCE_VERSION", "4.0.5136.14794.28495");
+        public static readonly string AbResourceVersion = Env("GRIFFIN_AB_RESOURCE_VERSION", "4.0.5136.14911.28655");
 
         public static readonly string GameClientVersion = Env("GRIFFIN_GAME_CLIENT_VERSION", "4.0.5136");
 

@@ -704,7 +704,8 @@ namespace Griffin.GameServer.Services
                 Message(bytes, 1, entry);
             }
 
-            uint lastDone = level is null ? 0 : level.Keys.Where(state.Done.Contains).DefaultIfEmpty(0u).Last();
+            // a cleared attempt reports no squad done: the client counts the squads done to choose the battle of its "re-challenge" button and with every squad done it indexes past the list (A-142)
+            uint lastDone = level is null || state.Cleared ? 0 : level.Keys.Where(state.Done.Contains).DefaultIfEmpty(0u).Last();
             if (lastDone != 0)
                 Field(bytes, 9, lastDone);
             if (best != 0)
@@ -752,7 +753,7 @@ namespace Griffin.GameServer.Services
                 {
                     BossState b = state.Bosses.GetValueOrDefault(boss.ToString()) ?? new BossState();
                     var raw = new List<byte>(EntryOf(boss, b).ToByteArray());
-                    uint last = BossRow(boss) is { } row ? row.Keys.Where(b.Done.Contains).DefaultIfEmpty(0u).Last() : 0;
+                    uint last = BossRow(boss) is { } row && !b.Cleared ? row.Keys.Where(b.Done.Contains).DefaultIfEmpty(0u).Last() : 0;
                     if (last != 0)
                         Field(raw, 2, last);
                     foreach (uint questId in QuestsOfGroup(1000 + boss))
@@ -863,6 +864,21 @@ namespace Griffin.GameServer.Services
             {
                 WeekState state = Load(uid);
                 LevelRow? level = Current(Levels(), state);
+                if (level is not null && (state.Cleared || !state.Started) && state.Lineups.Count > 0 && level.Stages.Count > 0 && level.Stages[0] == stageId)
+                {
+                    // "re-challenge" of the result screen (A-142): the client enters the first battle again without a new start, so a new attempt with the same squads begins here
+                    if (!itemService.TrySpend(uid, Cost(), out SC_Items _))
+                        return HNINDAOJCKP.ItemNotEnough;
+                    state.Started = true;
+                    state.Cleared = false;
+                    state.Done = [];
+                    state.Score = 0;
+                    state.Attempts++;
+                    Save(uid, state);
+                    Log.Information("SimCombatWeek: account {Uid} re-challenges level {Level} (attempt {Attempts}).", uid, state.Level + 1, state.Attempts);
+                    return null;
+                }
+
                 if (level is null || !state.Started || state.Cleared)
                     return HNINDAOJCKP.ActivityMiniGameStatusInvalid;
                 int next = level.Keys.FindIndex(key => !state.Done.Contains(key));
@@ -998,6 +1014,22 @@ namespace Griffin.GameServer.Services
                 WeekState state = Load(uid);
                 LevelRow? row = BossRow(boss);
                 BossState b = BossStateOf(state, boss);
+                if (row is not null && (b.Cleared || !b.Started) && b.Lineups.Count > 0 && row.Stages[0] == stageId)
+                {
+                    // "re-challenge" of the result screen (A-142): a new attempt with the same squads
+                    if (!itemService.TrySpend(uid, Cost(), out SC_Items _))
+                        return HNINDAOJCKP.ItemNotEnough;
+                    b.Started = true;
+                    b.Cleared = false;
+                    b.Done = [];
+                    b.Score = 0;
+                    b.Attempts++;
+                    b.Attempt = [];
+                    Save(uid, state);
+                    Log.Information("SimCombatWeek: account {Uid} re-challenges boss {Boss} (attempt {Attempts}).", uid, boss, b.Attempts);
+                    return null;
+                }
+
                 if (row is null || !b.Started || b.Cleared)
                     return HNINDAOJCKP.ActivityMiniGameStatusInvalid;
                 int next = row.Keys.FindIndex(key => !b.Done.Contains(key));
