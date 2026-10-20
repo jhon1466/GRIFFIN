@@ -2326,7 +2326,8 @@ if (scenario is "all" or "rouge")
         && rgInto.Stage.Camps[0].LBJLMGIPOJA.Count >= 4, $"units={rgInto?.Stage?.Camps[0].LBJLMGIPOJA.Count}");
     main.Send(new CS_StageUsableGuns { StageId = 10104 });
     var rgLineup = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_StageUsableGuns>().FirstOrDefault();
-    Check("rouge: the preset squad is not remembered as the player's own last team", rgLineup is not null && rgLineup.Lineup.All(id => id == 0));
+    Check("rouge: the deployment screen preselects the dolls fielded in the run's battle (the preset ids), and they are not taken as the player's own last team (A-141)",
+        rgLineup is not null && new uint[] { 1001, 1008, 1021, 1022 }.All(rgLineup.Lineup.Contains), $"lineup={string.Join(",", rgLineup?.Lineup ?? [])}");
 
     main.Send(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 });
     var rgResult = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
@@ -2975,6 +2976,17 @@ if (scenario is "all" or "weekly")
             afterGoat is not null && !afterGoat.Rewards.ContainsKey(230152) && afterGoat.Rewards.ContainsKey(245031) && afterGoat.Rewards.ContainsKey(245032) && !afterGoat.Rewards.ContainsKey(230154),
             $"done={string.Join(",", afterGoat?.Rewards.Keys.Where(k => k is >= 230151 and <= 230156 or >= 245011 and <= 245044) ?? [])}");
         WkSend(new CS_SimCombatWeekQuit { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 15 });
+    }
+
+    if (wkBossesCleared == 15)
+    {
+        // "re-challenge" (重新挑战) of the result screen (A-142): with every squad done the info must report none done (the client indexes the squads by that count and failed past the end),
+        // and the first battle entered again starts a new attempt with the same squads for a ticket
+        var wkRetryInfo = WkInfo(1500)?.Info?.ODKPMJFEMIL.GetValueOrDefault(11u);
+        Check("weekly retry: a cleared boss reports no squad done in the info", wkRetryInfo is { OIFIKKAAKJB: 0 }, $"last={wkRetryInfo?.OIFIKKAAKJB}");
+        var wkRetry = WkSend(new CS_StageStart { StcStageId = 72901, Other = new StageOther { Weekly = new AEMFCIEIHLK { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 11 } } }, 800);
+        Check("weekly retry: entering the first battle of a cleared boss again starts a new attempt", wkRetry.OfType<SC_StageStart>().Any() && !wkRetry.OfType<SC_ReportError>().Any());
+        WkSend(new CS_SimCombatWeekQuit { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 11 });
     }
 
     var wkBossRetreat = WkSend(new CS_SimCombatWeekRetreat { Status = SimCombatWeekly.Types.Status.Final, KNPHEBDLFFP = 11 }).OfType<SC_SimCombatWeekRetreat>().FirstOrDefault();
