@@ -99,7 +99,7 @@ namespace Griffin.Database.Core
             {
                 e.HasIndex(m => m.WeaponModId);
                 e.HasIndex(m => m.Uid).IsUnique();
-                e.HasIndex("AccountUid", "WeaponModId").IsUnique();
+                e.HasIndex("AccountUid", "WeaponModId"); // not unique: every dropped mod is its own instance (A-148)
                 e.Property(m => m.Id).ValueGeneratedOnAdd();
                 e.Property(m => m.Level).HasDefaultValue(0u);
                 e.Property(m => m.Field5).HasDefaultValue(0u);

@@ -260,6 +260,7 @@ namespace Griffin.GameServer.Handlers
                 }
 
                 GrantRepeatableDrops(uid, stage, response, push);
+                GrantSyncGrades(uid, stage, stageProgress, response, push);
                 CompleteLoveEvent(uid, pending, stage.Id, response, push);
 
                 if (firstClear)
@@ -275,6 +276,13 @@ namespace Griffin.GameServer.Handlers
                 // next chapter (or the past-activity story) opens without logging in again.
                 if (achievements.NewlyCompleted(uid, achievementsBefore) is { } unlocked)
                     push.Add(new SC_CommonQuestCountUpdate { Counters = unlocked });
+            }
+
+            // the mods that dropped must be known to the client before the result screen asks for them
+            foreach (SC_NewGunWeaponMod newMod in push.OfType<SC_NewGunWeaponMod>().ToList())
+            {
+                connection.Send(newMod);
+                push.Remove(newMod);
             }
 
             if (announce)
@@ -367,6 +375,53 @@ namespace Griffin.GameServer.Handlers
         /// (<c>StageChallengeData</c> has none; the chapter star rewards are claimed in <c>ChapterHandler</c>), so <c>challenge_drop</c> stays
         /// empty. Character/commander experience of the stage (<c>gun_exp</c>, <c>exp</c>) is not applied.
         /// </summary>
+        /// <summary>
+        /// The standardized-sync stages (StageData col 20 = 20, <c>SimCombatResourceData</c>): the battle reports its sync value in <c>StageProgress.Points</c>; every
+        /// grade of the stage (<c>CashGradeData</c> of the group in <c>CashGroupId</c>: minimum value and drop packages) that the value reaches pays on EVERY run (that is
+        /// what the Auto button repeats), and the best value is told to the client (<c>SC_SimCombatResourceUpdate</c>), which marks the objectives as done (A-149).
+        /// </summary>
+        private void GrantSyncGrades(uint uid, StageData stage, StageProgress? progress, SC_StageResult response, List<Google.Protobuf.IMessage> push)
+        {
+            uint points = progress?.Points ?? 0;
+            if (points == 0 || SyncGradePackages(tableService, stage.Id, points).Count == 0 && !IsSyncStage(tableService, stage.Id))
+                return;
+
+            foreach (uint package in SyncGradePackages(tableService, stage.Id, points))
+                foreach ((uint item, int count) in itemUse.RollPackage(package))
+                {
+                    rewardService.Grant(uid, item, count, push);
+                    response.OtherDrop.Add(new UserDropCache { ItemId = item, ItemNum = (uint)count });
+                }
+
+            // the result screen draws the sync value, its grade and the objectives from StageOther.cash (field 3, point = the value of this run)
+            response.StageOther ??= new StageOther();
+            response.StageOther.Cash = new OHGAMIFMMGJ { Point = points };
+
+            uint stageType = TableFields.U(stage, 20);
+            var all = accountState.Get<Dictionary<string, Dictionary<string, uint>>>(uid, "simcombat.resource") ?? [];
+            if (!all.TryGetValue(stageType.ToString(), out Dictionary<string, uint>? stages))
+                all[stageType.ToString()] = stages = [];
+            uint best = Math.Max(stages.GetValueOrDefault(stage.Id.ToString()), points);
+            stages[stage.Id.ToString()] = best;
+            accountState.Set(uid, "simcombat.resource", all);
+            push.Add(new SC_SimCombatResourceUpdate { Type = stageType, StageId = stage.Id, Point = best });
+        }
+
+        public static bool IsSyncStage(ITableService tables, uint stageId) =>
+            tables.GetTable<SimCombatResourceData>().Any(r => r.Id == stageId && r.CashGroupId.Count > 0);
+
+        /// <summary>The drop packages of the grades of a sync stage that a value reaches (all of them, once per run).</summary>
+        public static List<uint> SyncGradePackages(ITableService tables, uint stageId, uint points)
+        {
+            SimCombatResourceData? resource = tables.GetTable<SimCombatResourceData>().FirstOrDefault(r => r.Id == stageId);
+            if (resource is null || resource.CashGroupId.Count == 0 || points == 0)
+                return [];
+
+            uint group = resource.CashGroupId[0];
+            return tables.GetTable<CashGradeData>().Where(g => g.GradeGroupId == group && g.MinScore <= points).OrderBy(g => g.GradeId)
+                .SelectMany(g => g.AwardDropList).ToList();
+        }
+
         private void GrantRepeatableDrops(uint uid, StageData stage, SC_StageResult response, List<Google.Protobuf.IMessage> push)
         {
             List<(uint Item, int Count)> drops = [];
@@ -380,7 +435,15 @@ namespace Griffin.GameServer.Handlers
 
             foreach ((uint item, int count) in drops)
             {
-                rewardService.Grant(uid, item, count, push);
+                GrantResult granted = rewardService.Grant(uid, item, count, push);
+                if (granted.ModIds is { Count: > 0 })
+                {
+                    // one entry per mod instance: the result screen looks it up by its id to show its effects (A-148)
+                    foreach (uint modId in granted.ModIds)
+                        response.OtherDrop.Add(new UserDropCache { ItemId = item, ItemNum = 1, Relate = modId });
+                    continue;
+                }
+
                 response.OtherDrop.Add(new UserDropCache { ItemId = item, ItemNum = (uint)count });
             }
         }

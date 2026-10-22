@@ -6,7 +6,7 @@ using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class SimCombatHandler(ISimCombatWeekService week) : SimCombatHandlerBase
+    public sealed class SimCombatHandler(ISimCombatWeekService week, IAccountStateService accountState) : SimCombatHandlerBase
     {
         /// <summary>Retreat from the attempt of the weekly mode: the squads and the score are dropped, the ticket is not given back (A-131).</summary>
         public override void HandleSimCombatWeekRetreat(CS_SimCombatWeekRetreat request, Connection connection)
@@ -107,12 +107,21 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleSimCombatResourceInfo(CS_SimCombatResourceInfo request, Connection connection)
         {
-            connection.Send(
-            new SC_SimCombatResourceInfo
+            // the best sync value of every stage of the account, per stage type (A-149)
+            var reply = new SC_SimCombatResourceInfo();
+            if (connection.Account is not null)
             {
-                SimCombatResource = { },
+                var all = accountState.Get<Dictionary<string, Dictionary<string, uint>>>(connection.Account.Uid, "simcombat.resource") ?? [];
+                foreach ((string type, Dictionary<string, uint> stages) in all)
+                {
+                    var resource = new SimCombatResource();
+                    foreach ((string stage, uint value) in stages)
+                        resource.Info[uint.Parse(stage)] = value;
+                    reply.SimCombatResource[uint.Parse(type)] = resource;
+                }
             }
-            );
+
+            connection.Send(reply);
         }
     }
 }

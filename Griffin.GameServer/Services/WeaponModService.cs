@@ -69,6 +69,21 @@ namespace Griffin.GameServer.Services
             return true;
         }
 
+        /// <summary>A new mod (a drop, a reward) with its own affixes, saved so that its id exists.</summary>
+        public WeaponModEntity Create(uint accountUid, uint weaponModStcId)
+        {
+            ulong uid = GenerateUid();
+            var mod = new WeaponModEntity
+            {
+                WeaponModId = weaponModStcId,
+                Uid = uid,
+                Level = 0,
+                Field7 = ModAffixes.Roll(tableService, weaponModStcId, uid),
+            };
+            AddWeaponMod(accountUid, mod);
+            return mod;
+        }
+
         public void Save() => weaponModRepository.SaveChanges();
 
         // Mod uids are unique in the database across server restarts: seed the counter from the clock (milliseconds << 12) instead of 0.
@@ -83,6 +98,7 @@ namespace Griffin.GameServer.Services
         void AddWeaponMod(uint accountUid, WeaponModEntity weaponMod);
         bool RemoveWeaponMod(uint accountUid, WeaponModEntity weaponMod);
         void AddAllWeaponMods(uint accountUid);
+        WeaponModEntity Create(uint accountUid, uint weaponModStcId);
         void Save();
     }
 }
