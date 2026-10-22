@@ -63,6 +63,26 @@ if (-not (Test-Path -LiteralPath $serverDll)) {
     throw "No existe $serverDll. Ejecuta el script sin -NoBuild."
 }
 
+# Token de la API GM (la usa Griffin GM Tools): se genera la primera vez y se reutiliza en cada arranque.
+$gmTokenPath = Join-Path $repoRoot 'GRIFFIN_GM_TOKEN.txt'
+if (Test-Path -LiteralPath $gmTokenPath) {
+    $gmToken = [System.IO.File]::ReadAllText($gmTokenPath).Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($env:GRIFFIN_GM_TOKEN)) {
+    $gmToken = $env:GRIFFIN_GM_TOKEN.Trim()
+    [System.IO.File]::WriteAllText($gmTokenPath, $gmToken, [System.Text.UTF8Encoding]::new($false))
+} else {
+    $randomBytes = New-Object byte[] 32
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $generator.GetBytes($randomBytes) } finally { $generator.Dispose() }
+    $gmToken = [Convert]::ToBase64String($randomBytes)
+    [System.IO.File]::WriteAllText($gmTokenPath, $gmToken, [System.Text.UTF8Encoding]::new($false))
+}
+if ($gmToken.Length -lt 24) {
+    throw "El token de $gmTokenPath tiene menos de 24 caracteres. Corrígelo o borra el archivo para generar uno nuevo."
+}
+$env:GRIFFIN_GM_TOKEN = $gmToken
+Write-Host "Token de la API GM listo (para Griffin GM Tools): $gmTokenPath"
+
 Write-Host 'Iniciando Griffin: HTTPS 443 y 80 (SDK) y TCP 7001 (juego). Ctrl+C para detenerlo.'
 Push-Location $serverDirectory
 try {
