@@ -152,7 +152,7 @@ public static class GmAdminExtensions
 
         api.MapPost("/accounts/{uid}/items", async (uint uid, GrantItemRequest request,
             GriffinDbContext db, ITableService tables, IItemService itemService,
-            IResourceService resources, ConnectionManager connections, ILoggerFactory loggerFactory) =>
+            IResourceService resources, IRewardService rewards, ConnectionManager connections, ILoggerFactory loggerFactory) =>
         {
             if (request.ItemId == 0 || request.Count is < 1 or > 1_000_000)
                 return Results.BadRequest(new { error = "itemId debe ser positivo y count debe estar entre 1 y 1.000.000." });
@@ -163,18 +163,20 @@ public static class GmAdminExtensions
             if (definition is null || definition.Id == 0)
                 return Results.BadRequest(new { error = "El ID no existe en ItemData de las tablas cargadas." });
 
-            if (definition.Type == ResourceService.ResourceItemType)
+            // Same path as every other reward (shop, mail, stages): resources, stamina (item 101, its own balance), plain items, weapon mods as
+            // their own instances... and the client is told with the messages that path builds (A-150).
+            // every weapon mod is its own row with its own affixes: do not create thousands of them at once
+            if (request.Count > 100 && tables.GetTable<WeaponModData>().Any(m => m.Id == request.ItemId))
+                return Results.BadRequest(new { error = "Los accesorios se entregan como unidades independientes: maximo 100 por operacion." });
+            List<Google.Protobuf.IMessage> grantMessages = [];
+            GrantResult granted = rewards.Grant(uid, request.ItemId, request.Count, grantMessages);
+            if (!granted.Granted)
+                return Results.BadRequest(new { error = "El servidor no pudo entregar ese ID (no es un objeto entregable)." });
+            Connection? liveConnection = connections.Connections.FirstOrDefault(c => c.Account?.Uid == uid);
+            if (liveConnection is not null && grantMessages.Count > 0)
             {
-                SC_ResourceUpdate update = resources.Add(uid, new Dictionary<uint, int> { [request.ItemId] = request.Count });
-                SendLive(connections, uid, update, loggerFactory);
-            }
-            else
-            {
-                itemService.Grant(uid, request.ItemId, definition.Type, request.Count);
-                ItemEntity[] current = await db.Items.AsNoTracking().Where(i => i.Account.Uid == uid && i.Type != ResourceService.ResourceItemType).ToArrayAsync();
-                SC_Items update = new();
-                foreach (ItemEntity item in current) update.Items[item.ItemId] = item.Count;
-                SendLive(connections, uid, update, loggerFactory);
+                try { liveConnection.SendAutoEncrypted(grantMessages.ToArray()); }
+                catch (Exception ex) { loggerFactory.CreateLogger("GmAdmin").LogWarning(ex, "Could not push the item grant to account {Uid}.", uid); }
             }
 
             await AuditAsync(app, uid, "item.grant", new { request.ItemId, request.Count, itemType = definition.Type });
