@@ -1048,13 +1048,15 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleGetGunRemouldingPluginLockPlan(CS_GetGunRemouldingPluginLockPlan request, Connection connection)
         {
-                connection.Send(new SC_GetGunRemouldingPluginLockPlan
-                {
-                    DJNPEOFHKHD = new AOEAJGGGBBM
-                    {
-                        COFDFFJMNMA = false,
-                    },
-                });
+            // The 4.0.5136 client indexes this repeated field once for every
+            // GunDutyData row. The local client table has four rows; an empty plan
+            // crashes its response handler before it can open the weapon panel.
+            // Return one empty entry per row while leaving all locks disabled.
+            AOEAJGGGBBM plan = new() { COFDFFJMNMA = false };
+            for (int i = 0; i < 4; i++)
+                plan.PMDFJCLFFPB.Add(new PBPDJINOMHG());
+
+            connection.Send(new SC_GetGunRemouldingPluginLockPlan { DJNPEOFHKHD = plan });
         }
 
         public override void HandleGunSelected(CS_GunSelected request, Connection connection)
