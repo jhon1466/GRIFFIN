@@ -1,9 +1,11 @@
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
+using Griffin.GameServer.Extensions;
+using Griffin.Common.Protocol;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class DarkZoneHandler : DarkZoneHandlerBase
+    public sealed class DarkZoneHandler(Griffin.GameServer.Services.IModProgressService modProgress) : DarkZoneHandlerBase
     {
         public override void HandleDarkZoneStorage(CS_DarkZoneStorage request, Connection connection)
         {
@@ -38,6 +40,35 @@ namespace Griffin.GameServer.Handlers
                     {
                         JIAMDNEMBAK = { },
                     });
+        }
+
+        /// <summary>
+        /// The "Dismantle" button of the storeroom (UIRepositoryDecomposingDialog) of the 4.0.5136 client does not send CS_GunWeaponModDismantle: it sends this request
+        /// with the ids of the weapon mods (log of 2026-10-22: the server refused it with DarkZoneNotStart and nothing happened). The mods are dismantled like in
+        /// <see cref="GunWeaponHandler"/>; the client removes them with SC_GunWeaponModDismantle and takes what it got from the answer (A-153).
+        /// </summary>
+        public override void HandleDarkZoneWishDismantle(CS_DarkZoneWishDismantle request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            List<Google.Protobuf.IMessage> messages = [];
+            Dictionary<uint, int> gains = [];
+            IReadOnlyList<uint> removed = modProgress.Dismantle(connection.Account.Uid, request.Ids, messages, gains);
+            if (removed.Count == 0)
+            {
+                connection.Refuse(MsgId.MsgCsDarkZoneWishDismantle, HNINDAOJCKP.GunWeaponModIsNotFree);
+                return;
+            }
+
+            SC_GunWeaponModDismantle gone = new();
+            gone.Ids.AddRange(removed.Select(i => (ulong)i));
+            SC_DarkZoneWishDismantle answer = new();
+            answer.Ids.AddRange(removed);
+            foreach ((uint item, int count) in gains)
+                answer.DropItems[item] = (uint)count;
+            List<Google.Protobuf.IMessage> all = [gone, .. GunWeaponHandler.CoalesceTotals(messages), answer];
+            connection.SendAutoEncrypted(all.ToArray());
         }
 
         public override void HandleDarkZoneWishExp(CS_DarkZoneWishExp request, Connection connection)

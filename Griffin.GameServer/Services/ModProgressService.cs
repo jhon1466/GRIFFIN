@@ -37,7 +37,7 @@ namespace Griffin.GameServer.Services
         /// </summary>
         bool ConsumeFodder(uint uid, uint modId, IEnumerable<uint> materials, IReadOnlyDictionary<uint, uint> items, long minExp, IReadOnlyDictionary<uint, int> extraCost, List<IMessage> messages);
 
-        IReadOnlyList<uint> Dismantle(uint uid, IEnumerable<uint> modIds, List<IMessage> messages);
+        IReadOnlyList<uint> Dismantle(uint uid, IEnumerable<uint> modIds, List<IMessage> messages, Dictionary<uint, int>? gains = null);
     }
 
     public sealed class ModProgressService(
@@ -193,7 +193,7 @@ namespace Griffin.GameServer.Services
             return true;
         }
 
-        public IReadOnlyList<uint> Dismantle(uint uid, IEnumerable<uint> modIds, List<IMessage> messages)
+        public IReadOnlyList<uint> Dismantle(uint uid, IEnumerable<uint> modIds, List<IMessage> messages, Dictionary<uint, int>? gains = null)
         {
             AccountEntity? account = accountService.GetByUid(uid);
             if (account is null)
@@ -214,7 +214,12 @@ namespace Griffin.GameServer.Services
             }
 
             if (removed.Count > 0 && perItem > 0 && experience / perItem > 0)
+            {
                 rewardService.Grant(uid, UpgradeItem, (int)(experience / perItem), messages);
+                if (gains is not null)
+                    gains[UpgradeItem] = gains.GetValueOrDefault(UpgradeItem) + (int)(experience / perItem);
+            }
+
             return removed;
         }
 

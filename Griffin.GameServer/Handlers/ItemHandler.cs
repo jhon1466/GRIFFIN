@@ -57,7 +57,7 @@ namespace Griffin.GameServer.Handlers
             SC_ItemDismantle response = new();
             foreach ((uint id, uint num) in request.IdAndNum)
                 response.IdAndNum[id] = num;
-            messages.Add(response);
+            messages.Insert(0, response);
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
@@ -74,7 +74,8 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            messages.Add(new SC_ComposeItems { ItemId = request.ItemId, ItemNum = request.ItemNum, UseItems = request.UseItems });
+            // The client applies the answer to its own counts (adds the composed items, spends the materials): the totals must come AFTER it, or they are applied twice (A-152).
+            messages.Insert(0, new SC_ComposeItems { ItemId = request.ItemId, ItemNum = request.ItemNum, UseItems = request.UseItems });
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
@@ -91,7 +92,7 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            messages.Add(new SC_UseItems { ItemId = request.ItemId, Num = request.Num });
+            messages.Insert(0, new SC_UseItems { ItemId = request.ItemId, Num = request.Num });
             connection.SendAutoEncrypted(messages.ToArray());
         }
     }

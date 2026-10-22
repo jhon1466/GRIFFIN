@@ -390,6 +390,36 @@ namespace Griffin.GameServer.Handlers
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
+        /// <summary>
+        /// A batch dismantle used to push one SC_Items and one SC_ResourceUpdate per weapon or mod (hundreds of packets in one answer). The values they carry are
+        /// totals, so the last one of each item wins: the batch keeps one SC_Items and one SC_ResourceUpdate with the final totals (A-151).
+        /// </summary>
+        internal static List<Google.Protobuf.IMessage> CoalesceTotals(List<Google.Protobuf.IMessage> messages)
+        {
+            SC_Items items = new();
+            SC_ResourceUpdate resources = new();
+            List<Google.Protobuf.IMessage> others = [];
+            foreach (Google.Protobuf.IMessage message in messages)
+            {
+                if (message is SC_Items i)
+                    foreach (var pair in i.Items)
+                        items.Items[pair.Key] = pair.Value;
+                else if (message is SC_ResourceUpdate r)
+                    foreach (var pair in r.ResourceEx)
+                        resources.ResourceEx[pair.Key] = pair.Value;
+                else
+                    others.Add(message);
+            }
+
+            List<Google.Protobuf.IMessage> result = [];
+            if (items.Items.Count > 0)
+                result.Add(items);
+            if (resources.ResourceEx.Count > 0)
+                result.Add(resources);
+            result.AddRange(others);
+            return result;
+        }
+
         public override void HandleGunWeaponModDismantle(CS_GunWeaponModDismantle request, Connection connection)
         {
             if (connection.Account is null)
@@ -405,6 +435,7 @@ namespace Griffin.GameServer.Handlers
 
             SC_GunWeaponModDismantle response = new();
             response.Ids.AddRange(removed.Select(i => (ulong)i));
+            messages = CoalesceTotals(messages);
             messages.Add(response);
             connection.SendAutoEncrypted(messages.ToArray());
         }
@@ -471,6 +502,7 @@ namespace Griffin.GameServer.Handlers
 
             SC_GunWeaponDismantle response = new();
             response.Uids.AddRange(removed);
+            messages = CoalesceTotals(messages);
             messages.Add(response);
             connection.SendAutoEncrypted(messages.ToArray());
         }
