@@ -311,7 +311,7 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleGunRemouldingPlugins(CS_GunRemouldingPlugins request, Connection connection)
         {
-            SC_GunRemouldingPlugins plugins = PluginCatalog();
+            SC_GunRemouldingPlugins plugins = PluginCatalog(tableService);
             if (connection.Account is not null)
                 foreach (GunRemouldingPlugin plugin in plugins.RemouldingPlugins)
                     plugin.GunId = RemouldingPlugins.GunOf(accountState, connection.Account.Uid, plugin.Id);
@@ -319,7 +319,8 @@ namespace Griffin.GameServer.Handlers
             connection.Send(4, plugins);
         }
 
-        private static readonly Lazy<IReadOnlySet<ulong>> PluginIds = new(() => PluginCatalog().RemouldingPlugins.Select(p => p.Id).ToHashSet());
+        private IReadOnlySet<ulong> PluginIds => pluginIds ??= PluginCatalog(tableService).RemouldingPlugins.Select(p => p.Id).ToHashSet();
+        private static IReadOnlySet<ulong>? pluginIds;
 
         /// <summary>Puts a plugin in a slot of the core (slot is 1-based; slot 0 takes the plugin off; plugin 0 empties the slot) and keeps it (A-58).</summary>
         public override void HandleGunRemouldingPluginBelong(CS_GunRemouldingPluginBelong request, Connection connection)
@@ -337,7 +338,7 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
-                if (request.Slot > RemouldingPlugins.SlotCount || !RemouldingPlugins.Owns(PluginIds.Value, request.GIBKJMJPLGC))
+                if (request.Slot > RemouldingPlugins.SlotCount || !RemouldingPlugins.Owns(PluginIds, request.GIBKJMJPLGC))
                 {
                     connection.Refuse(MsgId.MsgCsGunRemouldingPluginBelong, request.Slot > RemouldingPlugins.SlotCount
                         ? HNINDAOJCKP.GunRemouldingCoreSlotError : HNINDAOJCKP.GunRemouldingPluginNotFound);
@@ -380,7 +381,7 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
-                if (request.PluginUids.Count > RemouldingPlugins.SlotCount || request.PluginUids.Any(p => !RemouldingPlugins.Owns(PluginIds.Value, p)))
+                if (request.PluginUids.Count > RemouldingPlugins.SlotCount || request.PluginUids.Any(p => !RemouldingPlugins.Owns(PluginIds, p)))
                 {
                     connection.Refuse(MsgId.MsgCsGunRemouldingPluginBatchBelong, HNINDAOJCKP.GunRemouldingPluginNotFound);
                     return;
@@ -393,7 +394,51 @@ namespace Griffin.GameServer.Handlers
             }
         }
 
-        internal static SC_GunRemouldingPlugins PluginCatalog() =>
+        private static List<(ulong Id, uint Stc, uint[] Entries)>? generatedPlugins;
+
+        /// <summary>
+        /// Every plugin of the game (<c>PluginData</c>: 128 named kinds "Electric - Heaven Blossom γ"...): the effect entries of a plugin are the
+        /// <c>EntryLibraryData</c> rows of its columns 7-9 (column 5 of those rows = <c>FeaturesEntryData</c> id), the ones the client shows as "Nv.3 Attack boost".
+        /// The catalog has one plugin of each kind on top of the few the original server sent; its uid is derived from the item so it never changes (A-150).
+        /// </summary>
+        internal static SC_GunRemouldingPlugins PluginCatalog(ITableService tables)
+        {
+            SC_GunRemouldingPlugins catalog = CapturedPluginCatalog();
+            if (generatedPlugins is null)
+            {
+                var library = tables.GetTable<EntryLibraryData>().ToDictionary(row => row.Id, row => TableFields.U(row, 5));
+                var featureIcons = tables.GetTable<FeaturesEntryData>().ToDictionary(row => row.Id, row => TableFields.S(row, 5));
+                var items = tables.GetTable<ItemData>().Select(row => row.Id).ToHashSet();
+                var list = new List<(ulong, uint, uint[])>();
+                foreach (PluginData row in tables.GetTable<PluginData>().OrderBy(r => r.Id))
+                {
+                    // the instance is an item of its class and grade (98 + grade + class + variant: "Ovule Root α"); the client names and draws it from its entries
+                    uint instanceItem = new[] { 980_000u + TableFields.U(row, 4) * 1000 + TableFields.U(row, 3) * 100 + 1, 980_000u + TableFields.U(row, 4) * 1000 + TableFields.U(row, 3) * 100 + 2 }
+                        .FirstOrDefault(items.Contains);
+                    if (instanceItem == 0)
+                        continue;
+
+                    uint[] entries = new[] { 7, 8, 9 }.Select(column => TableFields.U(row, column))
+                        .Where(id => id != 0 && library.ContainsKey(id)).Select(id => library[id]).Where(featureIcons.ContainsKey).ToArray();
+                    // the placeholder kinds ("unknown" plugins, entries 1-9 that are not features) have no entry to name or draw them: they come out blank
+                    if (entries.Length > 0 && !string.IsNullOrEmpty(featureIcons[entries[0]]))
+                        list.Add((1_800_000_000_000_000_000UL + row.Id, instanceItem, entries));
+                }
+
+                generatedPlugins = list;
+            }
+
+            foreach ((ulong id, uint stc, uint[] entries) in generatedPlugins)
+            {
+                var plugin = new GunRemouldingPlugin { Id = id, StcId = stc, GunId = 0, MDFIDAFPBJN = false };
+                plugin.ACEIFDEGLMH.AddRange(entries);
+                catalog.RemouldingPlugins.Add(plugin);
+            }
+
+            return catalog;
+        }
+
+        private static SC_GunRemouldingPlugins CapturedPluginCatalog() =>
             new SC_GunRemouldingPlugins
                     {
                         RemouldingPlugins =

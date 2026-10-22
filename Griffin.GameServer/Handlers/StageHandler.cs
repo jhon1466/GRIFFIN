@@ -447,7 +447,7 @@ namespace Griffin.GameServer.Handlers
         private IReadOnlyList<uint> PluginAffixesOf(uint uid, uint gunId)
         {
             ulong[] slots = RemouldingPlugins.SlotsOf(accountState, uid, gunId);
-            return GunHandler.PluginCatalog().RemouldingPlugins.Where(plugin => slots.Contains(plugin.Id)).SelectMany(plugin => plugin.ACEIFDEGLMH).ToList();
+            return GunHandler.PluginCatalog(tableService).RemouldingPlugins.Where(plugin => slots.Contains(plugin.Id)).SelectMany(plugin => plugin.ACEIFDEGLMH).ToList();
         }
 
         /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>.</summary>
