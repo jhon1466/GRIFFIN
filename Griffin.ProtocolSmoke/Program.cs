@@ -541,6 +541,15 @@ if (scenario is "all" or "gun")
 
 if (scenario is "all" or "weapon")
 {
+    // The 4.0.5136 client indexes one lock-plan record per GunDutyData row (4);
+    // returning an empty repeated field crashes the weapon panel.
+    main.Send(new CS_GetGunRemouldingPluginLockPlan());
+    var remouldPlans = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message)
+        .OfType<SC_GetGunRemouldingPluginLockPlan>().FirstOrDefault();
+    Check("weapon: remoulding lock-plan response matches four GunDutyData rows",
+        remouldPlans?.DJNPEOFHKHD?.PMDFJCLFFPB.Count == 4,
+        $"rows={remouldPlans?.DJNPEOFHKHD?.PMDFJCLFFPB.Count}");
+
     // Weapon progression: claim the starter kit (analysis blueprints), level up, lock, break with a duplicate, dismantle.
     main.Send(new CS_Mails());
     var wMails = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Mails>().FirstOrDefault();

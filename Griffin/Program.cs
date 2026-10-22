@@ -12,6 +12,7 @@ using Griffin.Command;
 using Griffin.SDKServer;
 using Griffin.Common.Table;
 using Serilog;
+using Griffin.Admin;
 
 
 namespace Griffin
@@ -79,6 +80,7 @@ ____ ____  ___ _____ _____ ___ _   _
                 app.UseSerilogRequestLogging();
                 app.UseAuthorization();
                 app.MapControllers();
+                app.MapGmAdmin();
 
                 app.Run();
             }
