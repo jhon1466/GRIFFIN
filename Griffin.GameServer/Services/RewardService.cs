@@ -13,7 +13,8 @@ namespace Griffin.GameServer.Services
         bool Granted,
         uint Relate = 0,
         bool NewCharacter = false,
-        bool DuplicateCharacter = false);
+        bool DuplicateCharacter = false,
+        IReadOnlyList<uint>? ModIds = null);
 
     /// <summary>
     /// Gives items to an account from an item id, the way the shop, gacha, mail and quests all need it: characters (with
@@ -34,7 +35,8 @@ namespace Griffin.GameServer.Services
         ITableService tableService,
         IResourceService resourceService,
         IItemService itemService,
-        IStaminaService staminaService) : IRewardService
+        IStaminaService staminaService,
+        IWeaponModService weaponModService) : IRewardService
     {
         private const uint StaminaItemId = 101;
 
@@ -56,6 +58,21 @@ namespace Griffin.GameServer.Services
                     relate = GrantWeapon(accountUid, account, itemId, messages);
 
                 return new GrantResult(true, relate);
+            }
+
+            if (tableService.GetTable<WeaponModData>().Any(m => m.Id == itemId))
+            {
+                // A weapon mod is not a stackable item: every one that drops is its own instance with its own affixes (A-74), announced the way the
+                // client keeps them (SC_NewGunWeaponMod); the result screen then finds it by the id in UserDropCache.relate and shows its effects (A-148).
+                List<uint> ids = [];
+                for (int i = 0; i < count; i++)
+                {
+                    WeaponModEntity mod = weaponModService.Create(accountUid, itemId);
+                    ids.Add(mod.Id);
+                    messages.Add(new SC_NewGunWeaponMod { Mod = Extensions.ProtoExtensions.ToProtoWeaponMod(mod, null, ModPower.EffectIdOf(tableService, mod)) });
+                }
+
+                return new GrantResult(true, ids[^1], ModIds: ids);
             }
 
             if (itemId == StaminaItemId)

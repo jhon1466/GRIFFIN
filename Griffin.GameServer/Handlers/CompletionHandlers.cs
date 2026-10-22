@@ -187,6 +187,13 @@ namespace Griffin.GameServer.Handlers
                 foreach (uint package in stage.NormalDropList)
                     foreach ((uint item, int count) in itemUse.RollPackage(package))
                         totals[item] = totals.GetValueOrDefault(item) + count;
+                // a standardized-sync stage pays the grades of the best value of the account on every sweep (A-149)
+                uint bestSync = accountState.Get<Dictionary<string, Dictionary<string, uint>>>(uid, "simcombat.resource") is { } sync
+                    && sync.TryGetValue(TableFields.U(stage, 20).ToString(), out Dictionary<string, uint>? syncStages)
+                    ? syncStages.GetValueOrDefault(stage.Id.ToString()) : 0;
+                foreach (uint package in StageResultHandler.SyncGradePackages(tableService, stage.Id, bestSync))
+                    foreach ((uint item, int count) in itemUse.RollPackage(package))
+                        totals[item] = totals.GetValueOrDefault(item) + count;
                 foreach ((uint item, uint count) in stage.ExpReward)
                     if (count > 0)
                         totals[item] = totals.GetValueOrDefault(item) + (int)count;
@@ -198,7 +205,15 @@ namespace Griffin.GameServer.Handlers
             StageDrop.Types.DropCache cache = new() { DropType = StageDrop.Types.DropType.DropPackage };
             foreach ((uint item, int count) in totals)
             {
-                rewardService.Grant(uid, item, count, messages);
+                GrantResult granted = rewardService.Grant(uid, item, count, messages);
+                if (granted.ModIds is { Count: > 0 })
+                {
+                    // every mod is its own instance: the screen looks it up by id to show its effects (A-148)
+                    foreach (uint modId in granted.ModIds)
+                        cache.Cache.Add(new UserDropCache { ItemId = item, ItemNum = 1, Relate = modId });
+                    continue;
+                }
+
                 cache.Cache.Add(new UserDropCache { ItemId = item, ItemNum = (uint)count });
             }
 

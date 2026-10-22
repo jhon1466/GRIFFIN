@@ -460,8 +460,7 @@ namespace Griffin.Database.Migrations
 
                     b.HasIndex("WeaponModId");
 
-                    b.HasIndex("AccountUid", "WeaponModId")
-                        .IsUnique();
+                    b.HasIndex("AccountUid", "WeaponModId");
 
                     b.ToTable("WeaponMods");
                 });
