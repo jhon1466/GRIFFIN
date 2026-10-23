@@ -23,7 +23,9 @@ namespace Griffin.GameServer.Services
         IReadOnlyDictionary<int, double> GunUpRates,
         IReadOnlyDictionary<int, List<uint>> UpGuns,
         IReadOnlyDictionary<int, double> WeaponUpRates,
-        IReadOnlyDictionary<int, List<uint>> UpWeapons);
+        IReadOnlyDictionary<int, List<uint>> UpWeapons,
+        IReadOnlyList<uint> Selectable,
+        uint DefaultSelected);
 
     public sealed record GachaPull(uint ItemId, int Rank, bool IsUp);
 
@@ -36,11 +38,20 @@ namespace Griffin.GameServer.Services
 
         /// <summary>The last 5-star was not the "up" unit, so the next one is guaranteed to be.</summary>
         public bool NextSsrGuaranteedUp { get; set; }
+
+        /// <summary>The first 5-star of a selectable banner (the "首次保底必得自选对象 0/1" of the client) already gave the chosen unit (A-155).</summary>
+        public bool SelectedGuaranteeDone { get; set; }
     }
 
     public interface IGachaService : IGameService
     {
         GachaBanner? GetBanner(uint gachaId);
+
+        /// <summary>The unit the account chose in a selectable banner (the table default until it chooses); 0 when the banner is not selectable.</summary>
+        uint GetSelection(uint accountUid, GachaBanner banner);
+
+        /// <summary>Chooses the unit of a selectable banner; false when it is not one of its selectable units.</summary>
+        bool SetSelection(uint accountUid, GachaBanner banner, uint item);
 
         /// <summary>Rolls <paramref name="count"/> pulls and updates the pity counters of the account for that banner.</summary>
         IReadOnlyList<GachaPull> Roll(uint accountUid, GachaBanner banner, int count, out GachaPity pity);
@@ -78,7 +89,29 @@ namespace Griffin.GameServer.Services
                 ParseRates(row.WeaponUpItem),
                 ParsePool(row.GunUpCharacter),
                 ParseRates(row.GunUpCharacterName),
-                ParsePool(row.GunUpCharacterVideo));
+                ParsePool(row.GunUpCharacterVideo),
+                TableFields.List(row, 36),
+                TableFields.U(row, 37));
+        }
+
+        private static string SelectionKey(uint gachaId) => $"gacha.select.{gachaId}";
+
+        public uint GetSelection(uint accountUid, GachaBanner banner)
+        {
+            if (banner.Selectable.Count == 0)
+                return 0;
+
+            uint chosen = accountState.Get<uint>(accountUid, SelectionKey(banner.Id));
+            return banner.Selectable.Contains(chosen) ? chosen : banner.Selectable.Contains(banner.DefaultSelected) ? banner.DefaultSelected : banner.Selectable[0];
+        }
+
+        public bool SetSelection(uint accountUid, GachaBanner banner, uint item)
+        {
+            if (!banner.Selectable.Contains(item))
+                return false;
+
+            accountState.Set(accountUid, SelectionKey(banner.Id), item);
+            return true;
         }
 
         public IReadOnlyList<GachaPull> Roll(uint accountUid, GachaBanner banner, int count, out GachaPity pity)
@@ -87,8 +120,9 @@ namespace Griffin.GameServer.Services
             pity = accountState.Get<GachaPity>(accountUid, key) ?? new GachaPity();
             List<GachaPull> pulls = new(count);
 
+            uint selected = GetSelection(accountUid, banner);
             for (int i = 0; i < count; i++)
-                pulls.Add(RollOne(banner, pity));
+                pulls.Add(RollOne(banner, pity, selected));
 
             accountState.Set(accountUid, key, pity);
             return pulls;
@@ -148,13 +182,25 @@ namespace Griffin.GameServer.Services
             return pulls;
         }
 
-        private static GachaPull RollOne(GachaBanner banner, GachaPity pity)
+        private static GachaPull RollOne(GachaBanner banner, GachaPity pity, uint selected)
         {
             pity.Total++;
             pity.SinceSsr++;
             pity.SinceSr++;
 
             int rank = PickRank(banner, pity);
+
+            // Selectable banner: the FIRST 5-star of the banner is the unit the player chose (the client shows it as "首次保底必得自选对象 0/1"; changing the
+            // choice does not reset the count). Before this was honoured the 5-star was a random one and the chosen unit never came (A-155).
+            if (rank >= 5 && selected != 0 && !pity.SelectedGuaranteeDone)
+            {
+                pity.SsrCount++;
+                pity.SinceSsr = 0;
+                pity.SinceSr = 0;
+                pity.SelectedGuaranteeDone = true;
+                pity.NextSsrGuaranteedUp = false;
+                return new GachaPull(selected, 5, true);
+            }
             if (rank >= 5)
             {
                 pity.SsrCount++;
@@ -167,7 +213,9 @@ namespace Griffin.GameServer.Services
             }
 
             bool wantUp = rank == 5 && pity.NextSsrGuaranteedUp;
-            List<uint> upList = UpList(banner, rank);
+            // On a selectable banner the "up" 5-star IS the unit the player chose (the table's own up list is the default one), so the 50/50 and the
+            // guaranteed up after a lost 50/50 aim at it too (A-155).
+            List<uint> upList = rank == 5 && selected != 0 ? [selected] : UpList(banner, rank);
             double upRate = Math.Max(
                 banner.GunUpRates.GetValueOrDefault(rank),
                 banner.WeaponUpRates.GetValueOrDefault(rank));

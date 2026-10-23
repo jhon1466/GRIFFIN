@@ -15,14 +15,20 @@ namespace Griffin.GameServer.Handlers
     {
         private const string StateKey = "formations";
 
+        /// <summary>Squads the client always shows (the overview lists at least seven).</summary>
+        private const uint DefaultSquads = 7;
+
         public override void HandleGetCustomFormation(CS_GetCustomFormation request, Connection connection)
         {
             PBEBLABCGEP container = new();
             if (connection.Account is not null)
             {
+                // The client creates its squads itself and then fills them with this list by position. An EMPTY list left every squad without data and the
+                // squad screen froze as soon as one was edited (the reference server has the same bug: it always sends an empty list). The squad overview of
+                // the client shows seven squads at least, so the list always has that many entries (an entry without squads is an empty squad) (A-154).
                 Dictionary<uint, string> saved = Load(connection.Account.Uid);
-                for (uint id = 1; id <= (saved.Count == 0 ? 0 : saved.Keys.Max()); id++)
-                    container.KMPIHKFBAEP.Add(saved.TryGetValue(id, out string? data) ? Parse(data) : new CLHJOEOIFHP());
+                for (uint id = 1; id <= Math.Max(DefaultSquads, saved.Count == 0 ? 0 : saved.Keys.Max()); id++)
+                    container.KMPIHKFBAEP.Add(saved.TryGetValue(id, out string? data) ? Parse(data) : new CLHJOEOIFHP { Name = string.Empty });
             }
 
             connection.Send(new SC_GetCustomFormation { OGNHICHKFAD = container });
