@@ -32,7 +32,6 @@ namespace Griffin.GameServer.Services
             (new Regex("^GetBattlepassRewardTimeLimit", RegexOptions.Compiled), HNINDAOJCKP.BattlepassRewardLock),
             (new Regex("^(DarkZone)", RegexOptions.Compiled), HNINDAOJCKP.DarkZoneNotStart),
             (new Regex("^SimCombatMythic", RegexOptions.Compiled), HNINDAOJCKP.SimCombatMythicNotStarted),
-            (new Regex("^SimCombatUnite", RegexOptions.Compiled), HNINDAOJCKP.SimCombatUniteMissionIdNotOpen),
             (new Regex("^SimCombat", RegexOptions.Compiled), HNINDAOJCKP.SimCombatWeeklyNotOpened),
             (new Regex("^NrtPvp|^PvpCycle|^Pvp", RegexOptions.Compiled), HNINDAOJCKP.NrtPvpHasClosed),
             (new Regex("^HighPvp", RegexOptions.Compiled), HNINDAOJCKP.HighPvpIsClosed),

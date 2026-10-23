@@ -393,6 +393,18 @@ if (scenario is "all" or "gachaselect")
     Check("gacha select: the first 5-star was the chosen unit", firstFive == 1043, $"pulls={pulled}, first guaranteed unit={firstFive}");
 }
 
+if (scenario is "all" or "unite")
+{
+    // Expanded drill (SimCombatUnite): open mission state, history, and star rewards that stay locked without stars (A-156).
+    main.Send(new CS_SimCombatUniteEnter());
+    var uniteEnter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SimCombatUniteEnter>().FirstOrDefault();
+    Check("unite: Enter answers the open mission 1173", uniteEnter is not null && uniteEnter.MNIFLHHOPHK.Any(m => m.OHPHNKCEGCM == 1173 && m.PlanId == 90077));
+    main.Send(new CS_SimCombatUniteGetHistory());
+    Check("unite: GetHistory is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_SimCombatUniteGetHistory));
+    main.Send(new CS_SimCombatUniteClaimReward { OHPHNKCEGCM = 1173, KNAHJGMNKIL = 4 });
+    Check("unite: a reward without the stars is not given", !main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_SimCombatUniteClaimReward));
+}
+
 if (scenario is "gachaall")
 {
     // Every table-driven banner must roll without errors (pools of every type: characters, weapons, novice, items).

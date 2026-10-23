@@ -242,6 +242,7 @@ public static class GmAdminExtensions
             else
             {
                 existing.Level = request.Level;
+                existing.GunClass = Math.Max(existing.GunClass, GunService.ClassForLevel(request.Level));
                 guns.Save();
                 var current = await db.Guns.AsNoTracking().Where(g => g.Account.Uid == uid).ToListAsync();
                 SC_Guns update = new();
