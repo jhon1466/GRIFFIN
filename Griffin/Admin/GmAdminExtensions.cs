@@ -184,7 +184,7 @@ public static class GmAdminExtensions
         });
 
         api.MapPost("/accounts/{uid}/characters", async (uint uid, CharacterRequest request,
-            GriffinDbContext db, ITableService tables, IGunService guns, IInventoryService inventory,
+            GriffinDbContext db, ITableService tables, IGunService guns, IInventoryService inventory, IAchievementService achievements,
             ConnectionManager connections, ILoggerFactory loggerFactory) =>
         {
             if (request.GunId == 0) return Results.BadRequest(new { error = "gunId debe ser positivo." });
@@ -196,6 +196,7 @@ public static class GmAdminExtensions
 
             GunEntity? existing = await db.Guns.SingleOrDefaultAsync(g => g.Account.Uid == uid && g.GunId == request.GunId);
             List<Google.Protobuf.IMessage> live = [];
+            var achievementsBefore = achievements.Completed(uid);
             if (existing is null)
             {
                 GunEntity gun = GunService.CreateDefault(definition, request.Level);
@@ -241,14 +242,21 @@ public static class GmAdminExtensions
             }
             else
             {
-                existing.Level = request.Level;
-                existing.GunClass = Math.Max(existing.GunClass, GunService.ClassForLevel(request.Level));
+                // the game reads the characters from the service's in-memory account, not from this DbContext: change THAT entity (else the level is
+                // only seen after a server restart)
+                GunEntity cached = guns.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == request.GunId) ?? existing;
+                cached.Level = request.Level;
+                cached.GunClass = Math.Max(cached.GunClass, GunService.ClassForLevel(request.Level));
                 guns.Save();
-                var current = await db.Guns.AsNoTracking().Where(g => g.Account.Uid == uid).ToListAsync();
                 SC_Guns update = new();
-                foreach (GunEntity gun in current) update.Guns.Add(gun.ToProtoGunCharacter());
+                foreach (GunEntity gun in guns.GetPlayerGuns(uid)) update.Guns.Add(gun.ToProtoGunCharacter());
                 live.Add(update);
+                existing = cached;
             }
+
+            // the talent tree asks achievements of the kind "character reaches level L": the client only learns they are done from this push
+            if (achievements.NewlyCompleted(uid, achievementsBefore) is { } unlocked)
+                live.Add(new SC_CommonQuestCountUpdate { Counters = unlocked });
 
             Connection? liveConnection = connections.Connections.FirstOrDefault(c => c.Account?.Uid == uid);
             if (liveConnection is not null)
