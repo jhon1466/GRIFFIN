@@ -1265,31 +1265,78 @@ namespace Griffin.GameServer.Handlers
             connection.Send(response);
         }
 
-        // ---- welcome setting (the characters that greet the commander when entering the lobby)
+        // ---- welcome ceremony (欢迎仪式, "Cubierta de la tripulación - Ceremonia de bienvenida"): a doll greets the commander in a short cinematic (A-168)
+        /// <summary>
+        /// Client flow (read from the client): when the commander enters the crew deck the client plays the greeting of <c>JCOMGOPOLOP</c> (the doll the server
+        /// chose, a row of <c>LobbyWelcomeData</c> col 2) unless the played flag (<c>HPNKLKLOECK</c>) is set or the system is locked; after it ran it sends
+        /// <c>CS_LobbyWelcomeSettingPlayed</c>. So the server sets the flag false once per game day (05:00 CST) and true after the cinematic. The setting dialog
+        /// edits: field 1 = random doll (true) or the chosen ones (false), the chosen dolls and a mode (1 = in the order listed, 0 = at random among them).
+        /// </summary>
         private sealed class WelcomeSetting
         {
+            /// <summary>Random doll among all the ones that have a greeting (the client names it "Random"; default).</summary>
             public bool Enabled { get; set; } = true;
             public List<uint> Guns { get; set; } = [];
             public uint Mode { get; set; }
             public long UpdatedAt { get; set; }
+            /// <summary>Game day (GameDay.Key) the doll of the day was chosen / the cinematic was played.</summary>
+            public string ChosenDay { get; set; } = string.Empty;
+            public string PlayedDay { get; set; } = string.Empty;
+            public uint Current { get; set; }
+            public int Cursor { get; set; }
+            public long PlayedAt { get; set; }
+        }
+
+        /// <summary>Dolls the account owns that have a greeting cinematic (<c>LobbyWelcomeData</c>).</summary>
+        private List<uint> WelcomeCandidates(uint uid)
+        {
+            HashSet<uint> withGreeting = tableService.GetTable<LobbyWelcomeData>().Select(row => TableFields.U(row, 2)).ToHashSet();
+            return (accountService.GetByUid(uid)?.Guns.Select(g => g.GunId) ?? []).Where(withGreeting.Contains).Distinct().OrderBy(id => id).ToList();
+        }
+
+        /// <summary>The doll that greets today: kept for the whole game day until the cinematic is played.</summary>
+        private WelcomeSetting WelcomeOfToday(uint uid)
+        {
+            WelcomeSetting setting = accountState.Get<WelcomeSetting>(uid, "lobby.welcome") ?? new WelcomeSetting { UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+            string today = GameDay.Key();
+            List<uint> candidates = WelcomeCandidates(uid);
+            if (setting.ChosenDay == today && candidates.Contains(setting.Current))
+                return setting;
+
+            List<uint> pool = setting.Enabled ? candidates : setting.Guns.Where(candidates.Contains).ToList();
+            if (pool.Count == 0)
+                pool = candidates;
+            if (pool.Count == 0)
+            {
+                setting.Current = 0;
+            }
+            else if (!setting.Enabled && setting.Mode == 1)
+            {
+                setting.Current = pool[setting.Cursor % pool.Count];
+            }
+            else
+            {
+                setting.Current = pool[Random.Shared.Next(pool.Count)];
+            }
+
+            setting.ChosenDay = today;
+            accountState.Set(uid, "lobby.welcome", setting);
+            return setting;
         }
 
         private NMEMMFMPCJB WelcomeMessage(uint uid)
         {
-            WelcomeSetting setting = accountState.Get<WelcomeSetting>(uid, "lobby.welcome") ?? new WelcomeSetting { UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+            WelcomeSetting setting = WelcomeOfToday(uid);
             NMEMMFMPCJB message = new()
             {
                 OIKBNGNPNIM = setting.Enabled,
-                DHFNGECCLAK = setting.UpdatedAt,
-                JCOMGOPOLOP = setting.Guns.FirstOrDefault(1017u),
-                HPNKLKLOECK = true,
+                DHFNGECCLAK = setting.PlayedAt != 0 ? setting.PlayedAt : setting.UpdatedAt,
+                JCOMGOPOLOP = setting.Current,
+                // true = nothing to play (already played today, or no doll has a greeting)
+                HPNKLKLOECK = setting.PlayedDay == GameDay.Key() || setting.Current == 0,
+                NIBJKGCIDJK = new NMEMMFMPCJB.Types.CDECAJCOOPF { Mode = setting.Mode },
             };
-            if (setting.Guns.Count > 0 || setting.Mode != 0)
-            {
-                message.NIBJKGCIDJK = new NMEMMFMPCJB.Types.CDECAJCOOPF { Mode = setting.Mode };
-                message.NIBJKGCIDJK.GGOLBAILKIO.AddRange(setting.Guns);
-            }
-
+            message.NIBJKGCIDJK.GGOLBAILKIO.AddRange(setting.Guns);
             return message;
         }
 
@@ -1321,12 +1368,17 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            WelcomeSetting previous = accountState.Get<WelcomeSetting>(uid, "lobby.welcome") ?? new WelcomeSetting();
             accountState.Set(uid, "lobby.welcome", new WelcomeSetting
             {
                 Enabled = request.OIKBNGNPNIM,
                 Guns = guns,
                 Mode = request.ENEKBLDCKHF,
                 UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                // a new choice picks the doll of the day again (unless today's greeting already played)
+                PlayedDay = previous.PlayedDay,
+                PlayedAt = previous.PlayedAt,
+                Cursor = previous.Cursor,
             });
             connection.Send(new SC_LobbyWelcomeSettingUpdate { OBOGLCLAIPH = WelcomeMessage(uid) });
         }
@@ -2292,20 +2344,23 @@ namespace Griffin.GameServer.Handlers
             connection.Send(reply);
         }
 
-                public override void HandleLobbyWelcomeSettingPlayed(CS_LobbyWelcomeSettingPlayed request, Connection connection)
+        public override void HandleLobbyWelcomeSettingPlayed(CS_LobbyWelcomeSettingPlayed request, Connection connection)
         {
-            uint nowUnix = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (connection.Account is null)
+                return;
 
-            connection.Send(new SC_LobbyWelcomeSettingPlayed
+            // the cinematic ran: no more greetings until the next game day; in the "in order" mode the next day starts with the next doll
+            uint uid = connection.Account.Uid;
+            WelcomeSetting setting = WelcomeOfToday(uid);
+            if (setting.PlayedDay != GameDay.Key())
             {
-                OBOGLCLAIPH = new NMEMMFMPCJB
-                {
-                    OIKBNGNPNIM = true,
-                    DHFNGECCLAK = nowUnix,
-                    JCOMGOPOLOP = 1017,
-                    HPNKLKLOECK = true,
-                },
-            });
+                setting.PlayedDay = GameDay.Key();
+                setting.PlayedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                setting.Cursor++;
+                accountState.Set(uid, "lobby.welcome", setting);
+            }
+
+            connection.Send(new SC_LobbyWelcomeSettingPlayed { OBOGLCLAIPH = WelcomeMessage(uid) });
         }
 
         public override void HandleLobbyCancelEvent(CS_LobbyCancelEvent request, Connection connection)
@@ -2354,7 +2409,7 @@ namespace Griffin.GameServer.Handlers
                 return;
 
             List<IMessage> messages = [];
-            if (!miniGames.Pay(connection.Account.Uid, request.LAOKONCHCHL, request.KMEFAJLEJHK, messages, out HMDODOBKKND? info))
+            if (!miniGames.Pay(connection.Account.Uid, request.LAOKONCHCHL, request.KMEFAJLEJHK, request.ObjectId, messages, out HMDODOBKKND? info))
             {
                 connection.Refuse(MsgId.MsgCsLobbyMiniGamePay, info is null && tableService.GetTable<LobbyMinigameGamelistData>().All(g => g.Id != request.LAOKONCHCHL)
                     ? HNINDAOJCKP.ItemConfigNotExist
@@ -2379,7 +2434,12 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            connection.Send(miniGames.Finish(connection.Account.Uid, request));
+            // the answer goes first; the items the run collected and the achievements it completed follow
+            List<IMessage> messages = [];
+            SC_LobbyMiniGameFinish reply = miniGames.Finish(connection.Account.Uid, request, messages);
+            messages.Insert(0, reply);
+            messages.Add(new SC_CommonQuestCountUpdate { Counters = miniGames.Counters(connection.Account.Uid) });
+            connection.SendAutoEncrypted(messages.ToArray());
         }
 
         public override void HandleLobbyTriggerEvent(CS_LobbyTriggerEvent request, Connection connection)

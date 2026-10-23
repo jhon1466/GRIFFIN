@@ -405,6 +405,26 @@ if (scenario is "all" or "unite")
     Check("unite: a reward without the stars is not given", !main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_SimCombatUniteClaimReward));
 }
 
+if (scenario is "all" or "welcome")
+{
+    // Welcome ceremony of the crew deck (A-168): one greeting per game day by a doll that has one; played flag false until the client reports it
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory addall gun" });
+    main.ReadFor(TimeSpan.FromSeconds(4));
+    main.Send(new CS_LobbyWelcomeSettingInfo());
+    var welcome = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyWelcomeSettingInfo>().FirstOrDefault()?.OBOGLCLAIPH;
+    Check("welcome: a doll with a greeting is chosen and the greeting is pending", welcome is { JCOMGOPOLOP: > 0, HPNKLKLOECK: false });
+    uint chosenToday = welcome?.JCOMGOPOLOP ?? 0;
+    main.Send(new CS_LobbyWelcomeSettingInfo());
+    var welcomeAgain = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyWelcomeSettingInfo>().FirstOrDefault()?.OBOGLCLAIPH;
+    Check("welcome: the doll of the day stays the same until it is played", welcomeAgain?.JCOMGOPOLOP == chosenToday);
+    main.Send(new CS_LobbyWelcomeSettingPlayed());
+    var welcomePlayed = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyWelcomeSettingPlayed>().FirstOrDefault()?.OBOGLCLAIPH;
+    Check("welcome: after the cinematic the greeting is done for the day", welcomePlayed is { HPNKLKLOECK: true } && welcomePlayed.JCOMGOPOLOP == chosenToday);
+    main.Send(new CS_LobbyWelcomeSettingInfo());
+    var welcomeAfter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyWelcomeSettingInfo>().FirstOrDefault()?.OBOGLCLAIPH;
+    Check("welcome: it does not play again the same day", welcomeAfter is { HPNKLKLOECK: true });
+}
+
 if (scenario is "gachaall")
 {
     // Every table-driven banner must roll without errors (pools of every type: characters, weapons, novice, items).
@@ -650,6 +670,51 @@ if (scenario is "all" or "weapon")
 
 if (scenario is "all" or "minigame")
 {
+    // Game Center (lobby arcade): the client starts the space shooter with its character and the doodle jump with only the game id, no stage (A-164)
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory addall item" });
+    main.ReadFor(TimeSpan.FromSeconds(4));
+    foreach (uint arcade in new uint[] { 1, 2 })
+    {
+        main.Send(new CS_LobbyMiniGamePay { LAOKONCHCHL = arcade, ObjectId = (uint)BDPHJPNIHEK.PayGame });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        var startArcade = new CS_LobbyMiniGameStart { LAOKONCHCHL = arcade };
+        if (arcade == 1)
+            startArcade.Shootspace = new CS_LobbyMiniGameStart.Types.MDGLOOKPFMI { GunId = 1034 };
+        main.Send(startArcade);
+        Check($"minigame: the arcade game {arcade} starts without a stage", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyMiniGameStart>().Any(r => r.LAOKONCHCHL == arcade));
+    }
+    // Game Center shooter (A-165/A-166): Makiatto and the first difficulty are free and open; the other characters and difficulties are bought
+    main.Send(new CS_LobbyMiniGameInfo());
+    var arcadeInfo = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyMiniGameInfo>().FirstOrDefault();
+    var shooterInfo = arcadeInfo?.PDGDDBPGDKD.GetValueOrDefault(1u)?.ShootspaceData;
+    Check("minigame: the shooter lists Makiatto as owned and difficulty 901 as bought and 902 as not", shooterInfo is not null && shooterInfo.Guns.Contains(1034u)
+        && shooterInfo.FDPOAJJJKGC.GetValueOrDefault(901u)?.MPNGHAKGLDM == true && shooterInfo.FDPOAJJJKGC.GetValueOrDefault(902u)?.MPNGHAKGLDM == false);
+    main.Send(new CS_LobbyMiniGamePay { LAOKONCHCHL = 1, KMEFAJLEJHK = BDPHJPNIHEK.PayGun, ObjectId = 1052 });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_LobbyMiniGamePay { LAOKONCHCHL = 1, KMEFAJLEJHK = BDPHJPNIHEK.PayStage, ObjectId = 902 });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_LobbyMiniGameInfo());
+    var paidInfo = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyMiniGameInfo>().FirstOrDefault()?.PDGDDBPGDKD.GetValueOrDefault(1u)?.ShootspaceData;
+    Check("minigame: a bought character and difficulty stay bought", paidInfo is not null && paidInfo.Guns.Contains(1052u) && paidInfo.FDPOAJJJKGC.GetValueOrDefault(902u)?.MPNGHAKGLDM == true);
+    main.Send(new CS_LobbyMiniGameStart { LAOKONCHCHL = 1, Shootspace = new CS_LobbyMiniGameStart.Types.MDGLOOKPFMI { GunId = 1034 } });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    var shooterRun = new CS_LobbyMiniGameFinish { LAOKONCHCHL = 1, StageId = 901, Duration = 1200, Score = 12000, Shootspace = new CS_LobbyMiniGameFinish.Types.HEHAHHIOFBM() };
+    shooterRun.Shootspace.DPIODNMOADH[176022u] = 5;
+    shooterRun.Shootspace.IFDNNGFHCKK[70051u] = 6;
+    main.Send(shooterRun);
+    var runReply = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    var finished = runReply.OfType<SC_LobbyMiniGameFinish>().FirstOrDefault();
+    Check("minigame: a shooter run reports the best score and the times of its difficulty", finished is { CGFMBCCDFPG: 12000, Shootspace.Times: 1 });
+    var minigameCounters = runReply.OfType<SC_CommonQuestCountUpdate>().Select(u => u.Counters).FirstOrDefault(c => c?.Type == CommonQuestCounters.Types.Type.LobbyMiniGame);
+    Check("minigame: the run completes its achievements (10000 points, 5 Tumorhynchus, Makiatto once) but not the ones it did not reach",
+        minigameCounters is not null && minigameCounters.Rewards.ContainsKey(1) && minigameCounters.Rewards.ContainsKey(18) && minigameCounters.Rewards.ContainsKey(32)
+        && !minigameCounters.Rewards.ContainsKey(2) && !minigameCounters.Rewards.ContainsKey(33));
+    main.Send(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.LobbyMiniGame, QuestId = { 1u } });
+    var claim = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("minigame: the reward of a completed achievement is taken once", claim.OfType<SC_CommonQuestTakeReward>().Any(r => r.QuestId.Contains(1u)));
+    main.Send(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.LobbyMiniGame, QuestId = { 1u } });
+    Check("minigame: ...and not twice", !main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_CommonQuestTakeReward));
+
     // A-101: the "I Wanna" challenge (28001) of the event and any other mini game of an event open and finish
     main.Send(new CS_ThemeMiniGameStart { ThemeId = 4101, FNEFKKLJMDN = 28001, StageId = 2001 });
     Check("minigame: the Iwanna challenge starts", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ThemeMiniGameStart>().Any(r => r.ThemeId == 4101 && r.FNEFKKLJMDN == 28001 && r.StageId == 2001));
