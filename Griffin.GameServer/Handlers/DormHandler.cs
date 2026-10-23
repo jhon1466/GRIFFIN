@@ -14,9 +14,14 @@ namespace Griffin.GameServer.Handlers
         /// The dormitory character chosen with <c>DormSetLove</c> (stored in <c>dorm.love</c>); until one is chosen, the one of the original
         /// capture (1032) when the account owns it, otherwise the first owned character.
         /// </summary>
+        /// <summary>Stored in <c>dorm.love</c> when the player removes the favourite (DormSetLove with gun 0): no default is forced back.</summary>
+        private const uint NoLove = uint.MaxValue;
+
         private uint LoveGun(uint uid, GunEntity[] guns)
         {
             uint stored = accountState.Get<uint>(uid, "dorm.love");
+            if (stored == NoLove)
+                return 0;
             if (stored != 0 && guns.Any(g => g.GunId == stored))
                 return stored;
             return guns.Any(g => g.GunId == 1032) ? 1032 : guns.FirstOrDefault()?.GunId ?? 0;
@@ -78,6 +83,13 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account is null)
                 return;
+
+            if (request.GunId == 0)
+            {
+                accountState.Set(connection.Account.Uid, "dorm.love", NoLove);
+                connection.Send(new SC_DormSetLove { GunId = 0 });
+                return;
+            }
 
             if (gunService.GetPlayerGuns(connection.Account.Uid).All(g => g.GunId != request.GunId))
             {

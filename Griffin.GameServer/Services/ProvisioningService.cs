@@ -24,7 +24,7 @@ namespace Griffin.GameServer.Services
     public interface IProvisioningService : IGameService
     {
         /// <summary>With <paramref name="refill"/> every balance below the amount of its category is raised to it (<c>/inventory addall</c>), not only the ones at 0 (A-113).</summary>
-        ProvisionReport Provision(uint uid, bool refill = false);
+        ProvisionReport Provision(uint uid, bool refill = false, bool full = false);
 
         /// <summary>Provisions once per account (login); returns null when it already ran or is disabled.</summary>
         ProvisionReport? ProvisionOnce(uint uid);
@@ -56,6 +56,12 @@ namespace Griffin.GameServer.Services
             [175] = 1, [176] = 1, [177] = 1, [179] = 1, [181] = 1, [182] = 1, [183] = 1, [184] = 1, [186] = 1,
         };
 
+        /// <summary>Types that are counters, scores or battle pass steps rather than objects (kilometres, pass experience and ranks, ambience level...): never given as items.</summary>
+        private static readonly HashSet<uint> FullExcludedTypes = [7, 33, 34, 70, 92, 94, 95, 96, 97, 98, 100, 121, 140, 141, 142, 160, 330, 331, 332, 333, 994, 995, 996, 997, 998];
+
+        /// <summary>Types whose objects are unique (titles, frames, badges, keys, blueprints, plugins, attachments...): one is enough; the rest get 99.</summary>
+        private static readonly HashSet<uint> FullSingleTypes = [10, 11, 14, 20, 21, 31, 36, 37, 38, 39, 99, 108];
+
         /// <summary>
         /// Single items of a type that must not be given as a whole: 304 is the ticket of the weekly mode 要塞伯爵 (ItemData type 33 "challenge count", of which only this one
         /// is used by a mode the server runs). The week tops it up to <see cref="SimCombatWeekService.WeeklyTickets"/>; a provisioned account gets 5 times that so that nothing
@@ -63,7 +69,7 @@ namespace Griffin.GameServer.Services
         /// </summary>
         public static readonly IReadOnlyDictionary<uint, int> ExtraItems = new Dictionary<uint, int> { [304] = SimCombatWeekService.WeeklyTickets * 20 };
 
-        public ProvisionReport Provision(uint uid, bool refill = false)
+        public ProvisionReport Provision(uint uid, bool refill = false, bool full = false)
         {
             lock (Gate)
             {
@@ -92,7 +98,12 @@ namespace Griffin.GameServer.Services
                     }
 
                     if (!Amounts.TryGetValue((uint)data.Type, out int amount) && !ExtraItems.TryGetValue(data.Id, out amount))
-                        continue;
+                    {
+                        // the explicit commands (/inventory addall, GM Tools) give EVERY object of the table (A-161), except the pseudo-objects
+                        if (!full || FullExcludedTypes.Contains((uint)data.Type) || data.Id == 44)
+                            continue;
+                        amount = FullSingleTypes.Contains((uint)data.Type) ? 1 : 99;
+                    }
 
                     if (!rows.TryGetValue(data.Id, out ItemEntity? row))
                     {

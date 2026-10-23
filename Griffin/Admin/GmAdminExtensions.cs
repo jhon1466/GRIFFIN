@@ -400,12 +400,12 @@ public static class GmAdminExtensions
             }
             else if (category == "all")
             {
-                provisioning.Provision(uid, refill: true);
+                provisioning.Provision(uid, refill: true, full: true);
                 AddAllExceptItems(inventory, uid);
             }
             else if (category == "item")
             {
-                provisioning.Provision(uid, refill: true);
+                provisioning.Provision(uid, refill: true, full: true);
             }
             else
             {
