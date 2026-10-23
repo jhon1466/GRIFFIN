@@ -24,7 +24,7 @@ namespace Griffin.Common.Utils
         public static readonly string GameClientVersion = Env("GRIFFIN_GAME_CLIENT_VERSION", "4.0.5136");
 
         /// <summary>Version of the server-side table set (bk_stc_pb.zip). The client downloads this version from the CDN.</summary>
-        public static readonly string StcVersion = Env("GRIFFIN_STC_VERSION", "1189260");
+        public static readonly string StcVersion = Env("GRIFFIN_STC_VERSION", "1194912");
 
         public const string ResUrlCdn = "https://gf2-cn.cdn.sunborngame.com/game_resources";
 
@@ -32,7 +32,7 @@ namespace Griffin.Common.Utils
 
         public static string StcTableZipUrl => $"{ResUrlCdn}/data/{StcVersion}/bk_stc_pb.zip";
 
-        public static readonly string BinaryVersion = Env("GRIFFIN_BINARY_VERSION", "4.0.5136.3242");
+        public static readonly string BinaryVersion = Env("GRIFFIN_BINARY_VERSION", "4.0.5136.3257");
 
         public const string MustUpdateVersionClient = "13407.25794";
 

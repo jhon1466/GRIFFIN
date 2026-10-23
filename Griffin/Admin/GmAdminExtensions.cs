@@ -66,7 +66,9 @@ public static class GmAdminExtensions
                 database = dbAvailable ? "connected" : "unavailable",
                 accounts = dbAvailable ? await db.Accounts.CountAsync() : (int?)null,
                 online = connections.Connections.Count(c => c.Account != null),
-                gmApi = "enabled"
+                gmApi = "enabled",
+                announced = new { res = Griffin.Common.Utils.StaticConfig.AbResourceVersion, stc = Griffin.Common.Utils.StaticConfig.StcVersion },
+                official = OfficialVersionWatcher.Latest
             });
         });
 
