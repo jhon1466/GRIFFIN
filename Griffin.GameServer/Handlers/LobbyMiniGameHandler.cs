@@ -18,7 +18,7 @@ namespace Griffin.GameServer.Handlers
             Dictionary<uint, MiniGameState> states = States(connection.Account.Uid);
             SC_LobbyMiniGameInfo response = new();
             foreach (LobbyMinigameGamelistData game in tables.GetTable<LobbyMinigameGamelistData>())
-                response.PDGDDBPGDKD[game.Id] = LobbyMiniGameService.BuildInfo(game, states.GetValueOrDefault(game.Id) ?? new MiniGameState());
+                response.PDGDDBPGDKD[game.Id] = miniGames.BuildInfo(game, states.GetValueOrDefault(game.Id) ?? new MiniGameState());
 
             connection.Send(response);
         }
@@ -36,8 +36,22 @@ namespace Griffin.GameServer.Handlers
         }
 
         /// <summary>The skills of the doodle jump are not stored: the answer repeats the request with no skill levels (ASSUMPTION A-26).</summary>
-        public override void HandleLobbyMiniGameGetSkill(CS_LobbyMiniGameGetSkill request, Connection connection) =>
-            connection.Send(new SC_LobbyMiniGameGetSkill { LAOKONCHCHL = request.LAOKONCHCHL, JJOKKNFDAGE = request.JJOKKNFDAGE });
+        public override void HandleLobbyMiniGameGetSkill(CS_LobbyMiniGameGetSkill request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            List<Google.Protobuf.IMessage> messages = [];
+            if (!miniGames.BuySkill(connection.Account.Uid, request.LAOKONCHCHL, request.JJOKKNFDAGE, messages))
+            {
+                connection.Refuse(MsgId.MsgCsLobbyMiniGameGetSkill, HNINDAOJCKP.ItemNotEnough);
+                return;
+            }
+
+            // the answer goes first; the item deltas of the price follow
+            messages.Insert(0, new SC_LobbyMiniGameGetSkill { LAOKONCHCHL = request.LAOKONCHCHL, JJOKKNFDAGE = request.JJOKKNFDAGE, Shootspace = new SC_LobbyMiniGameGetSkill.Types.FOKMBJFCNNH() });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
 
         public override void HandleLobbyMiniGameStart(CS_LobbyMiniGameStart request, Connection connection)
         {
@@ -52,7 +66,7 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            if (!miniGames.Start(connection.Account.Uid, game.Id, request.StageId))
+            if (!miniGames.Start(connection.Account.Uid, game.Id, request.StageId, request.Shootspace?.GunId ?? 0))
             {
                 MiniGameState state = States(connection.Account.Uid).GetValueOrDefault(game.Id) ?? new MiniGameState();
                 connection.Refuse(MsgId.MsgCsLobbyMiniGameStart, state.Unlocked

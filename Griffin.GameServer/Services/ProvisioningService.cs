@@ -56,6 +56,8 @@ namespace Griffin.GameServer.Services
             [175] = 1, [176] = 1, [177] = 1, [179] = 1, [181] = 1, [182] = 1, [183] = 1, [184] = 1, [186] = 1,
         };
 
+        private static readonly HashSet<uint> ShooterCurrency = [176020, 176021, 176022, 9176020, 9176021, 9176022];
+
         /// <summary>Types that are counters, scores or battle pass steps rather than objects (kilometres, pass experience and ranks, ambience level...): never given as items.</summary>
         private static readonly HashSet<uint> FullExcludedTypes = [7, 33, 34, 70, 92, 94, 95, 96, 97, 98, 100, 121, 140, 141, 142, 160, 330, 331, 332, 333, 994, 995, 996, 997, 998];
 
@@ -97,6 +99,11 @@ namespace Griffin.GameServer.Services
                         continue;
                     }
 
+                    // the currency of the Game Center shooter (StspItemData: its talents cost it) is earned by playing: with a full bag the client sees an upgrade it
+                    // can always afford and keeps a red dot lit (A-167); only the explicit full command gives it
+                    if (!full && ShooterCurrency.Contains(data.Id))
+                        continue;
+
                     if (!Amounts.TryGetValue((uint)data.Type, out int amount) && !ExtraItems.TryGetValue(data.Id, out amount))
                     {
                         // the explicit commands (/inventory addall, GM Tools) give EVERY object of the table (A-161), except the pseudo-objects
@@ -136,8 +143,39 @@ namespace Griffin.GameServer.Services
             }
         }
 
+        /// <summary>
+        /// Accounts created before A-167 received 99999 of the shooter currency from the provisioning: the client then always had an upgrade it could afford.
+        /// Once per account, those balances (exactly 99999, the provisioned amount) are set back to 0; anything else is left alone.
+        /// </summary>
+        private void RemoveShooterCurrencyProvision(uint uid)
+        {
+            const string flag = "provision.shooter-currency.v1";
+            if (accountState.Get<bool>(uid, flag))
+                return;
+
+            lock (Gate)
+            {
+                AccountEntity? account = accountService.GetByUid(uid);
+                if (account is null)
+                    return;
+
+                int reset = 0;
+                foreach (ItemEntity row in account.Items.Where(i => ShooterCurrency.Contains(i.ItemId) && i.Count == 99999))
+                {
+                    row.Count = 0;
+                    reset++;
+                }
+
+                if (reset > 0)
+                    itemRepository.SaveChanges();
+                accountState.Set(uid, flag, true);
+                Log.Information("Account {Uid}: {Count} shooter currency balance(s) of the old provisioning set back to 0.", uid, reset);
+            }
+        }
+
         public ProvisionReport? ProvisionOnce(uint uid)
         {
+            RemoveShooterCurrencyProvision(uid);
             if (Environment.GetEnvironmentVariable("GRIFFIN_AUTO_PROVISION") == "0" || accountState.Get<bool>(uid, FlagKey))
                 return null;
 

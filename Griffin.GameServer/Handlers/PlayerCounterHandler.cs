@@ -8,7 +8,7 @@ using Griffin.Common.Table;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class PlayerCounterHandler(IGunService gunService, ITableService tableService, IAchievementService achievements) : PlayerCounterHandlerBase
+    public sealed class PlayerCounterHandler(IGunService gunService, ITableService tableService, IAchievementService achievements, ILobbyMiniGameService miniGames) : PlayerCounterHandlerBase
     {
         public override void HandlePlayerCounterSync(CS_PlayerCounterSync request, Connection connection)
         {
@@ -3027,7 +3027,7 @@ namespace Griffin.GameServer.Handlers
 
             // Achievements complete for this account (the unlock conditions of chapters / activity stories): merged by the client with
             // the captured sections above, which carry none.
-            connection.SendUnsequenced(new SC_CountSection { Counters = { achievements.Counters(connection.Account.Uid) } });
+            connection.SendUnsequenced(new SC_CountSection { Counters = { achievements.Counters(connection.Account.Uid), miniGames.Counters(connection.Account.Uid) } });
         }
     }
 }

@@ -10,7 +10,8 @@ namespace Griffin.GameServer.Handlers
         IAccountStateService accountState,
         IDailyQuestProgressService questProgress,
         IAchievementService achievements,
-        ISimCombatWeekService week) : QuestCountHandlerBase
+        ISimCombatWeekService week,
+        ILobbyMiniGameService miniGames) : QuestCountHandlerBase
     {
         public override void HandleQuestCount(CS_QuestCount request, Connection connection)
         {
@@ -49,6 +50,7 @@ namespace Griffin.GameServer.Handlers
                 // the unlock conditions of chapters and activity stories (see IAchievementService)
                 quest.Counters.Add(achievements.Counters(connection.Account.Uid));
                 quest.Counters.Add(week.QuestCounters(connection.Account.Uid));
+                quest.Counters.Add(miniGames.Counters(connection.Account.Uid));
             }
 
             connection.Send(1, new SC_QuestCount

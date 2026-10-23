@@ -20,7 +20,8 @@ namespace Griffin.GameServer.Handlers
         IDailyQuestProgressService questProgress,
         IRewardService rewardService,
         IAchievementService achievements,
-        ISimCombatWeekService week) : CommonQuestHandlerBase
+        ISimCombatWeekService week,
+        ILobbyMiniGameService miniGames) : CommonQuestHandlerBase
     {
         private const string StateKey = "quest.daily.claims";
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, object> AccountLocks = new();
@@ -43,6 +44,24 @@ namespace Griffin.GameServer.Handlers
 
                 achievementMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { taken } });
                 connection.SendAutoEncrypted(achievementMessages.ToArray());
+                return;
+            }
+
+            if (request.Type == CommonQuestCounters.Types.Type.LobbyMiniGame)
+            {
+                // the achievements of the Game Center (A-166): the reward of each complete one is item 1610000, paid once
+                List<IMessage> gameMessages = [];
+                List<uint> takenGame = miniGames.Claim(connection.Account.Uid, request.QuestId, gameMessages);
+                if (takenGame.Count == 0)
+                {
+                    connection.Refuse(MsgId.MsgCsCommonQuestTakeReward, HNINDAOJCKP.QuestCondNotMatch);
+                    return;
+                }
+
+                gameMessages.Insert(0, new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenGame } });
+                // the client only marks the taken ids in its phase-reward map: the counters follow so its reward map says "taken" too (otherwise the red dot of the button stays lit)
+                gameMessages.Add(new SC_CommonQuestCountUpdate { Counters = miniGames.Counters(connection.Account.Uid) });
+                connection.SendAutoEncrypted(gameMessages.ToArray());
                 return;
             }
 
