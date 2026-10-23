@@ -94,7 +94,7 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
         // addall refills the objects and resources too (A-113): everything below the amount of its category goes back up to it
         if (requestedType is null || inventoryType == InventoryType.Item)
         {
-            ProvisionReport refill = provisioning.Provision(accountUid, refill: true);
+            ProvisionReport refill = provisioning.Provision(accountUid, refill: true, full: true);
             if (refill.ResourceUpdate is not null)
                 ctx.Connection.SendAutoEncrypted(refill.ResourceUpdate);
             ctx.Reply($"Recursos y objetos rellenados: {refill.ItemsAdded} añadidos, {refill.ItemsRepaired} subidos, {refill.ResourcesRepaired} recurso(s) subidos.");

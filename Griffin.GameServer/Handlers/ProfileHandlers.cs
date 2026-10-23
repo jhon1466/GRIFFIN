@@ -81,15 +81,25 @@ namespace Griffin.GameServer.Handlers
         }
     }
 
-    public sealed class SexHandler(IProfileService profile) : SexHandlerBase
+    public sealed class SexHandler(IProfileService profile, IItemUseService itemUse) : SexHandlerBase
     {
         public override void HandleModSex(CS_ModSex request, Connection connection)
         {
             if (connection.Account is null)
                 return;
 
+            // the change card (item 110051) is spent when the client names it; without one in the bag the change is refused
+            var messages = new List<Google.Protobuf.IMessage>();
+            if (request.ItemId != 0 && !itemUse.Spend(connection.Account.Uid, new Dictionary<uint, int> { [request.ItemId] = (int)Math.Max(request.Num, 1u) }, messages))
+            {
+                connection.Refuse(MsgId.MsgCsModSex, HNINDAOJCKP.ItemNotEnough);
+                return;
+            }
+
             profile.Update(connection.Account.Uid, state => state.Sex = (int)request.Sex);
-            connection.Send(new SC_ModSex { Sex = request.Sex });
+            // the client applies the item delta itself: the answer goes first
+            messages.Insert(0, new SC_ModSex { Sex = request.Sex });
+            connection.SendAutoEncrypted(messages.ToArray());
         }
     }
 

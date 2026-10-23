@@ -2226,7 +2226,7 @@ namespace Griffin.GameServer.Handlers
 
         private sealed class AvatarState
         {
-            public uint Avatar { get; set; } = 1071;
+            public uint Avatar { get; set; }
             public uint Clothes { get; set; } = 1002;
             public uint Type { get; set; }
         }
@@ -2241,6 +2241,10 @@ namespace Griffin.GameServer.Handlers
         public override void HandleLobbyAvatarInfo(CS_LobbyAvatarInfo request, Connection connection)
         {
             AvatarState state = connection.Account is null ? new AvatarState() : accountState.Get<AvatarState>(connection.Account.Uid, AvatarKey) ?? new AvatarState();
+            // a character the account does not own is loaded without animations (T-pose): the commander (0) is the default and the fallback
+            if (connection.Account is not null && state.Avatar != 0 && tableService.GetTable<LobbyNpcData>().All(n => TableFields.U(n, 1) != state.Avatar)
+                && connection.Account.Guns.All(g => g.GunId != state.Avatar))
+                state = new AvatarState { Clothes = state.Clothes };
             connection.Send(new SC_LobbyAvatarInfo { HIOGBPMJGON = new CGLPDAABOEP { MPFFENCOPFP = state.Avatar, OCCAHBFCHNP = state.Clothes, AvatarType = state.Type != 0 || state.Avatar == 0 || tableService.GetTable<LobbyNpcData>().All(n => TableFields.U(n, 1) != state.Avatar) ? state.Type : 1u } });
         }
 
