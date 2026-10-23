@@ -92,7 +92,7 @@ namespace Griffin.GameServer.Services
                 Level = level,
                 Exp = 120,
                 Energy = 120,
-                GunClass = level >= 60 ? 5u : 1u,
+                GunClass = ClassForLevel(level),
                 CostumeId = data.GLMMIEHDLEG,
                 CostumeParts = 0,
                 Grade = 6,
@@ -113,6 +113,9 @@ namespace Griffin.GameServer.Services
                 TimeCreated = DateTime.UtcNow,
             };
         }
+
+        /// <summary>The lowest rank (GunClassData col 6 caps the level at 10 + 10 per rank) that allows the level, so a doll set to a level is not above the cap of its rank.</summary>
+        public static uint ClassForLevel(int level) => (uint)Math.Clamp((level - 1) / 10, 1, 5);
 
         public static uint GetDefaultWeaponId(GunData data)
         {
