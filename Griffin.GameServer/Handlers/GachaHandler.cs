@@ -191,6 +191,22 @@ namespace Griffin.GameServer.Handlers
             connection.Send(response);
         }
 
+        /// <summary>
+        /// The player chooses the unit of a selectable banner (<c>GachaData</c> col 36 = the units it offers, 37 = the default). Before, the request was only echoed and
+        /// the choice was lost, so the pulls never gave it (A-155).
+        /// </summary>
+        public override void HandleGachaSelectUp(CS_GachaSelectUp request, Connection connection)
+        {
+            GachaBanner? banner = connection.Account is null ? null : gachaService.GetBanner(request.GachaId);
+            if (banner is null || !gachaService.SetSelection(connection.Account!.Uid, banner, request.OAIDHJMAEMM))
+            {
+                connection.Refuse(MsgId.MsgCsGachaSelectUp, HNINDAOJCKP.ClientInputInvalid);
+                return;
+            }
+
+            connection.Send(new SC_GachaSelectUp { GachaId = request.GachaId, OAIDHJMAEMM = request.OAIDHJMAEMM });
+        }
+
         public override void HandleGachaOnetime(CS_GachaOnetime request, Connection connection)
         {
             if (!TryRunBanner(request.GachaId, request.Cost, 1, connection))

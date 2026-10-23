@@ -368,6 +368,31 @@ if (scenario is "all" or "gacha")
         acq1 is not null && acq1.Drops.Count == 1 && (left1 == left10 - 1 || left1 == 70u), $"drops={acq1?.Drops.Count} guarantee {left10}->{left1}");
 }
 
+if (scenario is "all" or "gachaselect")
+{
+    // Selectable banner 1001 (SSR pity 80, GachaData col 36 = the units it offers): the first 5-star must be the unit the player chose (A-155).
+    main.Send(new CS_GachaSelectUp { GachaId = 1001, OAIDHJMAEMM = 1043 });
+    var selectReply = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GachaSelectUp>().FirstOrDefault();
+    Check("gacha select: choosing a unit of the banner is answered", selectReply is not null && selectReply.GachaId == 1001 && selectReply.OAIDHJMAEMM == 1043);
+    main.Send(new CS_GachaSelectUp { GachaId = 1001, OAIDHJMAEMM = 99999 });
+    Check("gacha select: a unit the banner does not offer is refused", !main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_GachaSelectUp));
+    uint firstFive = 0;
+    int pulled = 0;
+    for (int round = 0; round < 9 && firstFive == 0; round++)
+    {
+        main.Send(new CS_GachaTentimes { GachaId = 1001 });
+        var batch = main.ReadFor(TimeSpan.FromSeconds(6)).Select(p => p.Message).OfType<SC_GachaAcquirement>().FirstOrDefault();
+        if (batch is null)
+            break;
+        pulled += batch.Drops.Count;
+        foreach (var drop in batch.Drops)
+            if (firstFive == 0 && drop.ItemId is >= 1001 and < 1100 && drop.DropUp)
+                firstFive = drop.ItemId;
+    }
+
+    Check("gacha select: the first 5-star was the chosen unit", firstFive == 1043, $"pulls={pulled}, first guaranteed unit={firstFive}");
+}
+
 if (scenario is "gachaall")
 {
     // Every table-driven banner must roll without errors (pools of every type: characters, weapons, novice, items).
@@ -654,6 +679,9 @@ if (scenario is "all" or "lobbyroom")
 if (scenario is "all" or "formation")
 {
     // Custom squads are stored per account and come back in order of id.
+    main.Send(new CS_GetCustomFormation());
+    var initialSquads = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetCustomFormation>().FirstOrDefault();
+    Check("formation: a new account gets its seven squads (an empty list froze the squad editor)", initialSquads?.OGNHICHKFAD?.KMPIHKFBAEP.Count >= 7, $"squads={initialSquads?.OGNHICHKFAD?.KMPIHKFBAEP.Count}");
     var squad = new CLHJOEOIFHP { Name = "Alpha" };
     squad.Guns.Add(new BattleAiGun { GunId = 1001, WeaponId = 7 });
     squad.Guns.Add(new BattleAiGun { GunId = 1008 });
@@ -673,7 +701,7 @@ if (scenario is "all" or "formation")
     var listing = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GetCustomFormation>().FirstOrDefault();
     var entries = listing?.OGNHICHKFAD?.KMPIHKFBAEP;
     Check("formation: the list is ordered by id with empty slots (1 empty, 2 and 4 saved, 3 empty)",
-        entries is not null && entries.Count == 4 && entries[0].Guns.Count == 0 && entries[1].Name == "Bravo" && entries[1].Guns.Count == 2 && entries[2].Guns.Count == 0 && entries[3].Name == "Bravo",
+        entries is not null && entries.Count >= 4 && entries[0].Guns.Count == 0 && entries[1].Name == "Bravo" && entries[1].Guns.Count == 2 && entries[2].Guns.Count == 0 && entries[3].Name == "Bravo",
         $"entries={entries?.Count}");
 }
 
