@@ -405,6 +405,21 @@ if (scenario is "all" or "unite")
     Check("unite: a reward without the stars is not given", !main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_SimCombatUniteClaimReward));
 }
 
+if (scenario is "all" or "forcedstages")
+{
+    // Story missions that lend their own characters (default_guns names GunPresetData ids): the client sends no team and needs those units to fight (A-170)
+    int ForcedUnits(byte[] camp) { var r = new CodedInputStream(camp); int n = 0; while (!r.IsAtEnd) { uint tag = r.ReadTag(); if (tag >> 3 == 2) { r.ReadBytes(); n++; } else if ((tag & 7) == 0) r.ReadInt64(); else r.SkipLastField(); } return n; }
+    foreach ((uint stageId, int expected) in new[] { (10485u, 1), (10210u, 2), (39003u, 2) })
+    {
+        main.Send(new CS_StageStart { StcStageId = stageId });
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StageInto());
+        var forcedInto = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault();
+        int units = forcedInto?.Stage?.Camps.Where(c => { var r = new CodedInputStream(c.ToByteArray()); uint tg = r.ReadTag(); return (tg >> 3) == 1 && r.ReadEnum() == 1; }).Sum(c => ForcedUnits(c.ToByteArray())) ?? 0;
+        Check($"forced stages: stage {stageId} brings its own {expected} unit(s) when the client sends no team", units == expected, $"units={units}");
+    }
+}
+
 if (scenario is "all" or "welcome")
 {
     // Welcome ceremony of the crew deck (A-168): one greeting per game day by a doll that has one; played flag false until the client reports it
@@ -1466,6 +1481,35 @@ if (scenario is "all" or "recordroom")
     }
 }
 
+if (scenario is "all" or "archive")
+{
+    // Archive center exactly as the client sends it (A-169): the unlock names only the detail (story_id 0); the story is the group of the detail
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory addall item" });
+    main.ReadFor(TimeSpan.FromSeconds(4));
+    main.Send(new CS_RecordRoomUnLockDetail { DetailId = 103002 });
+    Check("archive: detail 2 of a story cannot be unlocked before detail 1", !main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_RecordRoomUnLockDetail));
+    var archiveUnlock = new List<uint>();
+    foreach (uint detail in new uint[] { 103001, 103002, 103003 })
+    {
+        main.Send(new CS_RecordRoomUnLockDetail { DetailId = detail });
+        var unlocked = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RecordRoomUnLockDetail>().FirstOrDefault();
+        if (unlocked is { StoryId: 1030 } && unlocked.DetailId == detail)
+            archiveUnlock.Add(detail);
+    }
+
+    Check("archive: the details of story 1030 unlock in order with the request the client sends (no story id)", archiveUnlock.Count == 3);
+    main.Send(new CS_RecordRoom());
+    var archiveInfo = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_RecordRoom>().FirstOrDefault();
+    Check("archive: the story is listed with 3 details unlocked and its reward pending", archiveInfo is not null && archiveInfo.Storys.TryGetValue(1030, out var story) && story.DetailIdx == 3 && !story.State);
+    main.Send(new CS_RecordRoomGetDetailReward { StoryId = 1030 });
+    var archiveReward = main.ReadFor(TimeSpan.FromSeconds(2));
+    Check("archive: the reward of the three details is paid", archiveReward.Any(p => p.Message is SC_RecordRoomGetDetailReward r && r.StoryId == 1030));
+    main.Send(new CS_RecordRoomGetDetailReward { StoryId = 1030 });
+    Check("archive: and it is not paid twice", !main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_RecordRoomGetDetailReward));
+    main.Send(new CS_RecordRoomUnLockDetail { DetailId = 999999 });
+    Check("archive: a detail that does not exist is refused", !main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_RecordRoomUnLockDetail));
+}
+
 if (scenario == "love")
 {
     // Affection (needs gifts the account does not have: run seed-items.py first, so it is not part of "all"): gifts (item 300040 = 60 love experience each), level thresholds of LoveLevelData.
@@ -2098,6 +2142,7 @@ if (scenario == "bugs")
     main.Send(new CS_Guns());
     var resetGun = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().SelectMany(g => g.Guns).FirstOrDefault(g => g.Id == 1017);
     Check("reset: the character is back at level 1", resetGun is { Level: 1 }, $"level={resetGun?.Level}");
+    Check("reset: and at class 1 with an empty talent tree (the client clears its own; a tree kept by the server left every node refused as already unlocked, A-171)", resetGun is { GunClass: 1 } && resetGun.TalentTree.Count == resetGun.TalentTree.Count(p => p.Value == 1) && resetGun.IsAllTalnetUnlock == false, $"class={resetGun?.GunClass} tree={resetGun?.TalentTree.Count}");
 }
 
 if (scenario == "equip")

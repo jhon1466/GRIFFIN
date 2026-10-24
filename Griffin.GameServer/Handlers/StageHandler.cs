@@ -389,8 +389,19 @@ namespace Griffin.GameServer.Handlers
                     string[] fields = row.Split(':');
                     if (fields.Length < 3
                         || !uint.TryParse(fields[0], out uint unitId)
-                        || !uint.TryParse(fields[2], out uint gunId)
-                        || !ownedGuns.TryGetValue(gunId, out GunEntity? gun))
+                        || !uint.TryParse(fields[2], out uint gunId))
+                        continue;
+                    GunEntity? gun;
+                    if (ownedGuns.TryGetValue(gunId, out GunEntity? ownedGun) && gunId < 100000)
+                        gun = ownedGun;
+                    else if (tableService.GetTable<GunPresetData>().FirstOrDefault(preset => preset.Id == gunId) is { } presetRow)
+                    {
+                        // the stage lends its own character (story missions such as 2-10 and SL-4-5 name a GunPresetData id here, not one of the account's characters): without a
+                        // unit the client has nothing to control, skips every turn by itself and freezes (A-170)
+                        uint source = TableFields.U(presetRow, 2);
+                        gun = RougeUnitOf(new RougeService.TeamGun(source, TableFields.U(presetRow, 16), gunId, TableFields.U(presetRow, 6)), ownedGuns.GetValueOrDefault(source));
+                    }
+                    else
                         continue;
                     playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
                 }

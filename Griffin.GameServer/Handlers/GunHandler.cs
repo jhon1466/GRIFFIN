@@ -83,6 +83,12 @@ namespace Griffin.GameServer.Handlers
                 gun.PublicTalentSkillItems = [0, 0, 0];
                 gun.IsAllTalentUnlock = false;
                 gunService.Save();
+                // the client clears the whole talent tree of the character when the reset answer arrives; the server kept the unlocked points (and their cost), so every node
+                // the client then tried to unlock again was refused as "already unlocked" and looked blocked (A-171): the tree goes back too and its cost is refunded
+                uint resetsBefore = gun.TalentResetNum;
+                talents.Reset(uid, gun.GunId, messages);
+                gun.TalentResetNum = resetsBefore;
+                gunService.Save();
             }
 
             if (weapon is not null)

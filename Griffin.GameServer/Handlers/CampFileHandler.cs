@@ -9,9 +9,9 @@ using Griffin.GameServer.Services;
 namespace Griffin.GameServer.Handlers
 {
     /// <summary>
-    /// Faction intelligence files (<c>CampFileData</c>: 1 = file, 2 = faction, 7 = file that must be unlocked first, 8 = reward). The state is a
-    /// dictionary file -> reward taken in <c>camp.files</c>; <c>SC_CampFiles</c> lists the unlocked ones. ASSUMPTION A-24: unlocking only needs the previous
-    /// file (the unlock condition ids of col 3 are client-side requirements that are not checked), the reward is paid once.
+    /// Faction intelligence files (<c>CampFileData</c>: 1 = file, 2 = faction, 6 = items of the client (battle-pass counters, no price), 7 = files that must be unlocked first,
+    /// 8 = reward). The state is a dictionary file -> reward taken in <c>camp.files</c>; <c>SC_CampFiles</c> lists the unlocked ones. ASSUMPTION A-24: the
+    /// reward is paid once; A-169: it needs every file of column 7 (a list, not one) and unlocking twice just answers again.
     /// </summary>
     public sealed class CampFileHandler(ITableService tableService, IAccountStateService accountState, IRewardService rewardService) : CampFileHandlerBase
     {
@@ -44,14 +44,21 @@ namespace Griffin.GameServer.Handlers
                 }
 
                 Dictionary<uint, bool> files = accountState.Get<Dictionary<uint, bool>>(uid, StateKey) ?? [];
-                uint previous = TableFields.U(row, 7);
-                if (previous != 0 && !files.ContainsKey(previous))
+                if (files.ContainsKey(request.FileId))
+                {
+                    // already unlocked: answered again, nothing is spent
+                    connection.Send(new SC_UnlockCampFile { FileId = request.FileId });
+                    return;
+                }
+
+                if (TableFields.List(row, 7).Any(previous => previous != 0 && !files.ContainsKey(previous)))
                 {
                     connection.Refuse(MsgId.MsgCsUnlockCampFile, HNINDAOJCKP.CampFileNotFound);
                     return;
                 }
 
-                files.TryAdd(request.FileId, false);
+                // column 6 (items 400-404) are battle-pass counters of the client, not a price: the unlock is free (A-24)
+                files[request.FileId] = false;
                 accountState.Set(uid, StateKey, files);
                 connection.Send(new SC_UnlockCampFile { FileId = request.FileId });
             }
