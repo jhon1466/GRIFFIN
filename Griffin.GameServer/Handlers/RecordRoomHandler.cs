@@ -43,15 +43,17 @@ namespace Griffin.GameServer.Handlers
             lock (AccountLock.For(connection.Account.Uid))
             {
                 uint uid = connection.Account.Uid;
-                IMessage? row = Details().FirstOrDefault(r => TableFields.U(r, 1) == request.DetailId && TableFields.U(r, 2) == request.StoryId);
+                // the client names only the detail (field 2); its story (field 1) goes empty (0): the story is the group of the detail row (A-169)
+                IMessage? row = Details().FirstOrDefault(r => TableFields.U(r, 1) == request.DetailId && (request.StoryId == 0 || TableFields.U(r, 2) == request.StoryId));
                 if (row is null)
                 {
-                    connection.Refuse(MsgId.MsgCsRecordRoomUnLockDetail, HNINDAOJCKP.RecordRoomClueNotUnlock);
+                    connection.Refuse(MsgId.MsgCsRecordRoomUnLockDetail, HNINDAOJCKP.RecordRoomDetailConfigNotExist);
                     return;
                 }
 
+                uint storyId = TableFields.U(row, 2);
                 Dictionary<uint, RoomState> states = accountState.Get<Dictionary<uint, RoomState>>(uid, StateKey) ?? [];
-                RoomState state = states.GetValueOrDefault(request.StoryId) ?? new RoomState();
+                RoomState state = states.GetValueOrDefault(storyId) ?? new RoomState();
                 uint number = TableFields.U(row, 3);
                 if (number != state.Detail + 1)
                 {
@@ -68,9 +70,9 @@ namespace Griffin.GameServer.Handlers
                 }
 
                 state.Detail = number;
-                states[request.StoryId] = state;
+                states[storyId] = state;
                 accountState.Set(uid, StateKey, states);
-                messages.Add(new SC_RecordRoomUnLockDetail { StoryId = request.StoryId, DetailId = request.DetailId });
+                messages.Add(new SC_RecordRoomUnLockDetail { StoryId = storyId, DetailId = request.DetailId });
                 connection.SendAutoEncrypted(messages.ToArray());
             }
         }
@@ -84,9 +86,15 @@ namespace Griffin.GameServer.Handlers
             {
                 uint uid = connection.Account.Uid;
                 Dictionary<uint, RoomState> states = accountState.Get<Dictionary<uint, RoomState>>(uid, StateKey) ?? [];
-                if (!states.TryGetValue(request.StoryId, out RoomState? state) || state.Claimed >= state.Detail)
+                if (!states.TryGetValue(request.StoryId, out RoomState? state) || state.Detail == 0)
                 {
                     connection.Refuse(MsgId.MsgCsRecordRoomGetDetailReward, HNINDAOJCKP.RecordRoomClueNotUnlock);
+                    return;
+                }
+
+                if (state.Claimed >= state.Detail)
+                {
+                    connection.Refuse(MsgId.MsgCsRecordRoomGetDetailReward, HNINDAOJCKP.RecordRoomRewardHasGet);
                     return;
                 }
 
