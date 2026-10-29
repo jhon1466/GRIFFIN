@@ -24,8 +24,13 @@ namespace Griffin.SDKServer
         })
         { Timeout = TimeSpan.FromMinutes(30) };
 
-        private static readonly string CdnOrigin = Environment.GetEnvironmentVariable("GRIFFIN_CDN_ORIGIN")?.TrimEnd('/')
-            ?? new Uri(StaticConfig.ResUrlCdn).GetLeftPart(UriPartial.Authority);
+        private static readonly string CdnOrigin = NormalizeOrigin(Environment.GetEnvironmentVariable("GRIFFIN_CDN_ORIGIN")?.TrimEnd('/')
+            ?? new Uri(StaticConfig.ResUrlCdn).GetLeftPart(UriPartial.Authority));
+
+        private static string NormalizeOrigin(string configuredOrigin) =>
+            configuredOrigin.Contains("/game_resources", StringComparison.OrdinalIgnoreCase)
+                ? configuredOrigin[..configuredOrigin.IndexOf("/game_resources", StringComparison.OrdinalIgnoreCase)]
+                : configuredOrigin;
 
         public static bool Matches(PathString path) =>
             ProxiedPrefixes.Any(prefix => path.StartsWithSegments(prefix.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));

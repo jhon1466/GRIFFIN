@@ -10,16 +10,30 @@ namespace Griffin.SDKServer.Controllers
         [HttpPost]
         public IResult PostConfig()
         {
-            return Results.Json(CreateConfig());
+            return Results.Json(CreateConfig(GetSdkOrigin(), ClientVersionForRequest()));
         }
 
         [HttpPost("collect_res")]
         public IResult PostCollectRes()
         {
-            return Results.Json(CreateConfig());
+            return Results.Json(CreateConfig(GetSdkOrigin(), ClientVersionForRequest()));
         }
 
-        private static Models.ConfigDto CreateConfig()
+        private string GetSdkOrigin() =>
+            (Environment.GetEnvironmentVariable("GRIFFIN_SDK_ORIGIN") ?? $"{Request.Scheme}://{Request.Host.Value}").TrimEnd('/');
+
+        // The Android Mica SDK asks with okhttp; it gets URLs carrying the Android build so client_res_v1 answers with
+        // the Android profile, while the PC keeps the PC one (A-174).
+        private string ClientVersionForRequest()
+        {
+            string agent = Request.Headers.UserAgent.ToString();
+            bool android = agent.Contains("okhttp", StringComparison.OrdinalIgnoreCase)
+                || agent.Contains("Android", StringComparison.OrdinalIgnoreCase)
+                || agent.Contains("Dalvik", StringComparison.OrdinalIgnoreCase);
+            return android ? StaticConfig.AndroidClientVersion : StaticConfig.ClientVersion;
+        }
+
+        private static Models.ConfigDto CreateConfig(string sdkOrigin, string clientVersion)
         {
             return new Models.ConfigDto
             {
@@ -30,14 +44,14 @@ namespace Griffin.SDKServer.Controllers
                     GameControl = new Models.ConfigDto.GameControlDto
                     {
                         IsAudit = 0,
-                        GateList = $"https://gf2-zoneinfo.sunborngame.com/zone/gatelist?version={StaticConfig.ClientVersion}&type_id=3&game_channel_id=5",
-                        ClientResV1 = $"https://gf2-zoneinfo.sunborngame.com/zone/client_res_v1?type_id=3&version={StaticConfig.ClientVersion}&game_channel_id=5",
+                        GateList = $"{sdkOrigin}/zone/gatelist?version={clientVersion}&type_id=3&game_channel_id=5",
+                        ClientResV1 = $"{sdkOrigin}/zone/client_res_v1?type_id=3&version={clientVersion}&game_channel_id=5",
                     },
                     GameResource = new Models.ConfigDto.GameResourceDto
                     {
-                        BannerUrl = "https://gf2-zoneinfo.sunborngame.com/banner",
+                        BannerUrl = $"{sdkOrigin}/banner",
                         BbsWebUrl = "https://gf2-bbs.exiliumgf.com/release",
-                        FlexibleConfigUrl = "https://gf2-zoneinfo.sunborngame.com/flexible_config",
+                        FlexibleConfigUrl = $"{sdkOrigin}/flexible_config",
                         GachaRecordUrl = "https://gf2-gacha-record.sunborngame.com/list",
                         GameWeatherApi = "https://gf2-gameweather-api.sunborngame.com/weather",
                         H5LevasitupApiUrl = "https://gf2-h5levasitup-api.sunborngame.com/client/remain_cnt",
@@ -45,10 +59,10 @@ namespace Griffin.SDKServer.Controllers
                         LotteryH5WebUrl = "https://gf2.sunborngame.com/HHZZRaffle/",
                         MicaH5ElmoRebuildApiUrl = "https://gf2-h5elmorebuild-api.sunborngame.com/client/lottery/remain_cnt",
                         MicaH5ElmoRebuildWebUrl = "https://gf2.sunborngame.com/amhfbdzz/cn/",
-                        NoticeAddr = "https://gf2-zoneinfo.sunborngame.com/gf2/game_notice_list",
+                        NoticeAddr = $"{sdkOrigin}/gf2/game_notice_list",
                         NoticeHtmlAddr = string.Empty,
                         NoticeWebUrl = "https://gf2-gamenotice.sunborngame.com",
-                        PosterAddr = "https://gf2-zoneinfo.sunborngame.com/gf2/poster",
+                        PosterAddr = $"{sdkOrigin}/gf2/poster",
                         RaffleApiUrl = "https://gf2-h52ndanngacha-api.sunborngame.com",
                         RaffleWebUrl = "https://gf2.sunborngame.com/yearendharvest",
                         ReflowApiUrl = "https://gf2-h5back-api.sunborngame.com/game_get_info",
@@ -65,7 +79,7 @@ namespace Griffin.SDKServer.Controllers
                         CustomerServiceUrl = "https://gf2-css.sunborngame.com",
                         FcmUrl = "https://gf2-cn-fcm.sunborngame.com",
                         GameName = "少女前线2：追放",
-                        LoginUrl = "https://gf2-zoneinfo.sunborngame.com",
+                        LoginUrl = sdkOrigin,
                         OssUrl = "https://gf2.oss-cn-beijing.aliyuncs.com",
                         PayUrl = "https://gf2-zonepay.sunborngame.com",
                         RegisterUrl = "https://gf2-cn-plateuser.sunborngame.com",

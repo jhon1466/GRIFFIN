@@ -35,6 +35,17 @@ namespace Griffin.SDKServer
                 request.Headers.Connection.ToString(),
                 request.Headers.UserAgent.ToString());
 
+            // The Android client probes reachability with HEAD / (and other paths). Routed to the API controllers it got a
+            // 405/400 that the client surfaced as a yellow "unexpected response code" toast. A HEAD probe only needs 200 (A-173).
+            if (HttpMethods.IsHead(request.Method))
+            {
+                context.Response.StatusCode = StatusCodes.Status200OK;
+                context.Response.ContentLength = 0;
+                context.Response.Headers.Connection = "close";
+                logger.LogInformation("SDK response {Path} status=200 bytes=0 type=head-probe", request.Path);
+                return;
+            }
+
             Stream originalBody = context.Response.Body;
             await using MemoryStream buffer = new();
             context.Response.Body = buffer;
