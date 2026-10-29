@@ -3,7 +3,12 @@
 Servidor privado de **Girls' Frontline 2: Exilium** (cliente CN de PC **4.0.5136** y de Android **4.0.5137**, tablas `1195672`), escrito en C# (.NET 8) con PostgreSQL.
 Inspirado en [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (ver [Créditos](#créditos)).
 
-> **¿Quieres el juego en español?** Los parches de traducción (Android y PC) están en su propio repositorio: [**GRIFFIN-ES**](https://github.com/jhon1466/GRIFFIN-ES).
+## Proyectos relacionados
+
+| Proyecto | Para qué sirve |
+|---|---|
+| [**GRIFFIN-ES-EN**](https://github.com/jhon1466/GRIFFIN-ES-EN) | Parche de idioma: pone el juego en **español** o **inglés**, en Android (app con Shizuku) y PC. |
+| [**GRIFFIN-TOOLS**](https://github.com/jhon1466/GRIFFIN-TOOLS) | **Griffin GM Tools**: app de escritorio para administrar el servidor (dar dolls, armas, objetos, gestionar cuentas…). |
 
 > Proyecto sin ánimo de lucro, hecho con fines educativos y de preservación. No está afiliado a SunBorn ni a ningún editor del juego y **no incluye archivos del juego**: necesitas tu propio cliente instalado.
 
