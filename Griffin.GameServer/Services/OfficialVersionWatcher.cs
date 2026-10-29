@@ -48,8 +48,16 @@ namespace Griffin.GameServer.Services
                         reported = key;
                     }
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
+                    // real shutdown
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // ANY other failure, including HttpClient.Timeout (which throws TaskCanceledException, a subclass of
+                    // OperationCanceledException): a version probe that cannot reach the official service must never stop the
+                    // host. The earlier filter let the timeout escape and killed the whole server on the offline hotspot (A-173).
                     logger.LogDebug(ex, "The official version service could not be reached.");
                 }
 

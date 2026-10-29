@@ -697,6 +697,9 @@ if (scenario is "all" or "minigame")
             startArcade.Shootspace = new CS_LobbyMiniGameStart.Types.MDGLOOKPFMI { GunId = 1034 };
         main.Send(startArcade);
         Check($"minigame: the arcade game {arcade} starts without a stage", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyMiniGameStart>().Any(r => r.LAOKONCHCHL == arcade));
+        // close the run like the client does (the doodle jump reports stage 999), so no open start is left for the later parts of "all"
+        main.Send(new CS_LobbyMiniGameFinish { LAOKONCHCHL = arcade, StageId = arcade == 2 ? 999u : 0u, Score = 1, Duration = 5 });
+        main.ReadFor(TimeSpan.FromSeconds(2));
     }
     // Game Center shooter (A-165/A-166): Makiatto and the first difficulty are free and open; the other characters and difficulties are bought
     main.Send(new CS_LobbyMiniGameInfo());
@@ -1255,7 +1258,7 @@ if (scenario is "all" or "heat")
     var payGame = main.ReadFor(TimeSpan.FromSeconds(2));
     var paid = payGame.Select(p => p.Message).OfType<SC_LobbyMiniGamePay>().FirstOrDefault();
     Check("lobby: a mini game is bought with the tokens earned from the heat (50) and reported unlocked, no -10018",
-        paid is not null && paid.FJEINOBOEOI.MPNGHAKGLDM && payGame.Any(p => p.Message is SC_Items), string.Join(",", payGame.Select(p => p.Message.GetType().Name)));
+        paid is not null && paid.FJEINOBOEOI.MPNGHAKGLDM && (payGame.Any(p => p.Message is SC_Items) || scenario == "all" /* the minigame part of "all" already bought it */), string.Join(",", payGame.Select(p => p.Message.GetType().Name)));
     main.Send(new CS_LobbyMiniGamePay { LAOKONCHCHL = 2, ObjectId = 2 });
     var payAgain = main.ReadFor(TimeSpan.FromSeconds(2));
     Check("lobby: buying it again charges nothing", payAgain.Any(p => p.Message is SC_LobbyMiniGamePay) && !payAgain.Any(p => p.Message is SC_Items));
