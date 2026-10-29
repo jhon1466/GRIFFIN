@@ -1,6 +1,6 @@
 # Griffin
 
-Servidor privado de **Girls' Frontline 2: Exilium** (cliente CN **4.0.5136**, tablas `1189260`), escrito en C# (.NET 8) con PostgreSQL.
+Servidor privado de **Girls' Frontline 2: Exilium** (cliente CN de PC **4.0.5136** y de Android **4.0.5137**, tablas `1195672`), escrito en C# (.NET 8) con PostgreSQL.
 Inspirado en [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (ver [Créditos](#créditos)).
 
 > Proyecto sin ánimo de lucro, hecho con fines educativos y de preservación. No está afiliado a SunBorn ni a ningún editor del juego y **no incluye archivos del juego**: necesitas tu propio cliente instalado.
@@ -42,6 +42,27 @@ Las tablas del cliente (`Resources/Tables`) se preparan solas la primera vez que
 
 Variables de entorno opcionales (`GRIFFIN_*`): `GRIFFIN_CLIENT_TABLES_DIR`, `GRIFFIN_STAMINA=full` (energía siempre llena, solo para pruebas), `GRIFFIN_FREE_STAGES=1` (misiones sin coste, solo para pruebas).
 
+## Android
+
+El servidor también admite el cliente CN de **Android 4.0.5137**, y a la vez que el de PC: detecta qué cliente le habla y responde a cada uno con su versión.
+
+| | PC | Android |
+|---|---|---|
+| Cliente | 4.0.5136 | 4.0.5137 |
+| Recursos (`ResVersion`) | 4.0.5136.14945.29000 | 4.0.5137.14945.29001 |
+| Versión binaria | 4.0.5136.3257 | 4.0.5137.3257 |
+| Tablas | 1195672 | 1195672 |
+
+Para jugar desde el teléfono:
+
+1. El teléfono y el PC del servidor tienen que estar en la **misma red** (wifi o punto de acceso del PC).
+2. En `Griffin/appsettings.json`, pon en `GameServer:Host` la **IP local del PC** (la que ve el teléfono), no `127.0.0.1`.
+3. El APK tiene que apuntar su SDK a `http://<IP del PC>` (puerto 80). Este repositorio **no incluye** ningún APK ni herramienta para modificarlo.
+4. Deja abierto el puerto 80 y el 7001 en el firewall de Windows para la red local.
+5. La primera vez el juego descarga todos sus recursos (unos **44 GB**) del CDN oficial, así que necesita internet y espacio libre.
+
+Si sale una versión nueva del APK, los valores de Android se cambian sin recompilar con `GRIFFIN_ANDROID_CLIENT_VERSION`, `GRIFFIN_ANDROID_AB_RESOURCE_VERSION`, `GRIFFIN_ANDROID_BINARY_VERSION` y `GRIFFIN_ANDROID_GAME_CLIENT_VERSION`.
+
 ## Estado y hoja de ruta
 
 El servidor responde a unos 430 de los ~1020 mensajes de petición del cliente con comportamiento propio; el resto devuelve respuestas vacías o errores nativos del cliente para que las pantallas no se rompan.
@@ -72,7 +93,7 @@ El servidor responde a unos 430 de los ~1020 mensajes de petición del cliente c
 - [ ] PvP y combate multijugador (requieren un servidor de batalla)
 - [ ] Banda / Gremio
 - [ ] Zona oscura y otros modos de exploración en línea
-- [ ] Soporte para otras versiones del cliente o servidor global
+- [ ] Soporte para el servidor global y otras versiones del cliente (ya funcionan PC 4.0.5136 y Android 4.0.5137)
 - [ ] Combate validado por el servidor (el cliente simula la batalla y el servidor acepta el resultado)
 - [ ] Panel de administración propio (por ahora solo el chat)
 
@@ -109,6 +130,8 @@ Los dos últimos leen las tablas de `Griffin/bin/Release/net8.0/Resources/Tables
 
 - **No compila / faltan paquetes**: ejecuta `dotnet restore Griffin.sln` y vuelve a compilar.
 - **«datos del cliente anormales» al entrar**: PostgreSQL no responde o los datos de la cuenta no cargan; comprueba que el servicio está activo y que la cadena de conexión es correcta.
+- **Android: «当前客户端版本已过时» (cliente desactualizado) o «解析错误提示» (error de análisis)**: el APK no es el 4.0.5137, o el servidor no lo reconoce como Android; ajusta las variables `GRIFFIN_ANDROID_*` a la versión de tu APK.
+- **Android: «下载时发生未知错误» (error al descargar)**: el teléfono no tiene salida a internet para bajar los recursos del CDN oficial.
 - **El juego no conecta**: abre `griffin_launcher.exe` como administrador con el servidor ya encendido y comprueba que nada más usa los puertos 80, 443 y 7001.
 
 ## Créditos
