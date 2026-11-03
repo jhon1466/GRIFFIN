@@ -132,7 +132,7 @@ namespace Griffin.GameServer.Handlers
             // Charge before opening the stage so the client cannot start a paid run without stamina.
             uint costItem = TableFields.U(stage, 8);
             uint costAmount = TableFields.U(stage, 9);
-            // Test switch of the campaign sweep: thousands of stages in one run cannot be paid with the stamina of one account.
+            // Test switch of the campaign sweep (scripts/campaign-sweep-list.py): thousands of stages in one run cannot be paid with the stamina of one account.
             if (Environment.GetEnvironmentVariable("GRIFFIN_FREE_STAGES") == "1")
                 costItem = costAmount = 0;
             SC_ResourceUpdate? resourceUpdate = null;

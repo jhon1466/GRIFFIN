@@ -3,6 +3,7 @@ using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
 using Griffin.Common.Table;
+using Griffin.Database.Entities;
 using Griffin.Database.Services;
 using Griffin.GameServer.Extensions;
 using Griffin.GameServer.Services;
@@ -10,7 +11,7 @@ using System;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class LobbyHandler(ILobbyGardenService garden, ILobbyProgressService lobbyProgress, IAccountStateService accountState, IAccountService accountService, IRewardService rewardService, ITableService tableService, ILobbyCookingService cooking, IDailyQuestProgressService questProgress, IItemUseService itemUse, ILobbyHeatService heat, ILobbyMiniGameService miniGames, ILobbyPartyService parties) : LobbyHandlerBase
+    public sealed class LobbyHandler(ILobbyGardenService garden, ILobbyProgressService lobbyProgress, IAccountStateService accountState, IAccountService accountService, IRewardService rewardService, ITableService tableService, ILobbyCookingService cooking, IDailyQuestProgressService questProgress, IItemUseService itemUse, ILobbyHeatService heat, ILobbyMiniGameService miniGames, ILobbyPartyService parties, IInventoryService inventoryService) : LobbyHandlerBase
     {
         int lobbyGetBuildInfoCount;
 
@@ -1489,6 +1490,20 @@ namespace Griffin.GameServer.Handlers
                 UpdatedAtMs = updatedAtMs,
             }).ToList();
             accountState.Set(uid, LobbyRosterKey, roster);
+
+            HashSet<uint> ownedCostumes = inventoryService.GetPlayerInventory<CostumeEntity>(uid)
+                .Select(costume => costume.CostumeId)
+                .ToHashSet();
+            foreach (PlacedGun entry in roster.Where(gun => gun.GunId != 0 && gun.Costume != 0))
+            {
+                if (!tableService.GetTable<ClothesData>().Any(clothes =>
+                    clothes.Id == entry.Costume && TableFields.U(clothes, 21) == entry.GunId))
+                    continue;
+
+                if (ownedCostumes.Add(entry.Costume))
+                    inventoryService.Add(uid, new CostumeEntity { CostumeId = entry.Costume });
+                connection.Send(new SC_AddIndex { Type = 13, Id = entry.Costume, Ts = 0 });
+            }
 
             Dictionary<uint, PlacedGun> placed = roster.Where(gun => gun.GunId != 0).ToDictionary(gun => gun.GunId);
 

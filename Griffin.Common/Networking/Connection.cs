@@ -56,6 +56,27 @@ namespace Griffin.Common.Networking
 
         public string Id { get; } = client.Client.RemoteEndPoint!.ToString()!;
 
+        /// <summary>The address the client connected to (<c>ipv4:port</c>), as the Darkov room tells the client where its room server is.</summary>
+        public string LocalAddress
+        {
+            get
+            {
+                try
+                {
+                    if (client.Client.LocalEndPoint is not System.Net.IPEndPoint endpoint)
+                        return "";
+                    System.Net.IPAddress address = endpoint.Address.IsIPv4MappedToIPv6 ? endpoint.Address.MapToIPv4() : endpoint.Address;
+                    if (System.Net.IPAddress.IsLoopback(address))
+                        address = System.Net.IPAddress.Loopback;
+                    return $"{address}:{endpoint.Port}";
+                }
+                catch (ObjectDisposedException)
+                {
+                    return "";
+                }
+            }
+        }
+
         private int sentMessageCount;
 
         /// <summary>Number of main messages written to this connection (lets the dispatcher detect handlers that stay silent).</summary>

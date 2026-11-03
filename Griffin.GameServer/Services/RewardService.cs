@@ -75,6 +75,28 @@ namespace Griffin.GameServer.Services
                 return new GrantResult(true, ids[^1], ModIds: ids);
             }
 
+            if (tableService.GetTable<WeaponSkinData>().Any(skin => skin.Id == itemId))
+            {
+                if (!account.WeaponSkins.Any(skin => skin.WeaponSkinId == itemId))
+                    inventoryService.Add(accountUid, new WeaponSkinEntity { WeaponSkinId = itemId });
+
+                messages.Add(new SC_AddIndex { Type = 60, Id = itemId, Ts = 0 });
+                messages.Add(new SC_UpdateGunWeaponSkinItem { PGMKLGCFAOF = { [itemId] = 1 } });
+                return new GrantResult(true, Relate: itemId);
+            }
+
+            // Character outfits are ClothesData rows, not ordinary ItemData. Treating
+            // them as generic items left index 13 unset, so the client showed a lock even
+            // when the reward flow had announced the outfit and the equip handler accepted it.
+            if (tableService.GetTable<ClothesData>().Any(clothes => clothes.Id == itemId))
+            {
+                if (!account.Costumes.Any(costume => costume.CostumeId == itemId))
+                    inventoryService.Add(accountUid, new CostumeEntity { CostumeId = itemId });
+
+                messages.Add(new SC_AddIndex { Type = 13, Id = itemId, Ts = 0 });
+                return new GrantResult(true, Relate: itemId);
+            }
+
             if (itemId == StaminaItemId)
             {
                 // Stamina (item 101) is not a resource_ex entry: it lives in its own balance with a recovery clock. Purchases (store goods
@@ -182,6 +204,7 @@ namespace Griffin.GameServer.Services
                 inventoryService.Add(uid, new WeaponSkinEntity { WeaponSkinId = skin.Id });
 
             messages.Add(new SC_AddIndex { Type = 60, Id = skin.Id, Ts = 0 });
+            messages.Add(new SC_UpdateGunWeaponSkinItem { PGMKLGCFAOF = { [skin.Id] = 1 } });
         }
     }
 }

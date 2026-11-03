@@ -1603,6 +1603,26 @@ namespace Griffin.GameServer.Handlers
                     inventoryService.Add<GunEntity>(uid, GunService.CreateDefault(gunData, level: 1));
                     gun = account.Guns.First(g => g.GunId == charId);
 
+                    // The captured character banner sends SC_AddIndex(Type=13) for the
+                    // character's outfit, but that notification alone is only client-side.
+                    // Persist it as owned inventory too, otherwise the next SC_Index marks
+                    // the outfit locked even though it was granted and can still be equipped.
+                    HashSet<uint> grantedCostumes = newCharacterIndexMessages
+                        .OfType<SC_AddIndex>()
+                        .Where(index => index.Type == 13 && index.Id != 0)
+                        .Select(index => index.Id)
+                        .ToHashSet();
+                    if (newGun.Gun.Costume != 0)
+                        grantedCostumes.Add(newGun.Gun.Costume);
+
+                    foreach (uint costumeId in grantedCostumes)
+                    {
+                        if (account.Costumes.Any(costume => costume.CostumeId == costumeId))
+                            continue;
+
+                        inventoryService.Add(uid, new CostumeEntity { CostumeId = costumeId });
+                    }
+
                     WeaponEntity? weapon = account.Weapons.FirstOrDefault(w => w.Id == gun.WeaponId);
                     if (weapon is not null)
                     {

@@ -180,13 +180,18 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            Dictionary<uint, uint> costumes = accountState.Get<Dictionary<uint, uint>>(uid, CostumesKey) ?? [];
-            costumes[request.GunId] = request.CostumeId;
-            accountState.Set(uid, CostumesKey, costumes);
+            Dictionary<uint, uint> dormCostumes = accountState.Get<Dictionary<uint, uint>>(uid, CostumesKey) ?? [];
+            dormCostumes[request.GunId] = request.CostumeId;
+            accountState.Set(uid, CostumesKey, dormCostumes);
             Dictionary<uint, long> costumeTimes = accountState.Get<Dictionary<uint, long>>(uid, "dorm.costumes.updatedAtMs") ?? [];
             costumeTimes[request.GunId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             accountState.Set(uid, "dorm.costumes.updatedAtMs", costumeTimes);
+            if (request.CostumeId != 0 && !costumes.GetPlayerCostumes(uid).Any(costume => costume.CostumeId == request.CostumeId))
+                costumes.AddCostume(uid, new CostumeEntity { CostumeId = request.CostumeId });
+
             connection.Send(new SC_DormSkinChange { GunId = request.GunId, CostumeId = request.CostumeId });
+            if (request.CostumeId != 0)
+                connection.Send(new SC_AddIndex { Type = 13, Id = request.CostumeId, Ts = 0 });
         }
 
         // Character reward of the dormitory: no reward table is linked to the request id, so it is confirmed without paying.

@@ -293,6 +293,36 @@ namespace Griffin.GameServer.Handlers
         public override void HandleBuyGunWeaponSkin(CS_BuyGunWeaponSkin request, Connection connection) =>
             connection.Refuse(MsgId.MsgCsBuyGunWeaponSkin, HNINDAOJCKP.WeaponSkinHasNoRequiredItem);
 
+        public override void HandleUnlockGunWeaponSkin(CS_UnlockGunWeaponSkin request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            WeaponEntity? weapon = inventoryService.GetPlayerInventory<WeaponEntity>(uid)
+                .FirstOrDefault(candidate => candidate.Id == request.Id);
+            if (weapon is null)
+            {
+                connection.Refuse(MsgId.MsgCsUnlockGunWeaponSkin, HNINDAOJCKP.GunWeaponNotFound);
+                return;
+            }
+
+            WeaponSkinData? skin = tableService.GetTable<WeaponSkinData>()
+                .FirstOrDefault(candidate => candidate.Id == request.GunId && candidate.WeaponId == weapon.WeaponId);
+            if (skin is null)
+            {
+                connection.Refuse(MsgId.MsgCsUnlockGunWeaponSkin, HNINDAOJCKP.GunConfigNotExist);
+                return;
+            }
+
+            if (!inventoryService.GetPlayerInventory<WeaponSkinEntity>(uid).Any(owned => owned.WeaponSkinId == skin.Id))
+                inventoryService.Add(uid, new WeaponSkinEntity { WeaponSkinId = skin.Id });
+
+            connection.Send(new SC_UnlockGunWeaponSkin { Id = request.Id, GunId = skin.Id });
+            connection.Send(new SC_UpdateGunWeaponSkinItem { PGMKLGCFAOF = { [skin.Id] = 1 } });
+            connection.Send(new SC_AddIndex { Type = 60, Id = skin.Id, Ts = 0 });
+        }
+
         public override void HandleBuyGunWeaponModSkin(CS_BuyGunWeaponModSkin request, Connection connection) =>
             connection.Refuse(MsgId.MsgCsBuyGunWeaponModSkin, HNINDAOJCKP.WeaponModSkinHasNoRequiredItem);
 
@@ -619,11 +649,21 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            uint uid = connection.Account.Uid;
+            EnsureEquippedWeaponSkinsOwned(uid);
+
             SC_GunWeaponSkinItems response = new SC_GunWeaponSkinItems();
-            foreach (WeaponSkinEntity weaponSkin in inventoryService.GetPlayerInventory<WeaponSkinEntity>(connection.Account.Uid))
+            foreach (WeaponSkinEntity weaponSkin in inventoryService.GetPlayerInventory<WeaponSkinEntity>(uid))
                 response.PGMKLGCFAOF[weaponSkin.WeaponSkinId] = 1;
 
             connection.Send(response);
+            if (response.PGMKLGCFAOF.Count > 0)
+            {
+                SC_UpdateGunWeaponSkinItem update = new();
+                foreach ((uint skinId, uint value) in response.PGMKLGCFAOF)
+                    update.PGMKLGCFAOF[skinId] = value;
+                connection.Send(update);
+            }
         }
 
         /// <summary>The pending continuous polarization (a mod with unchosen candidates), or an empty state.</summary>
@@ -663,6 +703,20 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            if (request.GunId != 0)
+            {
+                WeaponSkinData? skin = tableService.GetTable<WeaponSkinData>()
+                    .FirstOrDefault(candidate => candidate.Id == request.GunId && candidate.WeaponId == weapon.WeaponId);
+                if (skin is null)
+                {
+                    connection.Refuse(MsgId.MsgCsReplaceGunWeaponSkin, HNINDAOJCKP.GunConfigNotExist);
+                    return;
+                }
+
+                if (!inventoryService.GetPlayerInventory<WeaponSkinEntity>(connection.Account.Uid).Any(owned => owned.WeaponSkinId == skin.Id))
+                    inventoryService.Add(connection.Account.Uid, new WeaponSkinEntity { WeaponSkinId = skin.Id });
+            }
+
             weapon.EquippedSkinId = request.GunId;
             weaponRepository.SaveChanges();
             connection.Send(new SC_ReplaceGunWeaponSkin
@@ -670,6 +724,34 @@ namespace Griffin.GameServer.Handlers
                 Id = request.Id,
                 GunId = request.GunId,
             });
+            if (request.GunId != 0)
+            {
+                connection.Send(new SC_AddIndex { Type = 60, Id = request.GunId, Ts = 0 });
+                connection.Send(new SC_UpdateGunWeaponSkinItem { PGMKLGCFAOF = { [request.GunId] = 1 } });
+            }
+        }
+
+        private void EnsureEquippedWeaponSkinsOwned(uint uid)
+        {
+            HashSet<uint> knownSkins = tableService.GetTable<WeaponSkinData>()
+                .Select(skin => skin.Id)
+                .ToHashSet();
+            HashSet<uint> owned = inventoryService.GetPlayerInventory<WeaponSkinEntity>(uid)
+                .Select(skin => skin.WeaponSkinId)
+                .ToHashSet();
+
+            foreach (ItemEntity item in inventoryService.GetPlayerInventory<ItemEntity>(uid))
+            {
+                if (knownSkins.Contains(item.ItemId) && owned.Add(item.ItemId))
+                    inventoryService.Add(uid, new WeaponSkinEntity { WeaponSkinId = item.ItemId });
+            }
+
+            foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(uid))
+            {
+                uint skinId = weapon.EquippedSkinId;
+                if (skinId != 0 && knownSkins.Contains(skinId) && owned.Add(skinId))
+                    inventoryService.Add(uid, new WeaponSkinEntity { WeaponSkinId = skinId });
+            }
         }
 
         /// <summary>Switches "show the weapon skin" (<c>skin_use</c>, bit 2 of the weapon flags, next to lock = bit 0 and red dot = bit 1) and keeps it.</summary>

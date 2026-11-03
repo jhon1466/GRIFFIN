@@ -1,16 +1,78 @@
+using System.Text.Json;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
+using Griffin.Common.Table;
 using Griffin.Database.Entities;
 using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Handlers
 {
     public sealed class IndexHandler(
-        IInventoryService inventoryService) : IndexHandlerBase
+        IInventoryService inventoryService,
+        ITableService tableService,
+        IAccountStateService accountState) : IndexHandlerBase
     {
         public override void HandleIndex(CS_Index request, Connection connection)
         {
             if (connection.Account == null) return;
+
+            // Older banner code only sent SC_AddIndex for a granted outfit and did not
+            // persist CostumeEntity. Backfill outfits already applied to owned characters
+            // before rebuilding index 13, so the collection UI agrees with the saved gear.
+            uint accountUid = connection.Account.Uid;
+            HashSet<uint> ownedCostumes = inventoryService.GetPlayerInventory<CostumeEntity>(accountUid)
+                .Select(costume => costume.CostumeId)
+                .ToHashSet();
+            HashSet<uint> clothesIds = tableService.GetTable<ClothesData>()
+                .Select(clothes => clothes.Id)
+                .ToHashSet();
+
+            void OwnCostume(uint costumeId)
+            {
+                if (clothesIds.Contains(costumeId) && ownedCostumes.Add(costumeId))
+                    inventoryService.Add(accountUid, new CostumeEntity { CostumeId = costumeId });
+            }
+
+            foreach (ItemEntity item in inventoryService.GetPlayerInventory<ItemEntity>(accountUid))
+                OwnCostume(item.ItemId);
+
+            foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(accountUid))
+                OwnCostume(gun.CostumeId);
+
+            // These outfits live in account-state preferences rather than GunEntity: the
+            // lobby adjutant, placed lobby characters, and dorm models each save separately.
+            if (PreferenceResponder.Recall<CS_AdjutantSet>(accountState, accountUid, "AdjutantSet") is { } adjutant)
+                OwnCostume(adjutant.CostumeId);
+
+            foreach (uint costumeId in accountState.Get<Dictionary<uint, uint>>(accountUid, "dorm.costumes")?.Values ?? Enumerable.Empty<uint>())
+                OwnCostume(costumeId);
+
+            if (accountState.Get<Dictionary<uint, JsonElement>>(accountUid, "lobby.guns") is { } lobbyGuns)
+                foreach (JsonElement placement in lobbyGuns.Values)
+                    OwnCostume(ReadCostumeId(placement));
+
+            if (accountState.Get<List<JsonElement>>(accountUid, "lobby.guns.roster") is { } lobbyRoster)
+                foreach (JsonElement placement in lobbyRoster)
+                    OwnCostume(ReadCostumeId(placement));
+
+            HashSet<uint> knownWeaponSkins = tableService.GetTable<WeaponSkinData>()
+                .Select(skin => skin.Id)
+                .ToHashSet();
+            HashSet<uint> ownedWeaponSkins = inventoryService.GetPlayerInventory<WeaponSkinEntity>(accountUid)
+                .Select(skin => skin.WeaponSkinId)
+                .ToHashSet();
+            foreach (ItemEntity item in inventoryService.GetPlayerInventory<ItemEntity>(accountUid))
+            {
+                if (knownWeaponSkins.Contains(item.ItemId) && ownedWeaponSkins.Add(item.ItemId))
+                    inventoryService.Add(accountUid, new WeaponSkinEntity { WeaponSkinId = item.ItemId });
+            }
+
+            foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(accountUid))
+            {
+                uint skinId = weapon.EquippedSkinId;
+                if (skinId != 0 && knownWeaponSkins.Contains(skinId) && ownedWeaponSkins.Add(skinId))
+                    inventoryService.Add(accountUid, new WeaponSkinEntity { WeaponSkinId = skinId });
+            }
 
             SC_Index scIndex = new SC_Index
             {
@@ -656,6 +718,13 @@ namespace Griffin.GameServer.Handlers
             //connection.Send(2, scIndex);
             connection.SendAutoEncrypted(scIndex);
         }
+
+        private static uint ReadCostumeId(JsonElement placement) =>
+            placement.ValueKind == JsonValueKind.Object
+            && placement.TryGetProperty("Costume", out JsonElement costume)
+            && costume.TryGetUInt32(out uint costumeId)
+                ? costumeId
+                : 0;
 
         public override void HandleReadIndex(CS_ReadIndex request, Connection connection)
         {

@@ -9,4 +9,7 @@
     <ProjectReference Include="..\Griffin.Common\Griffin.Common.csproj" />
     <ProjectReference Include="..\Griffin.Common.Proto\Griffin.Common.Proto.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Griffin.GameServer\Services\Darkov\Pb.cs" Link="Pb.cs" />
+  </ItemGroup>
 </Project>

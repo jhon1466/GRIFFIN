@@ -11,7 +11,7 @@ namespace Griffin.GameServer.Services
     /// The checked-in generated schema predates that layout (<c>OPADLDPIIKL.LECCHKLIOOK</c> is empty), so the bytes are written by
     /// hand and parsed back into the camp message as protobuf unknown fields.
     ///
-    /// Layout (taken from the client's own builders, <c>HJJPBCDDLBA</c>/<c>OKPAHBPPCGO</c>):
+    /// Layout (taken from the client's own builders, <c>HJJPBCDDLBA</c>/<c>OKPAHBPPCGO</c>; see docs/claude-live-log.md):
     /// <list type="bullet">
     /// <item><description>camp: 1 = side (<b>1 = player, 2 = enemy</b>; 0 matches nothing the client looks for), 2 = repeated unit.</description></item>
     /// <item><description>unit (oneof): 1 = Gun, 2 = Enemy, 3 = Robot, 4 = Device, 5 = Support.</description></item>

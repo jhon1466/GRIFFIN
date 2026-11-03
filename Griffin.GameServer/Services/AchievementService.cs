@@ -10,7 +10,7 @@ namespace Griffin.GameServer.Services
     /// id is a key of the <c>rewards</c> map (value = reward already taken). With no achievements reported, every chapter that
     /// needs the clearing of the previous one (chapter 2, the hard chapters...) and every past-activity story stayed locked
     /// ("未解锁") although the stage the condition names was cleared. ASSUMPTION A-44: only the conditions the server can know
-    /// are reported (commander level; stage cleared, see <c>tools/gen-achievements.py</c>); the rest (gun levels, logins...) has no
+    /// are reported (commander level; stage cleared, see <c>scripts/gen-achievements.py</c>); the rest (gun levels, logins...) has no
     /// progress here and stays incomplete.
     /// </summary>
     public interface IAchievementService : IGameService

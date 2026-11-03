@@ -4,6 +4,9 @@ using Google.Protobuf.Reflection;
 using Griffin.Common.Networking;
 using Griffin.Common.Packets;
 using Griffin.Common.Protocol;
+using Griffin.Common.Proto;
+using Griffin.Common.Table;
+using Griffin.Database.Entities;
 using Serilog;
 
 namespace Griffin.GameServer.Services
@@ -14,7 +17,10 @@ namespace Griffin.GameServer.Services
     /// the fields the response shares with the request. Only names on <see cref="Names"/> are handled; rewards, purchases and
     /// anything that changes game progress never go through here.
     /// </summary>
-    public sealed class PreferenceResponder(IAccountStateService accountState) : IFallbackResponder
+    public sealed class PreferenceResponder(
+        IAccountStateService accountState,
+        IInventoryService inventoryService,
+        ITableService tableService) : IFallbackResponder
     {
         private const string StateKey = "prefs";
 
@@ -54,6 +60,19 @@ namespace Griffin.GameServer.Services
             Remember(connection, name[5..], packet);
             Copy(packet.Message!, reply);
             connection.SendAutoEncrypted<IMessage>(reply);
+
+            if (packet.Message is CS_AdjutantSet adjutant
+                && connection.Account is not null
+                && adjutant.CostumeId != 0
+                && tableService.GetTable<ClothesData>().Any(clothes =>
+                    clothes.Id == adjutant.CostumeId && TableFields.U(clothes, 21) == adjutant.AdjutantId))
+            {
+                uint uid = connection.Account.Uid;
+                if (!inventoryService.GetPlayerInventory<CostumeEntity>(uid).Any(costume => costume.CostumeId == adjutant.CostumeId))
+                    inventoryService.Add(uid, new CostumeEntity { CostumeId = adjutant.CostumeId });
+                connection.Send(new SC_AddIndex { Type = 13, Id = adjutant.CostumeId, Ts = 0 });
+            }
+
             Log.Information("Preference {Request} stored and echoed for account {Uid}.", name, connection.Account?.Uid);
             return true;
         }

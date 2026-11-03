@@ -6,10 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace Griffin.GameServer.Services
 {
     /// <summary>
-    /// Asks the official version service (<c>zone/client_res_v1</c>) which resources and tables the live game has and compares them with what this
-    /// server announces (<see cref="StaticConfig"/>). It NEVER changes the announced versions by itself: a newer game can bring tables or messages the
-    /// server does not understand yet, so the owner switches (GRIFFIN_AB_RESOURCE_VERSION / GRIFFIN_STC_VERSION) after testing. The result is only
-    /// logged (once per change) and kept in <see cref="Latest"/> for the GM status (A-163). Disabled with GRIFFIN_VERSION_WATCH=0; network errors are ignored.
+    /// Polls the official version service. It hot-publishes resource bundles only when they belong to the exact same
+    /// client build, allowing connected clients to download official CDN data without restarting Griffin. Table and
+    /// binary versions are never changed automatically. Explicit GRIFFIN_AB_RESOURCE_VERSION pins take precedence.
     /// </summary>
     public sealed class OfficialVersionWatcher(ILogger<OfficialVersionWatcher> logger) : Microsoft.Extensions.Hosting.BackgroundService
     {
@@ -17,7 +16,7 @@ namespace Griffin.GameServer.Services
 
         public static Snapshot? Latest { get; private set; }
 
-        private static readonly TimeSpan Interval = TimeSpan.FromHours(3);
+        private static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -25,40 +24,52 @@ namespace Griffin.GameServer.Services
                 return;
 
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            string? reported = null;
+            Dictionary<string, string> reported = new(StringComparer.Ordinal);
+            string[] clientVersions = [StaticConfig.ClientVersion, StaticConfig.AndroidClientVersion];
             while (!stoppingToken.IsCancellationRequested)
             {
-                try
+                foreach (string clientVersion in clientVersions.Distinct(StringComparer.Ordinal))
                 {
-                    string url = $"https://gf2-zoneinfo.sunborngame.com/zone/client_res_v1?type_id=3&version={StaticConfig.ClientVersion}&game_channel_id=5";
-                    using JsonDocument document = JsonDocument.Parse(await http.GetStringAsync(url, stoppingToken));
-                    JsonElement data = document.RootElement.GetProperty("data");
-                    string res = data.GetProperty("ResVersion").GetString() ?? string.Empty;
-                    string stc = data.GetProperty("StcVersion").GetString() ?? string.Empty;
-                    string binary = data.TryGetProperty("BinaryVersion", out JsonElement b) ? b.GetString() ?? string.Empty : string.Empty;
-                    bool newer = res != StaticConfig.AbResourceVersion || stc != StaticConfig.StcVersion;
-                    Latest = new Snapshot(res, stc, binary, newer, DateTime.UtcNow);
-
-                    string key = $"{res}|{stc}";
-                    if (newer && key != reported)
+                    try
                     {
-                        logger.LogWarning(
-                            "The official game has resources {Res} and tables {Stc}; this server announces {MyRes} and {MyStc}. Nothing was changed: after testing, set GRIFFIN_AB_RESOURCE_VERSION and GRIFFIN_STC_VERSION (or update StaticConfig).",
-                            res, stc, StaticConfig.AbResourceVersion, StaticConfig.StcVersion);
-                        reported = key;
+                        string url = $"https://gf2-zoneinfo.sunborngame.com/zone/client_res_v1?type_id=3&version={Uri.EscapeDataString(clientVersion)}&game_channel_id=5";
+                        using JsonDocument document = JsonDocument.Parse(await http.GetStringAsync(url, stoppingToken));
+                        JsonElement data = document.RootElement.GetProperty("data");
+                        string res = data.GetProperty("ResVersion").GetString() ?? string.Empty;
+                        string stc = data.GetProperty("StcVersion").GetString() ?? string.Empty;
+                        string binary = data.TryGetProperty("BinaryVersion", out JsonElement b) ? b.GetString() ?? string.Empty : string.Empty;
+                        int preDownload = data.TryGetProperty("PreDownloadResVersion", out JsonElement p) && p.TryGetInt32(out int pre) ? pre : 0;
+
+                        bool sameBuild = OfficialResourceCatalog.TryPublish(clientVersion, res, preDownload);
+                        if (!sameBuild)
+                        {
+                            string mismatchKey = $"{clientVersion}|{res}";
+                            if (!reported.ContainsKey(mismatchKey))
+                                logger.LogWarning("Ignoring official resources {Res} for configured client {ClientVersion}: the client build differs.", res, clientVersion);
+                            reported[mismatchKey] = mismatchKey;
+                        }
+                        else
+                        {
+                            string key = $"{clientVersion}|{res}";
+                            if (!reported.ContainsKey(key))
+                                logger.LogInformation("Official CDN resources {Res} are now announced for client build {ClientVersion}; table version remains pinned at {Stc}.", res, clientVersion, StaticConfig.StcVersion);
+                            reported[key] = key;
+                        }
+
+                        if (string.Equals(clientVersion, StaticConfig.ClientVersion, StringComparison.Ordinal))
+                        {
+                            bool newer = res != StaticConfig.AbResourceVersion || stc != StaticConfig.StcVersion;
+                            Latest = new Snapshot(res, stc, binary, newer, DateTime.UtcNow);
+                        }
                     }
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    // real shutdown
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    // ANY other failure, including HttpClient.Timeout (which throws TaskCanceledException, a subclass of
-                    // OperationCanceledException): a version probe that cannot reach the official service must never stop the
-                    // host. The earlier filter let the timeout escape and killed the whole server on the offline hotspot (A-173).
-                    logger.LogDebug(ex, "The official version service could not be reached.");
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogDebug(ex, "The official version service could not be reached for client {ClientVersion}.", clientVersion);
+                    }
                 }
 
                 try { await Task.Delay(Interval, stoppingToken); }

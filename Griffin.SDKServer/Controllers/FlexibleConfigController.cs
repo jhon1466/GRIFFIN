@@ -23,7 +23,7 @@ namespace Griffin.SDKServer.Controllers
             NexonPlugDto nexonPlug = new()
             {
                 AbResourceAddr = "https://gf2-cn.cdn.sunborngame.com/game_resources/",
-                AbResourceVersion = StaticConfig.AbResourceVersion,
+                AbResourceVersion = OfficialResourceCatalog.Resolve(StaticConfig.ClientVersion, StaticConfig.AbResourceVersion),
                 GameClientVersion = StaticConfig.GameClientVersion,
                 GameDownloadAddr = "https://gf2-cn.cdn.sunborngame.com/game_resources/package/PCClient/",
                 HeadPic = new NexonPlugDto.HeadPicDto

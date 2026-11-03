@@ -973,11 +973,15 @@ namespace Griffin.GameServer.Handlers
             gun.CostumeId = request.CostumeId;
             gun.CostumeParts = SavedParts(uid).GetValueOrDefault(PartsKey(request.CostumeId, BAGPCFGACEF.Types.GCBADMLINMA.Barrack));
             gunService.Save();
+            if (!inventoryService.GetPlayerInventory<CostumeEntity>(uid).Any(costume => costume.CostumeId == request.CostumeId))
+                inventoryService.Add(uid, new CostumeEntity { CostumeId = request.CostumeId });
+
             connection.Send(new SC_GunCostume
             {
                 GunId = request.GunId,
                 CostumeId = request.CostumeId,
             });
+            connection.Send(new SC_AddIndex { Type = 13, Id = request.CostumeId, Ts = 0 });
         }
 
         /// <summary>

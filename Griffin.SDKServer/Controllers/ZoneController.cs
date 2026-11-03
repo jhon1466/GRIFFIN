@@ -40,7 +40,9 @@ namespace Griffin.SDKServer.Controllers
             string resUrl = StaticConfig.ResUrlCdn;
             if (cdnOrigin is not null && !cdnOrigin.Contains("sunborngame.com", StringComparison.OrdinalIgnoreCase))
                 resUrl = $"{cdnOrigin}/game_resources";
-            string resVersion = android ? StaticConfig.AndroidAbResourceVersion : StaticConfig.AbResourceVersion;
+            string clientVersion = android ? StaticConfig.AndroidClientVersion : StaticConfig.ClientVersion;
+            string configuredResVersion = android ? StaticConfig.AndroidAbResourceVersion : StaticConfig.AbResourceVersion;
+            string resVersion = OfficialResourceCatalog.Resolve(clientVersion, configuredResVersion);
             return new ClientResV1Dto
             {
                 Code = 0,
@@ -61,7 +63,8 @@ namespace Griffin.SDKServer.Controllers
                     MustUpdateVersionBin = StaticConfig.MustUpdateVersionBin,
                     MustUpdateVersionStc = StaticConfig.MustUpdateVersionStc,
                     IsCloseBattle = 1,
-                    PreDownloadResVersion = 28495,
+                    PreDownloadResVersion = OfficialResourceCatalog.ResolvePreDownloadVersion(
+                        clientVersion, android ? 28495 : 29123),
                 },
             };
         }

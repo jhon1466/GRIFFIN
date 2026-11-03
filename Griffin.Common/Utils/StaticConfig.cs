@@ -14,17 +14,17 @@ namespace Griffin.Common.Utils
 
         public static string PcapDir = Path.Join(ResourceDir, "Packets");
 
-        // Versions announced to the client. Defaults match the official CN live values observed on 2026-10-14
-        // (zone/client_res_v1) and the installed client (launcher f_r_ab_v / Table/version.txt).
+        // Versions announced to the client. Defaults match the official CN live values observed on 2026-11-03
+        // (zone/client_res_v1); the server profile targets the same 4.0.5136 client build.
         // Each can be overridden with an GRIFFIN_* environment variable without rebuilding.
         public static readonly string ClientVersion = Env("GRIFFIN_CLIENT_VERSION", "4.0.5136.0.0");
 
-        public static readonly string AbResourceVersion = Env("GRIFFIN_AB_RESOURCE_VERSION", "4.0.5136.14945.29000");
+        public static readonly string AbResourceVersion = Env("GRIFFIN_AB_RESOURCE_VERSION", "4.0.5136.15094.29138");
 
         public static readonly string GameClientVersion = Env("GRIFFIN_GAME_CLIENT_VERSION", "4.0.5136");
 
         /// <summary>Version of the server-side table set (bk_stc_pb.zip). The client downloads this version from the CDN.</summary>
-        public static readonly string StcVersion = Env("GRIFFIN_STC_VERSION", "1195672");
+        public static readonly string StcVersion = Env("GRIFFIN_STC_VERSION", "1201382");
 
         public const string ResUrlCdn = "https://gf2-cn.cdn.sunborngame.com/game_resources";
 
@@ -32,7 +32,7 @@ namespace Griffin.Common.Utils
 
         public static string StcTableZipUrl => $"{ResUrlCdn}/data/{StcVersion}/bk_stc_pb.zip";
 
-        public static readonly string BinaryVersion = Env("GRIFFIN_BINARY_VERSION", "4.0.5136.3257");
+        public static readonly string BinaryVersion = Env("GRIFFIN_BINARY_VERSION", "4.0.5136.3320");
 
         // Forced-update thresholds. Must be lower than any client version in use (or "0") so clients
         // are not rejected with "当前客户端版本已过时" (force update dialog).

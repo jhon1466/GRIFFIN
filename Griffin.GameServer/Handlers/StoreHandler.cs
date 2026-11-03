@@ -218,6 +218,8 @@ namespace Griffin.GameServer.Handlers
         private bool IsKnownReward(uint itemId) =>
             tableService.GetTable<GunData>().Any(gun => gun.Id == itemId)
             || tableService.GetTable<GunWeaponData>().Any(weapon => weapon.Id == itemId)
+            || tableService.GetTable<WeaponSkinData>().Any(skin => skin.Id == itemId)
+            || tableService.GetTable<ClothesData>().Any(clothes => clothes.Id == itemId)
             || tableService.GetTable<ItemData>().Any(item => item.Id == itemId);
 
         /// <summary>
@@ -270,6 +272,8 @@ namespace Griffin.GameServer.Handlers
                 && rewards.All(reward => reward.ItemId > 0 && reward.Count > 0
                     && (tableService.GetTable<GunData>().Any(gun => gun.Id == reward.ItemId)
                         || tableService.GetTable<GunWeaponData>().Any(weapon => weapon.Id == reward.ItemId)
+                        || tableService.GetTable<WeaponSkinData>().Any(skin => skin.Id == reward.ItemId)
+                        || tableService.GetTable<ClothesData>().Any(clothes => clothes.Id == reward.ItemId)
                         || tableService.GetTable<ItemData>().Any(item => item.Id == reward.ItemId)));
             if (!rewardsAreValid)
             {

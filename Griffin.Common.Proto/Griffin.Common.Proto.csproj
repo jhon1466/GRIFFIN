@@ -17,7 +17,7 @@
 		<PrivateAssets>all</PrivateAssets>
 	</PackageReference>
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
-	<!-- message classes of both protocols; the packet-handler bases are Handlers/PacketHandlerBases.g.cs (tools/gen-handlers.py) -->
+	<!-- message classes of both protocols; the packet-handler bases are Handlers/PacketHandlerBases.g.cs (scripts/gen-handlers.py) -->
 	<Protobuf Include="protos\*.proto" GrpcServices="None"/>
 	<Protobuf Include="table_protos\*.proto" GrpcServices="None"/>
   </ItemGroup>

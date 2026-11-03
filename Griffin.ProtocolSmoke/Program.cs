@@ -1,9 +1,9 @@
-﻿// Protocol smoke test for the private server. Plays the client side of the documented flow:
+// Protocol smoke test for the private server. Plays the client side of the documented flow:
 //   HTTP /email/login -> TCP CS_Login -> startup requests -> inventory/gacha/dorm requests -> reconnect.
 // It never touches the user's game client. Test account credentials come from args/env, never hardcoded secrets.
 //
 // Usage: dotnet run --project Griffin.ProtocolSmoke -- [--http https://127.0.0.1] [--tcp 127.0.0.1:7001]
-//            [--email smoke@local.test] [--password <pw>] [--scenario all|weekly|party|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
+//            [--email smoke@local.test] [--password <pw>] [--scenario all|darkov|darkovroom|weekly|party|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
 using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -3196,9 +3196,68 @@ if (scenario is "all" or "weekly")
         Check("weekly raid: without tickets the sweep is refused with a text", wkRaidNever.OfType<SC_ReportError>().Any(e => WkTexted(e.ErrorNo)), $"got={string.Join(",", wkRaidNever.Select(m => m.GetType().Name))}");
 }
 
+if (scenario is "all" or "darkov")
+{
+    // 危区探遗 / Darkov (A-144): the requests of the hub are answered with complete messages (the client indexes the nested messages without null checks)
+    main.ReadFor(TimeSpan.FromSeconds(1));
+    List<IMessage> DkSend(IMessage request, int ms = 700) { main.Send(request); return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => p.Message).ToList(); }
+    var dkInfo = DkSend(new CS_GetDarkovInfo(), 3000).OfType<SC_GetDarkovInfo>().FirstOrDefault();
+    Check("darkov: GetDarkovInfo is answered with its nested messages present (the client read them without checking and failed with an empty answer)",
+        dkInfo is { F1: not null, F2: not null, F3: not null, F6: not null }, $"f1={dkInfo?.F1 is not null} f2={dkInfo?.F2 is not null} f3={dkInfo?.F3 is not null}");
+    Check("darkov: the store, talents, exploration, gallery, tech, weekly quests and settings answer", new IMessage[]
+        {
+            DkSend(new CS_GetDarkovStoreInfo()).OfType<SC_GetDarkovStoreInfo>().FirstOrDefault()!, DkSend(new CS_DarkovGetTalentInfo()).OfType<SC_DarkovGetTalentInfo>().FirstOrDefault()!,
+            DkSend(new CS_DarkovGetExploration()).OfType<SC_DarkovGetExploration>().FirstOrDefault()!, DkSend(new CS_DarkovGetGallery()).OfType<SC_DarkovGetGallery>().FirstOrDefault()!,
+            DkSend(new CS_DarkovGetTechInfo()).OfType<SC_DarkovGetTechInfo>().FirstOrDefault()!, DkSend(new CS_DarkovGetWeekQuest()).OfType<SC_DarkovGetWeekQuest>().FirstOrDefault()!,
+            DkSend(new CS_DarkovGetSetting()).OfType<SC_DarkovGetSetting>().FirstOrDefault()!, DkSend(new CS_DarkovGetQuests()).OfType<SC_DarkovGetQuests>().FirstOrDefault()!,
+        }.All(m => m is not null));
+}
+
+if (scenario is "all" or "darkovroom")
+{
+    // 危区探遗 room (A-145): march -> start -> loaded -> heartbeat -> operations -> exit, the way the client plays a match
+    main.ReadFor(TimeSpan.FromSeconds(1));
+    List<IMessage> DrSend(IMessage request, int ms = 1500) { main.Send(request); return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => p.Message).ToList(); }
+    List<(int Id, byte[] Data)> DrRaw(ushort id, byte[] payload, int ms = 800) { main.SendRaw(id, payload); return main.ReadFor(TimeSpan.FromMilliseconds(ms)).Select(p => ((int)p.RawMsgId, p.RawIMessageData)).ToList(); }
+    // the hub, built from the profile of the account (starter kit): info, store, items, quests, workbench, exploration
+    var hubInfo = DrRaw(26000, []).FirstOrDefault(p => p.Id == 26001).Data;
+    var hubInfoMsg = hubInfo is null ? null : Griffin.GameServer.Services.Darkov.PbMsg.Parse(hubInfo);
+    Check("darkov hub: GetDarkovInfo comes from the profile (50 storage slots, a starter backpack, a weapon)",
+        hubInfoMsg?.Msg(2)?.Msg(1)?.U(1) == 50 && hubInfoMsg.Msg(3)?.Msg(1)?.Msgs(2).Count(m => m.Has(1)) >= 4 && hubInfoMsg.Msg(3)!.Msgs(4).Any(m => m.U(2) == 3052001));
+    var storeInfo = DrRaw(26016, new Griffin.GameServer.Services.Darkov.PbW().V(1, 1).ToArray()).FirstOrDefault(p => p.Id == 26017).Data;
+    Check("darkov hub: the store lists its goods", storeInfo is not null && Griffin.GameServer.Services.Darkov.PbMsg.Parse(storeInfo).Msgs(4).Count() >= 10);
+    var buy = DrRaw(26042, new Griffin.GameServer.Services.Darkov.PbW().V(1, 1).M(3, new Griffin.GameServer.Services.Darkov.PbW().V(1, 1003).V(2, 1)).ToArray());
+    Check("darkov hub: buying pushes the item update and answers with the store", buy.Any(p => p.Id == 10377) && buy.Any(p => p.Id == 26043), $"got={string.Join(",", buy.Select(p => p.Id))}");
+    var move = DrRaw(10373, new Griffin.GameServer.Services.Darkov.PbW()
+        .M(1, new Griffin.GameServer.Services.Darkov.PbW().V(4, 3))
+        .M(2, new Griffin.GameServer.Services.Darkov.PbW().V(1, 3).M(6, new Griffin.GameServer.Services.Darkov.PbW().V(1, 1877919000000000005UL).V(2, 3010101).V(3, 2))).ToArray());
+    Check("darkov hub: moving an item to the storage is mirrored by an update and answered", move.Any(p => p.Id == 10377) && move.Any(p => p.Id == 10374));
+    var afterMove = Griffin.GameServer.Services.Darkov.PbMsg.Parse(DrRaw(26000, []).First(p => p.Id == 26001).Data);
+    Check("darkov hub: the storage now holds the moved item", afterMove.Msg(2)!.Msg(1)!.Msgs(2).Any(m => m.Msg(1)?.U(2) == 3010101));
+    var quest = DrRaw(10380, new Griffin.GameServer.Services.Darkov.PbW().V(1, 1107).ToArray());
+    Check("darkov hub: a quest can be received (steps listed)", quest.Any(p => p.Id == 10381 && Griffin.GameServer.Services.Darkov.PbMsg.Parse(p.Data).Msg(1)!.Msgs(2).Count() >= 5));
+    var craftRefused = DrRaw(26022, new Griffin.GameServer.Services.Darkov.PbW().M(1, new Griffin.GameServer.Services.Darkov.PbW().V(1, 271).V(2, 1)).V(2, 1).ToArray());
+    Check("darkov hub: crafting without the materials is refused", craftRefused.Any(p => p.Id == 19900));
+    Check("darkov hub: exploration answers", DrRaw(26054, []).Any(p => p.Id == 26055));
+
+    var drMarch = DrSend(new CS_DarkovMarch { F1 = 9963, F2 = { 1009, 0, 0 } }).OfType<SC_DarkovMarch>().FirstOrDefault();
+    ulong drRoom = drMarch?.F1?.F1 ?? 0;
+    Check("darkov room: March creates the room and returns its id", drRoom != 0, $"room={drRoom}");
+    var drStart = DrSend(new CS_DarkovStart { F1 = drRoom, F2 = DvOLCBIAOCOFE.OlcbiaocofeDarkovReqTypeNormal }).OfType<SC_DarkovStart>().FirstOrDefault();
+    Check("darkov room: Start returns the loadout (hero, backpack, spawn point)", drStart?.F1?.F5 is not null, $"start={(drStart is null ? "none" : "ok")}");
+    var drLoaded = DrSend(new CS_DarkovLoaded { F1 = drRoom, F2 = 5409388 }, 3000);
+    Check("darkov room: Loaded is answered and the world is pushed (enemies, objects, points of interest)", drLoaded.OfType<SC_DarkovLoaded>().Any() && drLoaded.OfType<SC_DarkovRoomUpdate>().Count() >= 5, $"updates={drLoaded.OfType<SC_DarkovRoomUpdate>().Count()}");
+    var drBeat = DrSend(new CS_DarkovHeartBeat { F1 = drRoom, F2 = 5414388 });
+    Check("darkov room: the heartbeat is answered and the attributes tick", drBeat.OfType<SC_DarkovHeartBeat>().Any() && drBeat.OfType<SC_DarkovRoomUpdate>().Any(), $"got={string.Join(",", drBeat.Select(m => m.GetType().Name))}");
+    var drOp = DrSend(new CS_DarkovOp { F2 = 2341300 });
+    Check("darkov room: an operation is acknowledged with its frame", drOp.OfType<SC_DarkovOp>().Any(o => o.F1 == 2341300));
+    var drExit = DrSend(new CS_DarkovExit(), 2000);
+    Check("darkov room: leaving ends the match (finished + exit)", drExit.OfType<SC_DarkovFinished>().Any() && drExit.OfType<SC_DarkovExit>().Any(), $"got={string.Join(",", drExit.Select(m => m.GetType().Name))}");
+}
+
 if (scenario == "campaign")
 {
-    // Sweep of EVERY stage of the tables (CAMPAIGN_FILE written by a helper script; run the server with GRIFFIN_FREE_STAGES=1):
+    // Sweep of EVERY stage of the tables (CAMPAIGN_FILE written by scripts/campaign-sweep-list.py; run the server with GRIFFIN_FREE_STAGES=1):
     // StageStart -> StageInto -> StageResult(Win) and the record it must leave. Prints the failures grouped by stage type. Opt-in.
     var failuresByType = new SortedDictionary<int, List<string>>();
     var okByType = new SortedDictionary<int, int>();

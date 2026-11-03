@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Griffin.Common.Hosting;
@@ -32,6 +32,7 @@ namespace Griffin.GameServer
                 services,
                 typeof(GameServerExtensions).Assembly);
 
+            services.AddScoped<IRawPacketHandler, Services.Darkov.DarkovRawHandler>();
             services.AddScoped<IFallbackResponder, Services.PreferenceResponder>();
             services.AddScoped<IFallbackResponder, Services.QueryResponder>();
             services.AddScoped<IFallbackResponder, Services.EchoResponder>();
@@ -42,6 +43,7 @@ namespace Griffin.GameServer
             services.AddSingleton<ConnectionManager>();
 
             services.AddHostedService<GameServerHostedService>();
+            services.AddHostedService<Services.OfficialVersionWatcher>();
 
              //var _ = PcapUtils.GetPacketFromPcap<SC_Guns>(MsgId.MsgScGuns, PacketType.RESPONSE);
 

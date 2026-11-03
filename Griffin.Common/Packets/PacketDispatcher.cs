@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Google.Protobuf;
@@ -48,6 +48,27 @@ namespace Griffin.Common.Packets
 
         public void Dispatch(Connection connection, BasePacket packet)
         {
+            // raw handlers first: they read the wire bytes themselves
+            {
+                using IServiceScope rawScope = rootProvider.CreateScope();
+                foreach (IRawPacketHandler raw in rawScope.ServiceProvider.GetServices<IRawPacketHandler>())
+                {
+                    try
+                    {
+                        if (raw.TryHandle(connection, (ushort)packet.RawMsgId, packet.RawIMessageData))
+                        {
+                            connection.SendKept();
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "{Handler} failed for raw id {RawMsgId}", raw.GetType().Name, packet.RawMsgId);
+                        return;
+                    }
+                }
+            }
+
             if (packet.Message is null)
             {
                 byte[] payload = packet.RawIMessageData;

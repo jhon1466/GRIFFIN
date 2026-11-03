@@ -38,15 +38,37 @@ namespace Griffin.GameServer.Handlers
 
                 if (PreferenceResponder.Recall<CS_BackAdjutantSet>(accountState, uid, "BackAdjutantSet") is { } back)
                 {
-                    adjutant.Assistants.Clear();
-                    foreach (uint slot in back.Adjutants.Take(SlotCount))
-                        adjutant.Assistants.Add(slot);
-                    while (adjutant.Assistants.Count < SlotCount)
-                        adjutant.Assistants.Add(0);
+                    SetUniqueAssistants(adjutant, back.Adjutants);
                 }
             }
 
+            // The game can leave a newly acquired/equipped adjutant in a side slot. Sending
+            // the same gun as Current and Assistant makes the lobby instantiate two models
+            // at the same anchor. Keep the primary choice and compact only distinct side slots.
+            SetUniqueAssistants(adjutant, adjutant.Assistants, adjutant.Assistants.Count);
+
             connection.Send(new SC_AdjutantInfo { Adjutant = adjutant });
+        }
+
+        private static void SetUniqueAssistants(Adjutant adjutant, IEnumerable<uint> slots, int count = SlotCount)
+        {
+            uint[] requestedSlots = slots.Take(count).ToArray();
+            var seen = new HashSet<uint>();
+            if (adjutant.Current != 0)
+                seen.Add(adjutant.Current);
+
+            adjutant.Assistants.Clear();
+            foreach (uint slot in requestedSlots)
+            {
+                if (slot != 0 && !seen.Add(slot))
+                    continue;
+                adjutant.Assistants.Add(slot);
+                if (adjutant.Assistants.Count == count)
+                    break;
+            }
+
+            while (adjutant.Assistants.Count < count)
+                adjutant.Assistants.Add(0);
         }
     }
 }

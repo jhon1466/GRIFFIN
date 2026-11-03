@@ -6,7 +6,7 @@ namespace Griffin.GameServer.Services
     /// <summary>
     /// The remoulding core of a character (weapon panel, "改造核心"). The client keeps the core of each character in
     /// <c>Gun.grass_group</c> (field 55: core id, plugin uids, core level) and shows the toast "人形达到55级后解锁" when the list is empty.
-    /// ASSUMPTION A-54: a character owns its core (the CoreData row named after it, see <c>tools/gen-cores.py</c>) from level
+    /// ASSUMPTION A-54: a character owns its core (the CoreData row named after it, see <c>scripts/gen-cores.py</c>) from level
     /// <see cref="UnlockLevel"/> on; the server sends it in the gun list and, when a level-up crosses the level, in
     /// <c>SC_GunLevelUp</c> (field 4 lists the new core ids). The core level is saved in the gun's <c>GunTalentConsume</c> map under the
     /// reserved key <see cref="StorageKey"/> (no database column needed; never sent to the client) and raising it is free.
