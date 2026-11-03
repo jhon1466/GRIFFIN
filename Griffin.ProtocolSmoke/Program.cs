@@ -149,6 +149,14 @@ if (scenario is "all" or "calendar")
 
 if (scenario is "all" or "login")
 {
+    main.Send(new CS_Index());
+    var indexPackets = main.ReadFor(TimeSpan.FromSeconds(3));
+    var index = indexPackets.Select(p => p.Message).OfType<SC_Index>().FirstOrDefault();
+    Check("login: collection index responds instead of reporting an error",
+        index is not null && !indexPackets.Any(p => p.Message is SC_ReportError));
+    Check("login: character and weapon skin collections are present",
+        index is not null && index.Indices.ContainsKey(13) && index.Indices.ContainsKey(60));
+
     foreach (var (name, msg) in new (string, IMessage)[]
     {
         ("preface", new CS_GetPrefaceRecord()),

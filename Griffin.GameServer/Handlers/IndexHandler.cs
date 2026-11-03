@@ -677,12 +677,12 @@ namespace Griffin.GameServer.Handlers
 
             foreach (CostumeEntity costume in inventoryService.GetPlayerInventory<CostumeEntity>(connection.Account.Uid))
             {
-                scIndex.Indices[13].Details.Add(costume.CostumeId, true);
+                scIndex.Indices[13].Details[costume.CostumeId] = true;
             }
 
             foreach (CostumePartEntity costumePart in inventoryService.GetPlayerInventory<CostumePartEntity>(connection.Account.Uid))
             {
-                scIndex.Indices[14].Details.Add(costumePart.CostumePartId, false);
+                scIndex.Indices[14].Details[costumePart.CostumePartId] = false;
             }
 
             foreach (BackgroundEntity background in inventoryService.GetPlayerInventory<BackgroundEntity>(connection.Account.Uid))
@@ -692,17 +692,18 @@ namespace Griffin.GameServer.Handlers
 
             foreach (WeaponModEntity weaponMod in inventoryService.GetPlayerInventory<WeaponModEntity>(connection.Account.Uid))
             {
-                scIndex.Indices[21].Details.Add(weaponMod.WeaponModId, true);
+                // Multiple owned copies of a mod share the same catalogue ID.
+                scIndex.Indices[21].Details[weaponMod.WeaponModId] = true;
             }
 
             foreach (WeaponSkinEntity weaponSkin in inventoryService.GetPlayerInventory<WeaponSkinEntity>(connection.Account.Uid))
             {
-                scIndex.Indices[60].Details.Add(weaponSkin.WeaponSkinId, true);
+                scIndex.Indices[60].Details[weaponSkin.WeaponSkinId] = true;
             }
 
             foreach (WeaponModSkinEntity weaponModSkin in inventoryService.GetPlayerInventory<WeaponModSkinEntity>(connection.Account.Uid))
             {
-               scIndex.Indices[61].Details.Add(weaponModSkin.WeaponModSkinId, true);
+                scIndex.Indices[61].Details[weaponModSkin.WeaponModSkinId] = true;
             }
 
             foreach (ItemEntity item in inventoryService.GetPlayerInventory<ItemEntity>(connection.Account.Uid))
