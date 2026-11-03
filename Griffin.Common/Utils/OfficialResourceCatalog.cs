@@ -8,17 +8,17 @@ namespace Griffin.Common.Utils;
 /// </summary>
 public static class OfficialResourceCatalog
 {
-    private static readonly ConcurrentDictionary<string, string> ResourceVersionsByBuild = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, int> PreDownloadVersionsByBuild = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, string> ResourceVersionsByClient = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, int> PreDownloadVersionsByClient = new(StringComparer.Ordinal);
 
     public static bool TryPublish(string clientVersion, string resourceVersion, int preDownloadVersion)
     {
-        string build = BuildOf(clientVersion);
-        if (string.IsNullOrWhiteSpace(build) || !string.Equals(build, BuildOf(resourceVersion), StringComparison.Ordinal))
+        string clientKey = ClientKey(clientVersion);
+        if (string.IsNullOrWhiteSpace(clientKey) || !string.Equals(BuildOf(clientVersion), BuildOf(resourceVersion), StringComparison.Ordinal))
             return false;
 
-        ResourceVersionsByBuild[build] = resourceVersion;
-        PreDownloadVersionsByBuild[build] = preDownloadVersion;
+        ResourceVersionsByClient[clientKey] = resourceVersion;
+        PreDownloadVersionsByClient[clientKey] = preDownloadVersion;
         return true;
     }
 
@@ -28,7 +28,7 @@ public static class OfficialResourceCatalog
         if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GRIFFIN_AB_RESOURCE_VERSION")))
             return configuredVersion;
 
-        return ResourceVersionsByBuild.TryGetValue(BuildOf(clientVersion), out string? official)
+        return ResourceVersionsByClient.TryGetValue(ClientKey(clientVersion), out string? official)
             ? official
             : configuredVersion;
     }
@@ -38,7 +38,7 @@ public static class OfficialResourceCatalog
         if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GRIFFIN_AB_RESOURCE_VERSION")))
             return configuredVersion;
 
-        return PreDownloadVersionsByBuild.TryGetValue(BuildOf(clientVersion), out int official)
+        return PreDownloadVersionsByClient.TryGetValue(ClientKey(clientVersion), out int official)
             ? official
             : configuredVersion;
     }
@@ -51,4 +51,9 @@ public static class OfficialResourceCatalog
         string[] parts = version.Split('.');
         return parts.Length >= 3 ? string.Join('.', parts.Take(3)) : string.Empty;
     }
+
+    private static string ClientKey(string? version) =>
+        string.Equals(BuildOf(version), BuildOf(StaticConfig.AndroidClientVersion), StringComparison.Ordinal)
+            ? StaticConfig.AndroidClientVersion
+            : StaticConfig.ClientVersion;
 }

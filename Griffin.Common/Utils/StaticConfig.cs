@@ -47,9 +47,9 @@ namespace Griffin.Common.Utils
         // The SDK server picks this profile when the client asks with the Android build in "version" (A-174).
         public static readonly string AndroidClientVersion = Env("GRIFFIN_ANDROID_CLIENT_VERSION", "4.0.5137.0.0");
 
-        public static readonly string AndroidAbResourceVersion = Env("GRIFFIN_ANDROID_AB_RESOURCE_VERSION", "4.0.5137.14945.29001");
+        public static readonly string AndroidAbResourceVersion = Env("GRIFFIN_ANDROID_AB_RESOURCE_VERSION", "4.0.5137.15094.29139");
 
-        public static readonly string AndroidBinaryVersion = Env("GRIFFIN_ANDROID_BINARY_VERSION", "4.0.5137.3257");
+        public static readonly string AndroidBinaryVersion = Env("GRIFFIN_ANDROID_BINARY_VERSION", "4.0.5137.3320");
 
         public static readonly string AndroidGameClientVersion = Env("GRIFFIN_ANDROID_GAME_CLIENT_VERSION", "4.0.5137");
 

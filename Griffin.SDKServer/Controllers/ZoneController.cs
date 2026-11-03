@@ -64,7 +64,7 @@ namespace Griffin.SDKServer.Controllers
                     MustUpdateVersionStc = StaticConfig.MustUpdateVersionStc,
                     IsCloseBattle = 1,
                     PreDownloadResVersion = OfficialResourceCatalog.ResolvePreDownloadVersion(
-                        clientVersion, android ? 28495 : 29123),
+                        clientVersion, android ? 29122 : 29123),
                 },
             };
         }

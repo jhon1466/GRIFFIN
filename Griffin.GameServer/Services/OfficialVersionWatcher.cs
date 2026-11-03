@@ -32,7 +32,8 @@ namespace Griffin.GameServer.Services
                 {
                     try
                     {
-                        string url = $"https://gf2-zoneinfo.sunborngame.com/zone/client_res_v1?type_id=3&version={Uri.EscapeDataString(clientVersion)}&game_channel_id=5";
+                        string typeId = StaticConfig.IsAndroidVersion(clientVersion) ? "1" : "3";
+                        string url = $"https://gf2-zoneinfo.sunborngame.com/zone/client_res_v1?type_id={typeId}&version={Uri.EscapeDataString(clientVersion)}&game_channel_id=5";
                         using JsonDocument document = JsonDocument.Parse(await http.GetStringAsync(url, stoppingToken));
                         JsonElement data = document.RootElement.GetProperty("data");
                         string res = data.GetProperty("ResVersion").GetString() ?? string.Empty;
@@ -56,7 +57,8 @@ namespace Griffin.GameServer.Services
                             reported[key] = key;
                         }
 
-                        if (string.Equals(clientVersion, StaticConfig.ClientVersion, StringComparison.Ordinal))
+                        if (string.Equals(clientVersion, StaticConfig.ClientVersion, StringComparison.Ordinal)
+                            || StaticConfig.IsAndroidVersion(clientVersion))
                         {
                             bool newer = res != StaticConfig.AbResourceVersion || stc != StaticConfig.StcVersion;
                             Latest = new Snapshot(res, stc, binary, newer, DateTime.UtcNow);

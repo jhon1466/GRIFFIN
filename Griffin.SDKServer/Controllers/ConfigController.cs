@@ -35,6 +35,7 @@ namespace Griffin.SDKServer.Controllers
 
         private static Models.ConfigDto CreateConfig(string sdkOrigin, string clientVersion)
         {
+            string typeId = StaticConfig.IsAndroidVersion(clientVersion) ? "1" : "3";
             return new Models.ConfigDto
             {
                 Code = 0,
@@ -44,8 +45,8 @@ namespace Griffin.SDKServer.Controllers
                     GameControl = new Models.ConfigDto.GameControlDto
                     {
                         IsAudit = 0,
-                        GateList = $"{sdkOrigin}/zone/gatelist?version={clientVersion}&type_id=3&game_channel_id=5",
-                        ClientResV1 = $"{sdkOrigin}/zone/client_res_v1?type_id=3&version={clientVersion}&game_channel_id=5",
+                        GateList = $"{sdkOrigin}/zone/gatelist?version={clientVersion}&type_id={typeId}&game_channel_id=5",
+                        ClientResV1 = $"{sdkOrigin}/zone/client_res_v1?type_id={typeId}&version={clientVersion}&game_channel_id=5",
                     },
                     GameResource = new Models.ConfigDto.GameResourceDto
                     {
