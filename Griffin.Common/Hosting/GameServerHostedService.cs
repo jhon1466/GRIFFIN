@@ -35,7 +35,18 @@ namespace Griffin.Common.Hosting
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _listener = new TcpListener(_address, _port);
-            _listener.Start();
+            try
+            {
+                _listener.Start();
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressNotAvailable)
+            {
+                // The configured host is not on this PC right now (e.g. the Windows hotspot address
+                // 192.168.137.1 while the hotspot is off). Listen on every interface instead of dying.
+                _logger.LogWarning("GameServer host {Address} is not available on this PC; listening on all interfaces instead.", _address);
+                _listener = new TcpListener(IPAddress.Any, _port);
+                _listener.Start();
+            }
             _logger.LogInformation("GameServer listening on {Address}:{Port}", _address, _port);
 
             _acceptThread = new Thread(AcceptLoop) { IsBackground = true, Name = "GameServer-Accept" };
