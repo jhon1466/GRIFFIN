@@ -675,6 +675,14 @@ namespace Griffin.GameServer.Handlers
                 },
             };
 
+            // Doll index (type 10): the hardcoded list predates newer dolls, so register every
+            // owned doll as well; otherwise new characters stay "未登记" even when owned.
+            foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(connection.Account.Uid))
+            {
+                if (gun.GunId != 0)
+                    scIndex.Indices[10].Details.TryAdd(gun.GunId, false);
+            }
+
             foreach (CostumeEntity costume in inventoryService.GetPlayerInventory<CostumeEntity>(connection.Account.Uid))
             {
                 scIndex.Indices[13].Details[costume.CostumeId] = true;
