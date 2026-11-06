@@ -37,7 +37,7 @@ namespace Griffin.GameServer.Services
         ClassUpResult? ClassUp(uint accountUid, uint gunId);
 
         /// <summary>Raises the grade by one (free); returns the new grade or null for an unknown character.</summary>
-        uint? GradeUp(uint accountUid, uint gunId);
+        uint? GradeUp(uint accountUid, uint gunId, List<Google.Protobuf.IMessage> messages);
     }
 
     public sealed class CharacterProgressService(
@@ -138,7 +138,11 @@ namespace Griffin.GameServer.Services
             return new ClassUpResult(gun.GunClass, spent);
         }
 
-        public uint? GradeUp(uint accountUid, uint gunId)
+        /// <summary>
+        /// Cloud Ascension (云图强固): the next step costs GunGradeData.cost_piece (30) of the doll's 心智存档 (GunData core_item_id);
+        /// the client checks the same amount before sending the request (GACOFIADMIN). It used to be free.
+        /// </summary>
+        public uint? GradeUp(uint accountUid, uint gunId, List<Google.Protobuf.IMessage> messages)
         {
             GunEntity? gun = Find(accountUid, gunId);
             if (gun is null)
@@ -147,12 +151,19 @@ namespace Griffin.GameServer.Services
                 return null;
             }
 
-            if (gun.Grade < MaxGrade)
+            if (gun.Grade >= MaxGrade)
+                return gun.Grade;
+
+            uint core = tableService.GetTable<GunData>().FirstOrDefault(g => g.Id == gunId)?.CoreItemId ?? 0;
+            uint cost = tableService.GetTable<GunGradeData>().FirstOrDefault(g => g.Id == gunId * 100 + gun.Grade + 2)?.CostPiece ?? 0;
+            if (core != 0 && cost != 0 && !itemUse.Spend(accountUid, new Dictionary<uint, int> { [core] = (int)cost }, messages))
             {
-                gun.Grade++;
-                gunService.Save();
+                LastError = HNINDAOJCKP.ItemNotEnough;
+                return null;
             }
 
+            gun.Grade++;
+            gunService.Save();
             return gun.Grade;
         }
 

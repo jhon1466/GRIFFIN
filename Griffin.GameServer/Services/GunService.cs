@@ -1,4 +1,4 @@
-using Griffin.Common.Table;
+﻿using Griffin.Common.Table;
 using Griffin.Database.Entities;
 using Griffin.Database.Repositories;
 using Griffin.Database.Services;
@@ -84,7 +84,7 @@ namespace Griffin.GameServer.Services
             return true;
         }
 
-        public static GunEntity CreateDefault(GunData data, int level)
+        public static GunEntity CreateDefault(GunData data, int level, uint grade = 6)
         {
             return new GunEntity
             {
@@ -95,7 +95,7 @@ namespace Griffin.GameServer.Services
                 GunClass = ClassForLevel(level),
                 CostumeId = data.GLMMIEHDLEG,
                 CostumeParts = 0,
-                Grade = 6,
+                Grade = grade,
                 AuthLevel = 0,
                 WeaponId = 0,
                 IsGetPublicTalentSkillItem = false,

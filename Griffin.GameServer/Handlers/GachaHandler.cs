@@ -79,7 +79,7 @@ namespace Griffin.GameServer.Handlers
                     // Official shape of a converted duplicate (client card CMCHINFBOGI): item_num 0 plays the "conversion"
                     // animation and lists ext_items as what was received; item_num > 0 always shows the "NEW" tag on a doll.
                     drop.ItemNum = 0;
-                    drop.ExtItems[granted.TranItem] = 1;
+                    drop.ExtItems[granted.TranItem] = granted.TranCount;
                 }
                 acquirement.Drops.Add(drop);
             }
