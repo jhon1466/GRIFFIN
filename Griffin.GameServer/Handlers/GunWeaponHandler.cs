@@ -1,3 +1,4 @@
+﻿using System.Runtime.CompilerServices;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
@@ -569,6 +570,7 @@ namespace Griffin.GameServer.Handlers
             }
 
             connection.SendAutoEncrypted(scGunWeapons);
+            PushMountedModLevels(connection, weaponsSent: true);
         }
 
         public override void HandleGetGunWeaponModLockPlan(CS_GetGunWeaponModLockPlan request, Connection connection)
@@ -635,10 +637,42 @@ namespace Griffin.GameServer.Handlers
                         response.OKPBGHGHPCH[equipped] = weapon.Id;
 
             // the client creates every mod at level 1 without experience (the list has no field for them) and takes the real ones from this push (A-74)
+            // A mod mounted on a weapon is looked up by the client's level-up handler (NGBFNMONBGC.NNKMHHNHAIB) through that weapon:
+            // pushed before SC_GunWeapons it threw a NullReferenceException at every login. Loose mods go now; mounted ones once both
+            // lists have been sent (see PushMountedModLevels).
             List<Google.Protobuf.IMessage> batch = [response];
-            foreach (WeaponModEntity mod in mods.Where(m => m.Level > 1 || m.Field6 > 0))
+            foreach (WeaponModEntity mod in mods.Where(m => (m.Level > 1 || m.Field6 > 0) && !response.OKPBGHGHPCH.ContainsKey(m.Id)))
                 batch.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
             connection.SendAutoEncrypted(batch.ToArray());
+            PushMountedModLevels(connection, modsSent: true);
+        }
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Connection, StrongBox<(bool Mods, bool Weapons)>> loginLists = new();
+
+        private void PushMountedModLevels(Connection connection, bool modsSent = false, bool weaponsSent = false)
+        {
+            if (connection.Account is null)
+                return;
+            StrongBox<(bool Mods, bool Weapons)> state = loginLists.GetOrCreateValue(connection);
+            lock (state)
+            {
+                bool before = state.Value.Mods && state.Value.Weapons;
+                state.Value = (state.Value.Mods || modsSent, state.Value.Weapons || weaponsSent);
+                if (before || !(state.Value.Mods && state.Value.Weapons))
+                    return;
+            }
+
+            HashSet<uint> mounted = [];
+            foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid))
+                foreach (uint equipped in weapon.EquippedModIds ?? [])
+                    if (equipped != 0)
+                        mounted.Add(equipped);
+            List<Google.Protobuf.IMessage> batch = [];
+            foreach (WeaponModEntity mod in weaponMods.GetPlayerWeaponMods(connection.Account.Uid))
+                if (mounted.Contains(mod.Id) && (mod.Level > 1 || mod.Field6 > 0))
+                    batch.Add(new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 });
+            if (batch.Count > 0)
+                connection.SendAutoEncrypted(batch.ToArray());
         }
 
         public override void HandleGunWeaponSkinItems(CS_GunWeaponSkinItems request, Connection connection)
