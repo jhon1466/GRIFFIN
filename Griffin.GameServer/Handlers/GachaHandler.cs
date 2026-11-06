@@ -64,14 +64,17 @@ namespace Griffin.GameServer.Handlers
                 if (granted.NewCharacter)
                     acquirement.PMJGFLLPIHO.Add(pull.ItemId);
 
-                acquirement.Drops.Add(new UserDropCache
+                UserDropCache drop = new()
                 {
                     ItemId = pull.ItemId,
                     ItemNum = 1,
                     Relate = granted.Relate,
                     DropUp = pull.IsUp,
                     CIPFHAHNMBM = FMMNODBGEJC.Gacha,
-                });
+                };
+                if (granted.TranItem != 0)
+                    drop.TranItems[granted.TranItem] = 1;
+                acquirement.Drops.Add(drop);
             }
 
             acquirement.Guarantee[gachaId] = (uint)Math.Max(0, banner.SsrPity - pity.SinceSsr);
