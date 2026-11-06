@@ -15,7 +15,8 @@ namespace Griffin.GameServer.Services
         bool NewCharacter = false,
         bool DuplicateCharacter = false,
         IReadOnlyList<uint>? ModIds = null,
-        uint TranItem = 0);
+        uint TranItem = 0,
+        bool FirstWeapon = false);
 
     /// <summary>
     /// Gives items to an account from an item id, the way the shop, gacha, mail and quests all need it: characters (with
@@ -54,11 +55,12 @@ namespace Griffin.GameServer.Services
 
             if (tableService.GetTable<GunWeaponData>().Any(w => w.Id == itemId))
             {
+                bool first = !account.Weapons.Any(w => w.WeaponId == itemId);
                 uint relate = 0;
                 for (int i = 0; i < count; i++)
                     relate = GrantWeapon(accountUid, account, itemId, messages);
 
-                return new GrantResult(true, relate);
+                return new GrantResult(true, relate, FirstWeapon: first);
             }
 
             if (tableService.GetTable<WeaponModData>().Any(m => m.Id == itemId))
