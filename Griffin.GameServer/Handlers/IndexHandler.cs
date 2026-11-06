@@ -676,27 +676,27 @@ namespace Griffin.GameServer.Handlers
             };
 
             // Doll index (type 10): the hardcoded list predates newer dolls, so register every owned doll (otherwise new characters
-            // stay "未登记"). Value true = already seen: with false the gacha result marked every owned doll "NEW" on every pull.
+            // stay "未登记"). Value = "new, not yet seen" (the client sets true on SC_AddIndex and clears it when viewed), so owned entries go as false.
             // A doll obtained for the first time arrives through SC_AddIndex and stays new until the player looks at it.
             HashSet<ulong> read = accountState.Get<HashSet<ulong>>(accountUid, ReadKey) ?? [];
             foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(connection.Account.Uid))
             {
                 if (gun.GunId != 0)
-                    scIndex.Indices[10].Details[gun.GunId] = true;
+                    scIndex.Indices[10].Details[gun.GunId] = false;
             }
 
             // Weapon index (type 20): same problem, the hardcoded list is a handful of old weapons; register every owned one.
             foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid))
             {
                 if (weapon.WeaponId != 0)
-                    scIndex.Indices[20].Details[weapon.WeaponId] = true;
+                    scIndex.Indices[20].Details[weapon.WeaponId] = false;
             }
 
-            // Entries the player already opened in the index stay read (false = still marked new).
+            // Entries the player already opened in the index are no longer new.
             foreach (Griffin.Common.Proto.Index index in scIndex.Indices.Values)
                 foreach (uint id in index.Details.Keys.ToList())
                     if (read.Contains(Key(index.Type, id)))
-                        index.Details[id] = true;
+                        index.Details[id] = false;
 
             foreach (CostumeEntity costume in inventoryService.GetPlayerInventory<CostumeEntity>(connection.Account.Uid))
             {
