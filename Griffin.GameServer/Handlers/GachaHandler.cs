@@ -70,7 +70,9 @@ namespace Griffin.GameServer.Handlers
                     ItemNum = 1,
                     Relate = granted.Relate,
                     DropUp = pull.IsUp,
-                    CIPFHAHNMBM = FMMNODBGEJC.Gacha,
+                    // The official capture tags only a doll obtained for the first time with the Gacha source; repeated weapons
+                    // and dolls carry none. The client draws "NEW" on the tagged ones, so tagging every drop made all of them "NEW".
+                    CIPFHAHNMBM = granted.NewCharacter || granted.FirstWeapon ? FMMNODBGEJC.Gacha : FMMNODBGEJC.NoneNull,
                 };
                 if (granted.TranItem != 0)
                     drop.TranItems[granted.TranItem] = 1;
