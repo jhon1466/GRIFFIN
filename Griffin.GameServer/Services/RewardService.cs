@@ -14,7 +14,8 @@ namespace Griffin.GameServer.Services
         uint Relate = 0,
         bool NewCharacter = false,
         bool DuplicateCharacter = false,
-        IReadOnlyList<uint>? ModIds = null);
+        IReadOnlyList<uint>? ModIds = null,
+        uint TranItem = 0);
 
     /// <summary>
     /// Gives items to an account from an item id, the way the shop, gacha, mail and quests all need it: characters (with
@@ -147,9 +148,13 @@ namespace Griffin.GameServer.Services
         {
             if (account.Guns.Any(g => g.GunId == gunId))
             {
-                // Duplicate character: the official compensation is not in the client tables, so nothing is granted.
-                Log.Information("Reward: character {GunId} already owned by account {Uid}; duplicate without compensation.", gunId, uid);
-                return new GrantResult(true, DuplicateCharacter: true);
+                // Duplicate character: it turns into one of its "心智存档" (GunData core_item_id, used for its Cloud Ascension), as on
+                // the official server. The drop carries it in tran_items; without it the gacha result showed the doll as "NEW".
+                uint core = tableService.GetTable<GunData>().First(g => g.Id == gunId).CoreItemId;
+                if (core == 0)
+                    return new GrantResult(true, DuplicateCharacter: true);
+                Grant(uid, core, 1, messages);
+                return new GrantResult(true, DuplicateCharacter: true, TranItem: core);
             }
 
             GunData data = tableService.GetTable<GunData>().First(g => g.Id == gunId);
