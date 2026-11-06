@@ -1,0 +1,84 @@
+# Builds everything a player needs and publishes it as a GitHub Release on every push to main.
+# Griffin GM Tools (repo GRIFFIN-TOOLS) polls the "latest" release here (manifest.json) and installs
+# server + patcher updates by itself, so nobody has to install the .NET SDK or Rust to run the server.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- Server (self-contained, no .NET install needed) ----------
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish server
+        shell: pwsh
+        run: |
+          dotnet publish Griffin/Griffin.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=false -p:ErrorOnDuplicatePublishOutputFiles=false -p:Version=$env:VERSION -o out/server
+          Set-Content out/server/griffin-version.txt $env:VERSION
+          Compress-Archive -Path out/server/* -DestinationPath out/griffin-server-win-x64.zip
+
+      # ---------- Client patcher ----------
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: GriffinPatcher
+      - name: Build patcher
+        shell: pwsh
+        run: |
+          Push-Location GriffinPatcher
+          cargo build --release
+          Pop-Location
+          New-Item -ItemType Directory out/patcher | Out-Null
+          Copy-Item GriffinPatcher/target/release/griffin_patcher.dll out/patcher/
+          Copy-Item GriffinPatcher/target/release/griffin_launcher.exe out/patcher/
+          Compress-Archive -Path out/patcher/* -DestinationPath out/griffin-patcher-win-x64.zip
+
+      # ---------- Manifest + release ----------
+      - name: Write manifest
+        shell: pwsh
+        run: |
+          $assets = [ordered]@{}
+          foreach ($name in 'griffin-server-win-x64.zip', 'griffin-patcher-win-x64.zip') {
+            $file = Get-Item "out/$name"
+            $assets[$name] = [ordered]@{
+              sha256 = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+              size   = $file.Length
+            }
+          }
+          [ordered]@{
+            version = $env:VERSION
+            commit  = '${{ github.sha }}'
+            date    = (Get-Date).ToUniversalTime().ToString('o')
+            assets  = $assets
+          } | ConvertTo-Json -Depth 5 | Set-Content out/manifest.json -Encoding utf8
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = git log -1 --pretty=format:'%s'
+          gh release create "v$env:VERSION" `
+            out/manifest.json out/griffin-server-win-x64.zip out/griffin-patcher-win-x64.zip `
+            --title "Griffin $env:VERSION" --notes "$notes" --latest
