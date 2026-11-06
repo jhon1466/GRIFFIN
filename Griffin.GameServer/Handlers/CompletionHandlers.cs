@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -13,8 +13,25 @@ namespace Griffin.GameServer.Handlers
     // rules or the data that would give a reward are not known, the answer confirms the request and grants nothing (no invented rewards).
 
     /// <summary>AFK assistant: ends the session; the server keeps no AFK run, so the reply carries no results.</summary>
-    public sealed class AfkAssistantHandler : AfkAssistantHandlerBase
+    public sealed class AfkAssistantHandler(ITableService tableService) : AfkAssistantHandlerBase
     {
+        /// <summary>
+        /// The AFK assistant panel (lobby button). With an empty reply the client had no display order and sorted the 14 entries itself
+        /// (NDOCGLEDLKM.HABPLBJACCF); its comparer threw and the panel never opened (the client froze). The reply now carries one entry
+        /// per AfkAssistantData row (id = system) and the order (field 6) from the table's sort column, so the client uses it as given.
+        /// </summary>
+        public override void HandleAfkAssistantInfo(CS_AfkAssistantInfo request, Connection connection)
+        {
+            LBMHFNEHFCP data = new();
+            foreach (AfkAssistantData row in tableService.GetTable<AfkAssistantData>().OrderBy(r => r.Sort).ThenBy(r => r.Id))
+            {
+                data.Data[row.Id] = new ABAHIONHKPP { Type = row.Id };
+                data.LEKFONGLCIJ.Add(row.Id);
+            }
+
+            connection.Send(new SC_AfkAssistantInfo { Data = data });
+        }
+
         public override void HandleAfkAssistantEnd(CS_AfkAssistantEnd request, Connection connection) =>
             connection.Send(new SC_AfkAssistantEnd());
     }
