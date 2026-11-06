@@ -58,8 +58,24 @@ namespace Griffin.GameServer.Handlers
                 GachaId = gachaId,
                 GachaTimes = (uint)count,
             };
+            // Index entries the account already has; a doll or weapon seen for the first time is announced with SC_AddIndex so the
+            // client files it in its index (otherwise the result screen keeps calling it "NEW" on every later pull).
+            HashSet<uint> indexedDolls = inventoryService.GetPlayerInventory<GunEntity>(uid).Select(g => g.GunId).ToHashSet();
+            HashSet<uint> indexedWeapons = inventoryService.GetPlayerInventory<WeaponEntity>(uid).Select(w => w.WeaponId).ToHashSet();
+            List<SC_AddIndex> addIndex = [];
+            long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (GachaPull pull in pulls)
             {
+                if (tableService.GetTable<GunData>().Any(g => g.Id == pull.ItemId))
+                {
+                    if (indexedDolls.Add(pull.ItemId))
+                        addIndex.Add(new SC_AddIndex { Type = 10, Id = pull.ItemId, Ts = nowTs });
+                }
+                else if (tableService.GetTable<GunWeaponData>().Any(w => w.Id == pull.ItemId) && indexedWeapons.Add(pull.ItemId))
+                {
+                    addIndex.Add(new SC_AddIndex { Type = 20, Id = pull.ItemId, Ts = nowTs });
+                }
+
                 GrantResult granted = rewardService.Grant(uid, pull.ItemId, 1, bundle);
                 if (granted.NewCharacter)
                     acquirement.PMJGFLLPIHO.Add(pull.ItemId);
@@ -79,6 +95,7 @@ namespace Griffin.GameServer.Handlers
             List<IMessage> message = [new SC_RecordStatisticUpdate { CHEOLEADCCB = 1, MDAIIFCGJMO = 1 }];
             message.AddRange(bundle);
             message.Add(acquirement);
+            message.AddRange(addIndex);
             if (resourceUpdate.ResourceEx.Count > 0)
                 message.Add(resourceUpdate);
 

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
@@ -677,11 +677,25 @@ namespace Griffin.GameServer.Handlers
 
             // Doll index (type 10): the hardcoded list predates newer dolls, so register every
             // owned doll as well; otherwise new characters stay "未登记" even when owned.
+            HashSet<ulong> read = accountState.Get<HashSet<ulong>>(accountUid, ReadKey) ?? [];
             foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(connection.Account.Uid))
             {
                 if (gun.GunId != 0)
-                    scIndex.Indices[10].Details.TryAdd(gun.GunId, false);
+                    scIndex.Indices[10].Details.TryAdd(gun.GunId, read.Contains(Key(10, gun.GunId)));
             }
+
+            // Weapon index (type 20): same problem, the hardcoded list is a handful of old weapons; register every owned one.
+            foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(connection.Account.Uid))
+            {
+                if (weapon.WeaponId != 0)
+                    scIndex.Indices[20].Details.TryAdd(weapon.WeaponId, read.Contains(Key(20, weapon.WeaponId)));
+            }
+
+            // Entries the player already opened in the index stay read (false = still marked new).
+            foreach (Griffin.Common.Proto.Index index in scIndex.Indices.Values)
+                foreach (uint id in index.Details.Keys.ToList())
+                    if (read.Contains(Key(index.Type, id)))
+                        index.Details[id] = true;
 
             foreach (CostumeEntity costume in inventoryService.GetPlayerInventory<CostumeEntity>(connection.Account.Uid))
             {
@@ -735,9 +749,25 @@ namespace Griffin.GameServer.Handlers
                 ? costumeId
                 : 0;
 
+        private const string ReadKey = "index.read";
+
+        private static ulong Key(uint type, uint id) => ((ulong)type << 32) | id;
+
+        /// <summary>The client reports an index entry the player has looked at; remember it so it is no longer shown as new.</summary>
         public override void HandleReadIndex(CS_ReadIndex request, Connection connection)
         {
-            
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                HashSet<ulong> read = accountState.Get<HashSet<ulong>>(uid, ReadKey) ?? [];
+                if (read.Add(Key(request.Type, request.Id)))
+                    accountState.Set(uid, ReadKey, read);
+            }
+
+            connection.Send(new SC_ReadIndex());
         }
     }
 }
