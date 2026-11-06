@@ -312,8 +312,12 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account is null)
                 return;
 
-            if (progress.GradeUp(connection.Account.Uid, request.GunId) is { } grade)
-                connection.Send(new SC_GunUpgrade { GunId = request.GunId, Grade = grade });
+            List<Google.Protobuf.IMessage> spent = [];
+            if (progress.GradeUp(connection.Account.Uid, request.GunId, spent) is { } grade)
+            {
+                spent.Add(new SC_GunUpgrade { GunId = request.GunId, Grade = grade });
+                connection.SendAutoEncrypted(spent.ToArray());
+            }
             else
                 connection.Refuse(MsgId.MsgCsGunUpgrade, progress.LastError);
         }

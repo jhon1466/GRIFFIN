@@ -16,6 +16,7 @@ namespace Griffin.GameServer.Services
         bool DuplicateCharacter = false,
         IReadOnlyList<uint>? ModIds = null,
         uint TranItem = 0,
+        uint TranCount = 1,
         bool FirstWeapon = false);
 
     /// <summary>
@@ -155,12 +156,15 @@ namespace Griffin.GameServer.Services
                 uint core = tableService.GetTable<GunData>().First(g => g.Id == gunId).CoreItemId;
                 if (core == 0)
                     return new GrantResult(true, DuplicateCharacter: true);
-                Grant(uid, core, 1, messages);
-                return new GrantResult(true, DuplicateCharacter: true, TranItem: core);
+                // One duplicate = one Cloud Ascension step: GunGradeData.cost_piece (30) of the core item.
+                uint pieces = tableService.GetTable<GunGradeData>().FirstOrDefault(g => g.Id == gunId * 100 + 2)?.CostPiece ?? 1;
+                Grant(uid, core, (int)Math.Max(1, pieces), messages);
+                return new GrantResult(true, DuplicateCharacter: true, TranItem: core, TranCount: Math.Max(1, pieces));
             }
 
             GunData data = tableService.GetTable<GunData>().First(g => g.Id == gunId);
-            inventoryService.Add<GunEntity>(uid, GunService.CreateDefault(data, level: 1));
+            // A doll obtained in game starts at Cloud Ascension 0 (云图强固); its duplicates give the 心智存档 used to raise it.
+            inventoryService.Add<GunEntity>(uid, GunService.CreateDefault(data, level: 1, grade: 0));
             GunEntity gun = account.Guns.First(g => g.GunId == gunId);
             WeaponEntity? weapon = account.Weapons.FirstOrDefault(w => w.Id == gun.WeaponId);
 
