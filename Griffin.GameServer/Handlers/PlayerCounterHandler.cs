@@ -1,4 +1,4 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
 using Griffin.Database.Entities;
@@ -8,7 +8,7 @@ using Griffin.Common.Table;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class PlayerCounterHandler(IGunService gunService, ITableService tableService, IAchievementService achievements, ILobbyMiniGameService miniGames) : PlayerCounterHandlerBase
+    public sealed class PlayerCounterHandler(IGunService gunService, ITableService tableService, IAchievementService achievements, ILobbyMiniGameService miniGames, ILoadingPictureService loadingPictures) : PlayerCounterHandlerBase
     {
         public override void HandlePlayerCounterSync(CS_PlayerCounterSync request, Connection connection)
         {
@@ -2804,24 +2804,7 @@ namespace Griffin.GameServer.Handlers
                           PhaseRewards = { },
                           JGOJBNHMJJH = { },
                       },
-                      new CommonQuestCounters
-                      {
-                          Type = CommonQuestCounters.Types.Type.LoadingPicture,
-                          Rewards =
-                          {
-                              { 20353u, false },
-                              { 1581u, false },
-                              { 1201u, false },
-                              { 20351u, false },
-                              { 20352u, false },
-                          },
-                          PhaseRewards = { },
-                          JGOJBNHMJJH =
-                          {
-                              { 1201u, 1761315960L },
-                              { 1581u, 1773698995L },
-                          },
-                      },
+                      loadingPictures.Counters(connection.Account.Uid),
                       new CommonQuestCounters
                       {
                           Type = CommonQuestCounters.Types.Type.NewSystem,

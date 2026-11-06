@@ -1,4 +1,4 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -17,7 +17,7 @@ namespace Griffin.GameServer.Handlers
         IRewardService rewardService,
         IItemUseService itemUse,
         IDailyQuestProgressService questProgress,
-        IAchievementService achievements,
+        IAchievementService achievements, ILoadingPictureService loadingPictures,
         IGunService gunService,
         ILoveService love,
         IRougeService rouge,
@@ -193,6 +193,7 @@ namespace Griffin.GameServer.Handlers
             var records = accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? [];
             records.TryGetValue(stage.Id.ToString(), out StageRecord? prior);
             IReadOnlyDictionary<uint, bool> achievementsBefore = won ? achievements.Completed(uid) : new Dictionary<uint, bool>();
+            IReadOnlySet<uint> picturesBefore = won ? loadingPictures.Unlocked(uid) : new HashSet<uint>();
             if (won)
             {
                 // StageData field 20 = 41 is Directed Research in the installed tables
@@ -276,6 +277,8 @@ namespace Griffin.GameServer.Handlers
                 // next chapter (or the past-activity story) opens without logging in again.
                 if (achievements.NewlyCompleted(uid, achievementsBefore) is { } unlocked)
                     push.Add(new SC_CommonQuestCountUpdate { Counters = unlocked });
+                if (loadingPictures.NewlyUnlocked(uid, picturesBefore) is { } pictures)
+                    push.Add(new SC_CommonQuestCountUpdate { Counters = pictures });
             }
 
             // the mods that dropped must be known to the client before the result screen asks for them

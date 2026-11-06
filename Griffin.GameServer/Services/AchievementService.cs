@@ -53,7 +53,7 @@ namespace Griffin.GameServer.Services
             return rewards = map;
         }
 
-        private static HashSet<uint> ClearedStages(Dictionary<string, StageRecord> records)
+        internal static HashSet<uint> ClearedStages(Dictionary<string, StageRecord> records)
         {
             HashSet<uint> cleared = [];
             foreach ((string key, StageRecord record) in records)
