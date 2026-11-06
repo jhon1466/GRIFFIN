@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -180,11 +180,15 @@ namespace Griffin.GameServer.Services
 
         private uint GrantWeapon(uint uid, AccountEntity account, uint weaponId, List<IMessage> messages)
         {
+            // Only the first copy of a weapon enters the index: announcing it again for every duplicate made the
+            // gacha result call an already owned weapon "NEW" each time.
+            bool firstCopy = !account.Weapons.Any(w => w.WeaponId == weaponId);
             WeaponEntity weapon = GunService.CreateDefaultWeapon(weaponId, gunId: 0);
             inventoryService.Add(uid, weapon);
 
             messages.Add(new SC_NewGunWeapon { Weapon = weapon.ToProtoWeapon() });
-            AddWeaponIndices(uid, account, weaponId, messages);
+            if (firstCopy)
+                AddWeaponIndices(uid, account, weaponId, messages);
             return weapon.Id;
         }
 
