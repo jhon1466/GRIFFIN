@@ -89,11 +89,84 @@ namespace Griffin.GameServer.Handlers
                     });
         }
 
+        /// <summary>
+        /// Daily meal of the events (PJBMOFEDKLG, ActivityListData type 12): column 11 gives the meals of the day ("slot:hh:mm;…", China
+        /// time) and column 16 their reward ("slot:item:count;…", e.g. 60 stamina). The state is, per slot, the time it opens today and
+        /// whether it was taken. The tables do carry the schedule; the meals were simply never served.
+        /// </summary>
+        private (ActivityListData Row, List<(uint Slot, long Opens, uint Item, int Count)> Meals)? DailyFood()
+        {
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            ActivityListData? row = tableService.GetTable<ActivityListData>()
+                .FirstOrDefault(r => r.Type == 12 && r.OpenTime <= now && (r.CloseTime == 0 || now <= r.CloseTime));
+            if (row is null)
+                return null;
+
+            DateTime chinaToday = DateTime.UtcNow.AddHours(8).Date;
+            Dictionary<uint, (uint Item, int Count)> rewards = TableFields.S(row, 16).Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(e => e.Split(':')).Where(p => p.Length == 3)
+                .ToDictionary(p => uint.Parse(p[0]), p => (uint.Parse(p[1]), int.Parse(p[2])));
+            List<(uint, long, uint, int)> meals = [];
+            foreach (string[] p in TableFields.S(row, 11).Split(';', StringSplitOptions.RemoveEmptyEntries).Select(e => e.Split(':')).Where(p => p.Length == 3))
+            {
+                uint slot = uint.Parse(p[0]);
+                long opens = new DateTimeOffset(chinaToday.AddHours(int.Parse(p[1])).AddMinutes(int.Parse(p[2])), TimeSpan.Zero).AddHours(-8).ToUnixTimeSeconds();
+                (uint item, int count) = rewards.GetValueOrDefault(slot);
+                meals.Add((slot, opens, item, count));
+            }
+
+            return (row, meals);
+        }
+
+        private static string FoodKey => "activity.dailyfood";
+
+        private Dictionary<string, bool> FoodTaken(uint uid) => accountState.Get<Dictionary<string, bool>>(uid, FoodKey) ?? [];
+
+        private static string FoodSlotKey(uint slot) => $"{GameDay.Key()}:{slot}";
+
         public override void HandleGetActivityDailyFood(CS_GetActivityDailyFood request, Connection connection)
         {
-            // The installed 4.0.5136 tables contain no daily-food schedule. Returning
-            // old captured timestamps would advertise already-expired claims.
-            connection.Send(new SC_GetActivityDailyFood());
+            if (connection.Account is null)
+                return;
+            SC_GetActivityDailyFood reply = new();
+            if (DailyFood() is { } food)
+            {
+                Dictionary<string, bool> taken = FoodTaken(connection.Account.Uid);
+                foreach ((uint slot, long opens, _, _) in food.Meals)
+                    reply.PLAKNGGJGPL[slot] = new JMNBIFKFMLB { ENGFMGEEMBG = opens, State = taken.GetValueOrDefault(FoodSlotKey(slot)) };
+            }
+            connection.Send(reply);
+        }
+
+        public override void HandleTakeActivityDailyFood(CS_TakeActivityDailyFood request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            List<IMessage> messages = [];
+            SC_TakeActivityDailyFood reply = new();
+            if (DailyFood() is { } food)
+            {
+                lock (AccountLock.For(uid))
+                {
+                    Dictionary<string, bool> taken = FoodTaken(uid);
+                    // id 0 takes every meal already served today
+                    foreach ((uint slot, long opens, uint item, int count) in food.Meals.Where(m => request.Id == 0 || m.Slot == request.Id))
+                    {
+                        if (now < opens || taken.GetValueOrDefault(FoodSlotKey(slot)))
+                            continue;
+                        if (item != 0 && count > 0)
+                            rewardService.Grant(uid, item, count, messages);
+                        taken[FoodSlotKey(slot)] = true;
+                        reply.AJNAPNNKIFC[slot] = true;
+                    }
+                    accountState.Set(uid, FoodKey, taken);
+                }
+            }
+
+            messages.Add(reply);
+            connection.SendAutoEncrypted(messages.ToArray());
         }
 
         public override void HandleGetActivityConversion(CS_GetActivityConversion request, Connection connection)
@@ -473,6 +546,109 @@ namespace Griffin.GameServer.Handlers
         public override void HandleActivityGacha(CS_ActivityGacha request, Connection connection) => BoxGacha.HandleActivityGacha(request, connection);
 
         public override void HandleActivityGachaSettle(CS_ActivityGachaSettle request, Connection connection) => BoxGacha.HandleActivityGachaSettle(request, connection);
+
+        /// <summary>One-time and daily claims of small events, kept per account under "activity.claims".</summary>
+        public sealed class ClaimState
+        {
+            public List<string> Done { get; set; } = [];
+            public Dictionary<uint, uint> AnniversaryDays { get; set; } = [];
+            public Dictionary<uint, string> AnniversaryLast { get; set; } = [];
+        }
+
+        private const string ClaimKey = "activity.claims";
+
+        private void Grant(uint uid, IEnumerable<KeyValuePair<uint, uint>> items, List<IMessage> messages)
+        {
+            foreach ((uint item, uint count) in items)
+                if (item != 0 && count > 0)
+                    rewardService.Grant(uid, item, (int)count, messages);
+        }
+
+        /// <summary>Reward of a "new system" event (EventNewSystemMainData column 3), once.</summary>
+        public override void HandleActivityNewSystemReward(CS_ActivityNewSystemReward request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            lock (AccountLock.For(uid))
+            {
+                ClaimState state = accountState.Get<ClaimState>(uid, ClaimKey) ?? new ClaimState();
+                string key = $"newsystem:{request.IKDMNOBMIFE}";
+                if (!state.Done.Contains(key) && tableService.GetTable<EventNewSystemMainData>().FirstOrDefault(r => TableFields.U(r, 1) == request.IKDMNOBMIFE) is { } row)
+                {
+                    Grant(uid, TableFields.Map(row, 3).Select(p => new KeyValuePair<uint, uint>(p.Key, p.Value)), messages);
+                    state.Done.Add(key);
+                    accountState.Set(uid, ClaimKey, state);
+                }
+            }
+
+            long end = tableService.GetTable<ActivityListData>().FirstOrDefault(r => r.Id == request.IKDMNOBMIFE)?.CloseTime ?? 0;
+            messages.Add(new SC_ActivityNewSystemReward { IKDMNOBMIFE = request.IKDMNOBMIFE, EndTime = end });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
+        /// <summary>
+        /// Anniversary sign-in (EventSigninAnniversaryData: 4 = reward group, 6 = final bonus): one day a game day, the reward of that day
+        /// from EventSigninAnniversaryRewardsData (2 = group, 3 = day, 4 = reward).
+        /// </summary>
+        public override void HandleActivityCheckInAnniversary(CS_ActivityCheckInAnniversary request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            lock (AccountLock.For(uid))
+            {
+                ClaimState state = accountState.Get<ClaimState>(uid, ClaimKey) ?? new ClaimState();
+                Google.Protobuf.IMessage? config = tableService.GetTable<EventSigninAnniversaryData>().FirstOrDefault(r => TableFields.U(r, 1) == request.EventId);
+                string today = GameDay.Key();
+                if (config is not null && state.AnniversaryLast.GetValueOrDefault(request.EventId) != today)
+                {
+                    uint group = TableFields.U(config, 4);
+                    uint day = state.AnniversaryDays.GetValueOrDefault(request.EventId) + 1;
+                    if (tableService.GetTable<EventSigninAnniversaryRewardsData>().FirstOrDefault(r => TableFields.U(r, 2) == group && TableFields.U(r, 3) == day) is { } reward)
+                    {
+                        Grant(uid, TableFields.Map(reward, 4).Select(p => new KeyValuePair<uint, uint>(p.Key, p.Value)), messages);
+                        state.AnniversaryDays[request.EventId] = day;
+                        state.AnniversaryLast[request.EventId] = today;
+                        accountState.Set(uid, ClaimKey, state);
+                    }
+                }
+            }
+
+            messages.Add(new SC_ActivityCheckInAnniversary { EventId = request.EventId });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
+        /// <summary>The final bonus of the anniversary sign-in (EventSigninAnniversaryData column 6), once.</summary>
+        public override void HandleActivityAnniversaryClaimBonus(CS_ActivityAnniversaryClaimBonus request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            lock (AccountLock.For(uid))
+            {
+                ClaimState state = accountState.Get<ClaimState>(uid, ClaimKey) ?? new ClaimState();
+                string key = $"anniversarybonus:{request.EventId}";
+                if (!state.Done.Contains(key) && tableService.GetTable<EventSigninAnniversaryData>().FirstOrDefault(r => TableFields.U(r, 1) == request.EventId) is { } config)
+                {
+                    Grant(uid, TableFields.Map(config, 6).Select(p => new KeyValuePair<uint, uint>(p.Key, p.Value)), messages);
+                    state.Done.Add(key);
+                    accountState.Set(uid, ClaimKey, state);
+                }
+            }
+
+            messages.Add(new SC_ActivityAnniversaryClaimBonus { EventId = request.EventId });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
+        public override void HandleActivityCheckInMessageOver(CS_ActivityCheckInMessageOver request, Connection connection)
+        {
+            if (connection.Account is not null)
+                connection.Send(new SC_ActivityCheckInMessageOver { EventId = request.EventId });
+        }
 
         public override void HandleActivityCheckIn(CS_ActivityCheckIn request, Connection connection)
         {
