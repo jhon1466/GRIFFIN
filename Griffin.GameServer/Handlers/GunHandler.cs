@@ -1233,15 +1233,18 @@ namespace Griffin.GameServer.Handlers
             if (TalentKeySlots.IsPeakKey(request.PrivateTalentSkillItemId))
             {
                 // the peak key (峰位键, e.g. 921055) goes to the middle slot of the wheel, not to the side ones (A-61)
+                // taking a key off sends the key that is already in the slot (KNNONABDNAG.ADEKLPNCFMA keeps the id for Private/Sp)
+                bool unload = peak[request.Slot] == request.PrivateTalentSkillItemId;
                 for (int i = 0; i < peak.Length; i++)
                     if (peak[i] == request.PrivateTalentSkillItemId)
                         peak[i] = 0;
-                peak[request.Slot] = request.PrivateTalentSkillItemId;
+                peak[request.Slot] = unload ? 0 : request.PrivateTalentSkillItemId;
                 TalentKeySlots.Store(gun, peak);
             }
             else
             {
-                items[request.Slot] = request.PrivateTalentSkillItemId;
+                bool unload = request.PrivateTalentSkillItemId != 0 && items[request.Slot] == request.PrivateTalentSkillItemId;
+                items[request.Slot] = unload ? 0 : request.PrivateTalentSkillItemId;
                 gun.PrivateTalentSkillItems = items;
             }
 
