@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -178,7 +178,7 @@ namespace Griffin.GameServer.Services
             {
                 CookState state = Load(uid);
                 bool today = state.DinnerDay == Day(Now());
-                return today ? (state.DinnerType, state.DinnerLevels.GetValueOrDefault(state.DinnerType, 1u), true) : (0u, 0u, false);
+                return today ? (state.DinnerType, Math.Max(1u, DinnerLevel(state, state.DinnerType)), true) : (0u, 0u, false);
             }
         }
 
@@ -197,7 +197,7 @@ namespace Griffin.GameServer.Services
         {
             lock (Gate)
             {
-                if (!ILobbyCookingService.DinnerGroups.Contains(group)
+                if (DinnerLevel(Load(uid), group) == 0
                     || !tableService.GetTable<LobbyCookBuffData>().Any(r => TableFields.U(r, 3) == group && TableFields.U(r, 6) == 1))
                     return HNINDAOJCKP.LobbyFoodBuffLocked;
 
@@ -563,12 +563,24 @@ namespace Griffin.GameServer.Services
 
         // ----- levels -----
 
+        /// <summary>
+        /// Level of a dinner dish group. The groups owned from the start (<see cref="ILobbyCookingService.DinnerGroups"/>) are level 1;
+        /// every other group of LobbyCookBuffData (the dishes added by later updates, e.g. 19 = Döner Kebab) starts at 0 and is
+        /// "unlocked" by buying its level-1 row (column 13 = its price). Before, those groups were refused as invalid input
+        /// ("client data anomaly").
+        /// </summary>
+        private static uint DinnerLevel(CookState state, uint group) =>
+            state.DinnerLevels.TryGetValue(group, out uint level) ? level : ILobbyCookingService.DinnerGroups.Contains(group) ? 1u : 0u;
+
+        private IEnumerable<uint> AllDinnerGroups() =>
+            tableService.GetTable<LobbyCookBuffData>().Select(r => TableFields.U(r, 3)).Where(g => g != 0).Distinct().Order();
+
         public IReadOnlyDictionary<uint, uint> DinnerLevels(uint uid)
         {
             lock (Gate)
             {
                 CookState state = Load(uid);
-                return ILobbyCookingService.DinnerGroups.ToDictionary(g => g, g => state.DinnerLevels.GetValueOrDefault(g, 1u));
+                return AllDinnerGroups().Select(g => (g, DinnerLevel(state, g))).Where(p => p.Item2 > 0).ToDictionary(p => p.g, p => p.Item2);
             }
         }
 
@@ -586,11 +598,11 @@ namespace Griffin.GameServer.Services
             lock (Gate)
             {
                 level = 0;
-                if (!ILobbyCookingService.DinnerGroups.Contains(group))
+                if (!AllDinnerGroups().Contains(group))
                     return HNINDAOJCKP.ClientInputInvalid;
 
                 CookState state = Load(uid);
-                level = state.DinnerLevels.GetValueOrDefault(group, 1u);
+                level = DinnerLevel(state, group);
                 uint wanted = level + 1;
                 IMessage? next = tableService.GetTable<LobbyCookBuffData>().FirstOrDefault(r => TableFields.U(r, 3) == group && TableFields.U(r, 6) == wanted);
                 if (next is null)
