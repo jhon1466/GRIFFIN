@@ -1,4 +1,4 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Protocol;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
@@ -19,6 +19,7 @@ namespace Griffin.GameServer.Handlers
         ILobbyCookingService cooking,
         IResourceService resourceService,
         IStaminaService staminaService,
+        IItemUseService itemUse,
         IDailyQuestProgressService questProgress,
         IRougeService rouge,
         ISimCombatWeekService week,
@@ -156,6 +157,17 @@ namespace Griffin.GameServer.Handlers
                             connection.SendRawPacket((ushort)MsgId.MsgScStaminaTypeResourceUpdate,
                                 StaminaService.BuildUpdatePayload(itemId: 101, balance));
                     }
+                }
+                else if (tableService.GetTable<ItemData>().FirstOrDefault(i => i.Id == costItem) is { } costData
+                         && costData.Type != ResourceService.ResourceItemType)
+                {
+                    // an inventory item, e.g. the event supply tickets (179203 准入密钥 for DF-1-x): it is not a currency, so the
+                    // resource wallet always answered "not enough" and the stage never started
+                    List<Google.Protobuf.IMessage> itemUpdate = [];
+                    spent = costAmount <= int.MaxValue && itemUse.Spend(connection.Account.Uid,
+                        new Dictionary<uint, int> { [costItem] = (int)costAmount }, itemUpdate);
+                    if (spent && itemUpdate.Count > 0)
+                        connection.SendAutoEncrypted(itemUpdate.ToArray());
                 }
                 else
                 {
