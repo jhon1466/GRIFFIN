@@ -40,6 +40,21 @@ namespace Griffin.GameServer.Handlers
             SC_ShootspaceInfo reply = new() { ThemeId = request.ThemeId, DEGNALHNOMI = state.Exp };
             foreach ((uint mode, Record record) in state.Modes)
                 reply.FDPOAJJJKGC[mode] = new CFGNAOGCNNF { Times = record.Times, CGFMBCCDFPG = record.Best };
+
+            // Levels (StspDifficultyData): the client opens a level only when its record says unlocked (field 3, read as
+            // JIIBANDCNOM by CNLJNMBPGCC). Column 4 is the best score needed on the previous level (level 1 has none, 2 needs 200 on
+            // level 1, 3 needs 500 on level 2). Without the flag every level showed the padlock, the first one included.
+            foreach (Google.Protobuf.IMessage row in tableService.GetTable<Griffin.Common.Table.StspDifficultyData>())
+            {
+                uint id = TableFields.U(row, 1);
+                if (id == 0)
+                    continue;
+                uint needed = TableFields.U(row, 4);
+                bool unlocked = needed == 0 || (state.Modes.TryGetValue(id - 1, out Record? previous) && previous.Best >= needed);
+                if (!reply.FDPOAJJJKGC.TryGetValue(id, out CFGNAOGCNNF? entry))
+                    reply.FDPOAJJJKGC[id] = entry = new CFGNAOGCNNF();
+                entry.MPNGHAKGLDM = unlocked;
+            }
             reply.IMOHEBMLOBE.AddRange(state.Talents);
             connection.Send(reply);
         }
