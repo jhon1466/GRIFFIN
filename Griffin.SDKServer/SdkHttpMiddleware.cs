@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Connections.Features;
+﻿using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Hosting;
 
 namespace Griffin.SDKServer
@@ -15,6 +15,25 @@ namespace Griffin.SDKServer
         public async Task InvokeAsync(HttpContext context)
         {
             HttpRequest request = context.Request;
+
+            // the tables with reopened events (ShiftedTables) are served from here; everything else goes to the official CDN
+            if (Griffin.Common.Utils.ShiftedTables.Version is { } shifted
+                && request.Path.StartsWithSegments($"/game_resources/data/{shifted}", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(Griffin.Common.Utils.ShiftedTables.ZipPath))
+            {
+                string file = Path.GetFileName(request.Path.Value ?? string.Empty);
+                if (file.Equals("bk_stc_pb.zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    await Results.File(Griffin.Common.Utils.ShiftedTables.ZipPath, "application/zip", enableRangeProcessing: true).ExecuteAsync(context);
+                    return;
+                }
+
+                if (file.Equals("bk_stc_pb_size.json", StringComparison.OrdinalIgnoreCase))
+                {
+                    await Results.Json(new { size = new FileInfo(Griffin.Common.Utils.ShiftedTables.ZipPath).Length }).ExecuteAsync(context);
+                    return;
+                }
+            }
 
             if (CdnProxy.Matches(request.Path))
             {

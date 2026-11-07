@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -73,6 +73,8 @@ ____ ____  ___ _____ _____ ___ _   _
                 var app = builder.Build();
 
                 app.Services.GetRequiredService<ITableService>().EnsureTables();
+                // events reopened from the GM tools: rebuild the shifted tables they need (ShiftedTables)
+                Griffin.GameServer.Services.EventOverrideService.Apply(app.Services.GetRequiredService<ITableService>());
 
                 // app.Services.GetService<ITableService>().DumpAllJsonToFile();
                 //List<GunData> gunData = app.Services.GetService<ITableService>().GetTable<GunData>();

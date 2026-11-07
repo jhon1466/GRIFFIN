@@ -91,7 +91,7 @@ namespace Griffin.SDKServer.Controllers
                     ResUrlCdn = resUrl,
                     ResUrlOss = resUrl,
                     AppUpdateUrl = "https://gf2.sunborngame.com/",
-                    StcVersion = StaticConfig.StcVersion,
+                    StcVersion = ShiftedTables.Version ?? StaticConfig.StcVersion,
                     ModifyHotfix = false,
                     AppVersionCompatible = [string.Empty],
                     IsAudit = false,

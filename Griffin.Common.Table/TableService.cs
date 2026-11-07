@@ -287,7 +287,9 @@ namespace Griffin.Common.Table
 
         private static string GetBytesFilePath(string tableName)
         {
-            return Path.Combine(ResourceDir, "Tables", $"{tableName}.bytes");
+            // while old events are reopened the server reads the same shifted copy it hands to the client (ShiftedTables)
+            string dir = Griffin.Common.Utils.ShiftedTables.Active ? Griffin.Common.Utils.ShiftedTables.Dir : Path.Combine(ResourceDir, "Tables");
+            return Path.Combine(dir, $"{tableName}.bytes");
         }
 
         /// <summary>The table version the official servers announce now, or null when they cannot be reached.</summary>

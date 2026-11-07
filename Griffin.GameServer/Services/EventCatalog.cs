@@ -1,4 +1,4 @@
-using Griffin.Common.Table;
+﻿using Griffin.Common.Table;
 
 namespace Griffin.GameServer.Services
 {
@@ -31,6 +31,9 @@ namespace Griffin.GameServer.Services
         public static List<Entry> All(ITableService tables, IEventOverrideService overrides)
         {
             IReadOnlyDictionary<uint, EventOverrideService.Window> opened = overrides.All();
+            // official dates from the official file: the server may be reading the shifted copy (ShiftedTables)
+            Dictionary<uint, (long Open, long Close)> official = Griffin.Common.Utils.ShiftedTables.OfficialActivityDates(
+                Path.Combine(Griffin.Common.Utils.StaticConfig.ResourceDir, "Tables"));
             return tables.GetTable<ActivityListData>()
                 .Where(r => TableFields.U(r, 1) != 0)
                 .Select(r =>
@@ -38,7 +41,7 @@ namespace Griffin.GameServer.Services
                     uint id = TableFields.U(r, 1);
                     opened.TryGetValue(id, out EventOverrideService.Window? w);
                     return new Entry(id, TableFields.U(r, 2), NameOf(tables, r), TableFields.S(r, 6),
-                        (long)TableFields.U64(r, 4), (long)TableFields.U64(r, 5), w?.Open, w?.Close);
+                        official.GetValueOrDefault(id).Open, official.GetValueOrDefault(id).Close, w?.Open, w?.Close);
                 })
                 .OrderBy(e => e.OfficialOpen).ThenBy(e => e.Id)
                 .ToList();

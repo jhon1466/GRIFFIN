@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Griffin.Common.Table;
 using Griffin.Common.Utils;
 
@@ -22,8 +22,28 @@ namespace Griffin.GameServer.Services
         (ulong Open, ulong Close) Effective(Google.Protobuf.IMessage row);
     }
 
-    public sealed class EventOverrideService : IEventOverrideService
+    public sealed class EventOverrideService(ITableService tableService) : IEventOverrideService
     {
+        /// <summary>
+        /// Rebuilds the shifted tables (ShiftedTables) for the opened events and makes the server read them. A closed event, or one
+        /// whose window has passed, is dropped. Called at start and after every change.
+        /// </summary>
+        public static void Apply(ITableService tables)
+        {
+            List<ShiftedTables.Shift> shifts;
+            lock (Gate)
+            {
+                long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                Dictionary<uint, Window> all = Load();
+                foreach (uint expired in all.Where(p => p.Value.Close < now).Select(p => p.Key).ToList())
+                    all.Remove(expired);
+                shifts = all.Select(p => new ShiftedTables.Shift(p.Key, p.Value.Open, p.Value.Close)).ToList();
+            }
+
+            ShiftedTables.Rebuild(Path.Combine(StaticConfig.ResourceDir, "Tables"), StaticConfig.StcVersion, shifts);
+            tables.ClearCache();
+        }
+
         public sealed class Window
         {
             public long Open { get; set; }
@@ -56,6 +76,7 @@ namespace Griffin.GameServer.Services
 
         private static void Save(Dictionary<uint, Window> all)
         {
+            cache = all;
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
             File.WriteAllText(FilePath, JsonSerializer.Serialize(all, new JsonSerializerOptions { WriteIndented = true }));
         }
@@ -68,8 +89,11 @@ namespace Griffin.GameServer.Services
 
         public Window Open(uint activityId, int days)
         {
+            // the event keeps at least its official length; "days" can make it longer
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Window window = new() { Open = now - 60, Close = now + (long)Math.Clamp(days, 1, 3650) * 86400 };
+            (long open, long close) = ShiftedTables.OfficialActivityDates(Path.Combine(StaticConfig.ResourceDir, "Tables")).GetValueOrDefault(activityId);
+            long length = close > open ? close - open : 0;
+            Window window = new() { Open = now - 60, Close = now - 60 + Math.Max(length, (long)Math.Clamp(days, 1, 3650) * 86400) };
             lock (Gate)
             {
                 Dictionary<uint, Window> all = Load();
@@ -77,6 +101,7 @@ namespace Griffin.GameServer.Services
                 Save(all);
             }
 
+            Apply(tableService);
             return window;
         }
 
@@ -88,19 +113,15 @@ namespace Griffin.GameServer.Services
                 if (!all.Remove(activityId))
                     return false;
                 Save(all);
-                return true;
             }
+
+            Apply(tableService);
+            return true;
         }
 
         public (ulong Open, ulong Close) Effective(Google.Protobuf.IMessage row)
         {
-            uint id = TableFields.U(row, 1);
-            lock (Gate)
-            {
-                if (Load().TryGetValue(id, out Window? window))
-                    return ((ulong)window.Open, (ulong)window.Close);
-            }
-
+            // the shifted tables already carry the new dates of a reopened event
             return (TableFields.U64(row, 4), TableFields.U64(row, 5));
         }
     }
