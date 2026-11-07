@@ -159,9 +159,13 @@ namespace Griffin.GameServer.Handlers
             // completes the pending event of the level for free (filling the bar first when needed): one level per call (A-55)
             if (gun.LoveLevel == 0)
                 gun.LoveLevel = 1;
+            uint beforeUpgrade = gun.LoveLevel;
             love.AddExperience(gun, Math.Max(0, Threshold(gun.LoveLevel) - gun.LoveExp));
             List<IMessage> upgrade = [];
             love.Advance(connection.Account.Uid, gun, upgrade);
+            // the levels reached this way pay their rewards too (before only gifts did: level 5 reached here gave neither the
+            // tickets nor the vow projection)
+            GrantLevelRewards(connection.Account.Uid, gun.GunId, beforeUpgrade, gun.LoveLevel, upgrade);
             gunService.Save();
             // client order of this message: field 2 = pending event, field 3 = level
             upgrade.Add(new SC_LoveUpgradeDirectly { GunId = gun.GunId, FDKIHAPHHPD = love.Pending(gun)?.Suffix ?? 0, JLHFICPMAEI = gun.LoveLevel });
