@@ -1,4 +1,4 @@
-namespace Griffin.Common.Utils
+﻿namespace Griffin.Common.Utils
 {
     public static class StaticConfig
     {
@@ -24,7 +24,20 @@ namespace Griffin.Common.Utils
         public static readonly string GameClientVersion = Env("GRIFFIN_GAME_CLIENT_VERSION", "4.0.5136");
 
         /// <summary>Version of the server-side table set (bk_stc_pb.zip). The client downloads this version from the CDN.</summary>
-        public static readonly string StcVersion = Env("GRIFFIN_STC_VERSION", "1201382");
+        /// <remarks>
+        /// At start the server follows the table version of the official servers (<see cref="OfficialStcVersionUrl"/>), so the client keeps the
+        /// tables it downloads from the official CDN instead of swapping them every time it switches between the official and the private
+        /// server. <see cref="PinnedStcVersion"/> is the fallback when the official service cannot be reached or its tables do not parse;
+        /// GRIFFIN_STC_VERSION pins a version and disables the follow.
+        /// </remarks>
+        public static string StcVersion { get; set; } = Env("GRIFFIN_STC_VERSION", "1201382");
+
+        public const string PinnedStcVersion = "1201382";
+
+        public static bool StcVersionPinnedByEnv => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GRIFFIN_STC_VERSION"));
+
+        public static string OfficialStcVersionUrl =>
+            $"https://gf2-zoneinfo.sunborngame.com/zone/client_res_v1?type_id=3&version={Uri.EscapeDataString(ClientVersion)}&game_channel_id=5";
 
         public const string ResUrlCdn = "https://gf2-cn.cdn.sunborngame.com/game_resources";
 

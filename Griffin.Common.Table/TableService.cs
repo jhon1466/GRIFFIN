@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Reflection;
 using Google.Protobuf;
@@ -32,6 +32,36 @@ namespace Griffin.Common.Table
 
         public void EnsureTables()
         {
+            string? official = StaticConfig.StcVersionPinnedByEnv ? null : OfficialStcVersion();
+            if (official is not null && official != StaticConfig.StcVersion)
+            {
+                string previous = StaticConfig.StcVersion;
+                StaticConfig.StcVersion = official;
+                try
+                {
+                    PrepareTables();
+                    var officialProblems = ValidateTables();
+                    if (officialProblems.Count == 0)
+                    {
+                        ClearCache();
+                        logger.LogInformation("Following the official table version {Version} (was {Previous})", official, previous);
+                        logger.LogInformation("All {Count} required tables validated (version {Version})", RequiredTables.Length, official);
+                        return;
+                    }
+
+                    foreach (var problem in officialProblems)
+                        logger.LogWarning("Official tables {Version}: {Problem}", official, problem);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "The official tables {Version} could not be prepared", official);
+                }
+
+                logger.LogWarning("Falling back to table version {Version}", previous);
+                StaticConfig.StcVersion = previous;
+            }
+
+            ClearCache();
             PrepareTables();
 
             var problems = ValidateTables();
@@ -258,6 +288,24 @@ namespace Griffin.Common.Table
         private static string GetBytesFilePath(string tableName)
         {
             return Path.Combine(ResourceDir, "Tables", $"{tableName}.bytes");
+        }
+
+        /// <summary>The table version the official servers announce now, or null when they cannot be reached.</summary>
+        private string? OfficialStcVersion()
+        {
+            try
+            {
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                string json = client.GetStringAsync(StaticConfig.OfficialStcVersionUrl).GetAwaiter().GetResult();
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                string? stc = doc.RootElement.GetProperty("data").GetProperty("StcVersion").GetString();
+                return string.IsNullOrWhiteSpace(stc) ? null : stc.Trim();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("The official table version could not be read ({Message}); keeping {Version}", ex.Message, StaticConfig.StcVersion);
+                return null;
+            }
         }
 
         private static byte[] FetchTables(string url)
