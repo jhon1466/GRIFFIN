@@ -5,7 +5,7 @@ using Griffin.Common.Protocol;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class DarkZoneHandler(Griffin.GameServer.Services.IModProgressService modProgress, Griffin.GameServer.Services.IAccountStateService accountState) : DarkZoneHandlerBase
+    public sealed class DarkZoneHandler(Griffin.GameServer.Services.IModProgressService modProgress, Griffin.GameServer.Services.IAccountStateService accountState, Griffin.Common.Table.ITableService tableService) : DarkZoneHandlerBase
     {
         /// <summary>The menus of the Dark Zone kept per account: talents, weekly difficulty, egg stages opened and quest groups claimed.</summary>
         public sealed class DzState
@@ -14,6 +14,144 @@ namespace Griffin.GameServer.Handlers
             public int Difficulty { get; set; } = (int)HBMBNIHMKLI.Types.FHOMGAKNIAF.Easy;
             public List<uint> EggStages { get; set; } = [];
             public List<uint> QuestsClaimed { get; set; } = [];
+            public Dictionary<uint, LineUpState> LineUps { get; set; } = [];
+            public List<uint> Squad { get; set; } = [];
+            public List<ContractState> Contracts { get; set; } = [];
+            public uint StorageBuyTimes { get; set; }
+        }
+
+        public sealed class LineUpState
+        {
+            public List<uint> Guns { get; set; } = [];
+            public uint Leader { get; set; }
+        }
+
+        /// <summary>A doll sent on a contract (DarkzoneContractData: 3 = seconds it lasts).</summary>
+        public sealed class ContractState
+        {
+            public uint Gun { get; set; }
+            public uint Contract { get; set; }
+            public long Start { get; set; }
+            public long End { get; set; }
+        }
+
+        private void SaveDz(uint uid, Action<DzState> change)
+        {
+            lock (Griffin.GameServer.Services.AccountLock.For(uid))
+            {
+                DzState state = Dz(uid);
+                change(state);
+                accountState.Set(uid, DzKey, state);
+            }
+        }
+
+        private EKGNJFNONNB ContractInfo(DzState state)
+        {
+            EKGNJFNONNB info = new();
+            info.LBGCCEHCNHD.AddRange(state.Contracts.Select(c => new AJHNKKCHBBB { GunId = c.Gun, JIDABKEPOOE = c.Contract, StartTime = c.Start, FEMJMHOADOI = c.End }));
+            return info;
+        }
+
+        public override void HandleDarkZoneLineUps(CS_DarkZoneLineUps request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            DzState state = Dz(connection.Account.Uid);
+            SC_DarkZoneLineUps reply = new();
+            uint max = state.LineUps.Count == 0 ? 0 : state.LineUps.Keys.Max();
+            for (uint i = 0; i <= max && state.LineUps.Count > 0; i++)
+            {
+                LineUpState line = state.LineUps.GetValueOrDefault(i) ?? new LineUpState();
+                LIJEDJGNKBD.Types.LineUp proto = new() { Leader = line.Leader };
+                proto.Guns.AddRange(line.Guns);
+                reply.LineUp.Add(proto);
+            }
+            connection.Send(reply);
+        }
+
+        public override void HandleDarkZoneLineUp(CS_DarkZoneLineUp request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            SaveDz(connection.Account.Uid, s => s.LineUps[request.Idx] = new LineUpState { Guns = [.. request.Guns], Leader = request.Leader });
+            connection.Send(new SC_DarkZoneLineUp());
+        }
+
+        public override void HandleDarkZoneSetLineUp(CS_DarkZoneSetLineUp request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            SaveDz(connection.Account.Uid, s => s.Squad = [.. request.Guns]);
+            SC_DarkZoneSetLineUp reply = new();
+            reply.Guns.AddRange(request.Guns);
+            connection.Send(reply);
+        }
+
+        public override void HandleDarkZoneGetContract(CS_DarkZoneGetContract request, Connection connection)
+        {
+            if (connection.Account is not null)
+                connection.Send(new SC_DarkZoneGetContract { Info = ContractInfo(Dz(connection.Account.Uid)) });
+        }
+
+        public override void HandleDarkZoneSetContract(CS_DarkZoneSetContract request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            Dictionary<uint, long> length = tableService.GetTable<Griffin.Common.Table.DarkzoneContractData>()
+                .ToDictionary(r => Griffin.GameServer.Services.TableFields.U(r, 1), r => (long)Griffin.GameServer.Services.TableFields.U(r, 3));
+            DzState after = new();
+            SaveDz(connection.Account.Uid, s =>
+            {
+                foreach (CS_DarkZoneSetContract.Types.HFDNLIKKFED pick in request.AEIMHFHKMDH)
+                {
+                    s.Contracts.RemoveAll(c => c.Gun == pick.GunId);
+                    s.Contracts.Add(new ContractState { Gun = pick.GunId, Contract = pick.JIDABKEPOOE, Start = now, End = now + length.GetValueOrDefault(pick.JIDABKEPOOE, 54000) });
+                }
+                after = s;
+            });
+            connection.Send(new SC_DarkZoneSetContract { Info = ContractInfo(after) });
+        }
+
+        public override void HandleDarkZoneEndContract(CS_DarkZoneEndContract request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            HashSet<uint> guns = request.AEIMHFHKMDH.Select(p => p.GunId).ToHashSet();
+            SaveDz(connection.Account.Uid, s => s.Contracts.RemoveAll(c => guns.Contains(c.Gun)));
+            SC_DarkZoneEndContract reply = new();
+            reply.AEIMHFHKMDH.AddRange(request.AEIMHFHKMDH);
+            connection.Send(reply);
+        }
+
+        public override void HandleDarkZoneBuyStorage(CS_DarkZoneBuyStorage request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint times = 0;
+            SaveDz(connection.Account.Uid, s => { s.StorageBuyTimes += Math.Max(1, request.Num); times = s.StorageBuyTimes; });
+            connection.Send(new SC_DarkZoneBuyStorage { StorageBuyTimes = times });
+        }
+
+        public override void HandleDarkZoneStorageMove(CS_DarkZoneStorageMove request, Connection connection)
+        {
+            if (connection.Account is not null)
+                connection.Send(new SC_DarkZoneStorageMove());
+        }
+
+        public override void HandleDarkZoneEquip(CS_DarkZoneEquip request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            SC_DarkZoneEquip reply = new();
+            reply.Entities.AddRange(request.Entities);
+            connection.Send(reply);
+        }
+
+        public override void HandleDarkZoneSell(CS_DarkZoneSell request, Connection connection)
+        {
+            if (connection.Account is not null)
+                connection.Send(new SC_DarkZoneSell());
         }
 
         private const string DzKey = "darkzone.menus";
