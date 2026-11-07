@@ -5,7 +5,7 @@ using Griffin.Common.Protocol;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class DarkZoneHandler(Griffin.GameServer.Services.IModProgressService modProgress, Griffin.GameServer.Services.IAccountStateService accountState, Griffin.Common.Table.ITableService tableService) : DarkZoneHandlerBase
+    public sealed class DarkZoneHandler(Griffin.GameServer.Services.IModProgressService modProgress, Griffin.GameServer.Services.IAccountStateService accountState, Griffin.Common.Table.ITableService tableService, Griffin.GameServer.Services.IItemUseService itemUse, Griffin.GameServer.Services.IRewardService rewardService) : DarkZoneHandlerBase
     {
         /// <summary>The menus of the Dark Zone kept per account: talents, weekly difficulty, egg stages opened and quest groups claimed.</summary>
         public sealed class DzState
@@ -113,15 +113,51 @@ namespace Griffin.GameServer.Handlers
             connection.Send(new SC_DarkZoneSetContract { Info = ContractInfo(after) });
         }
 
+        /// <summary>
+        /// Ends contracts. A finished one pays its loot: DarkzoneContractData column 5 lists "package:rolls:weight"; one package is chosen
+        /// by weight and rolled that many times (DropPackageData). A contract ended early pays nothing.
+        /// </summary>
         public override void HandleDarkZoneEndContract(CS_DarkZoneEndContract request, Connection connection)
         {
             if (connection.Account is null)
                 return;
+            uint uid = connection.Account.Uid;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             HashSet<uint> guns = request.AEIMHFHKMDH.Select(p => p.GunId).ToHashSet();
-            SaveDz(connection.Account.Uid, s => s.Contracts.RemoveAll(c => guns.Contains(c.Gun)));
+            List<ContractState> ended = [];
+            SaveDz(uid, s =>
+            {
+                ended = s.Contracts.Where(c => guns.Contains(c.Gun)).ToList();
+                s.Contracts.RemoveAll(c => guns.Contains(c.Gun));
+            });
+
+            List<Google.Protobuf.IMessage> messages = [];
             SC_DarkZoneEndContract reply = new();
             reply.AEIMHFHKMDH.AddRange(request.AEIMHFHKMDH);
-            connection.Send(reply);
+            foreach (ContractState contract in ended.Where(c => now >= c.End))
+            {
+                Google.Protobuf.IMessage? row = tableService.GetTable<Griffin.Common.Table.DarkzoneContractData>().FirstOrDefault(r => Griffin.GameServer.Services.TableFields.U(r, 1) == contract.Contract);
+                List<(uint Package, int Rolls, int Weight)> loot = (row is null ? "" : Griffin.GameServer.Services.TableFields.S(row, 5))
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(e => e.Split(':'))
+                    .Where(p => p.Length == 3 && uint.TryParse(p[0], out _) && int.TryParse(p[1], out _) && int.TryParse(p[2], out _))
+                    .Select(p => (uint.Parse(p[0]), int.Parse(p[1]), int.Parse(p[2])))
+                    .ToList();
+                int total = loot.Sum(l => Math.Max(0, l.Weight));
+                if (total <= 0)
+                    continue;
+                int roll = Random.Shared.Next(total);
+                (uint Package, int Rolls, int Weight) chosen = loot.First(l => (roll -= Math.Max(0, l.Weight)) < 0);
+                for (int i = 0; i < chosen.Rolls; i++)
+                    foreach ((uint item, int count) in itemUse.RollPackage(chosen.Package))
+                    {
+                        rewardService.Grant(uid, item, count, messages);
+                        reply.Rewards[item] = reply.Rewards.GetValueOrDefault(item) + (uint)count;
+                    }
+            }
+
+            messages.Add(reply);
+            connection.SendAutoEncrypted(messages.ToArray());
         }
 
         public override void HandleDarkZoneBuyStorage(CS_DarkZoneBuyStorage request, Connection connection)
