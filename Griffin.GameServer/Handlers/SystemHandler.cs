@@ -15,7 +15,10 @@ namespace Griffin.GameServer.Handlers
         /// stack overflow; the cause was the control room's timestamps being sent in the real clock instead of the client's (see
         /// ControlRoomHandler.ToGame), so it is open again. Put an id here to answer its button with "function not open".
         /// </summary>
-        private static readonly HashSet<uint> NeverOpen = [];
+        /// 14000 = PvP (NrtPvp): a local server has no opponents and no PvP; reported open, the AFK assistant's PvP row asked for the
+        /// PvP defence team, which the client only builds after entering the PvP screen, and froze the panel. Locked, it shows its
+        /// unlock requirement instead.
+        private static readonly HashSet<uint> NeverOpen = [14000];
 
         public override void HandleSystemUnlocks(CS_SystemUnlocks request, Connection connection)
         {
