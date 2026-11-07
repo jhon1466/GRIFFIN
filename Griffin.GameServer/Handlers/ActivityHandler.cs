@@ -650,6 +650,106 @@ namespace Griffin.GameServer.Handlers
                 connection.Send(new SC_ActivityCheckInMessageOver { EventId = request.EventId });
         }
 
+        /// <summary>
+        /// 3D wish board (ActivityThreeDimensionsAmo): AmoActivityMainclass3dData (1 = event, 3 = its boards, 8 = final reward) and
+        /// AmoActivitySubclass3dData (1 = board, 10 = its reward). The state is, per board, the nodes lit and whether its reward was
+        /// taken (field 2 = final reward taken). ASSUMPTION A-197: the map key and the reward id of the requests are the board id; id 0
+        /// asks for the final reward, given once every board was rewarded.
+        /// </summary>
+        public sealed class Amo3dState
+        {
+            public Dictionary<uint, List<uint>> Nodes { get; set; } = [];
+            public List<uint> Rewarded { get; set; } = [];
+            public bool Final { get; set; }
+        }
+
+        private static string Amo3dKey(uint activityId) => $"activity.amo3d.{activityId}";
+
+        private SC_ActivityThreeDimensionsAmoGetInfo Amo3dInfo(uint activityId, Amo3dState state)
+        {
+            JOBMDFAEAEE info = new() { LFDGEHMLOHM = state.Final };
+            IReadOnlyList<uint> boards = tableService.GetTable<AmoActivityMainclass3dData>().FirstOrDefault(r => TableFields.U(r, 1) == activityId) is { } main
+                ? TableFields.List(main, 3) : [];
+            foreach (uint board in boards.Union(state.Nodes.Keys))
+            {
+                JOBMDFAEAEE.Types.FFNGBLOKAAG entry = new() { Reward = state.Rewarded.Contains(board) };
+                entry.ICBFKPLLCLF.AddRange(state.Nodes.GetValueOrDefault(board) ?? []);
+                info.ICGIMHODGIE[board] = entry;
+            }
+
+            return new SC_ActivityThreeDimensionsAmoGetInfo { IKDMNOBMIFE = activityId, OFLLFNJOIOA = info };
+        }
+
+        public void HandleActivityThreeDimensionsAmoGetInfo(CS_ActivityThreeDimensionsAmoGetInfo request, Connection connection)
+        {
+            if (connection.Account is not null)
+                connection.Send(Amo3dInfo(request.IKDMNOBMIFE, accountState.Get<Amo3dState>(connection.Account.Uid, Amo3dKey(request.IKDMNOBMIFE)) ?? new Amo3dState()));
+        }
+
+        public override void HandleActivityThreeDimensionsAmoNodeCommit(CS_ActivityThreeDimensionsAmoNodeCommit request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                Amo3dState state = accountState.Get<Amo3dState>(uid, Amo3dKey(request.IKDMNOBMIFE)) ?? new Amo3dState();
+                List<uint> nodes = state.Nodes.GetValueOrDefault(request.OMIHLNBPGHG) ?? [];
+                if (!nodes.Contains(request.JBEONCNOEEA))
+                    nodes.Add(request.JBEONCNOEEA);
+                state.Nodes[request.OMIHLNBPGHG] = nodes;
+                accountState.Set(uid, Amo3dKey(request.IKDMNOBMIFE), state);
+            }
+
+            connection.Send(new SC_ActivityThreeDimensionsAmoNodeCommit { IKDMNOBMIFE = request.IKDMNOBMIFE, OMIHLNBPGHG = request.OMIHLNBPGHG, JBEONCNOEEA = request.JBEONCNOEEA });
+        }
+
+        public void ClaimAmo3dFinal(uint uid, uint activityId, out List<IMessage> messages)
+        {
+            messages = [];
+            lock (AccountLock.For(uid))
+            {
+                Amo3dState state = accountState.Get<Amo3dState>(uid, Amo3dKey(activityId)) ?? new Amo3dState();
+                if (!state.Final && tableService.GetTable<AmoActivityMainclass3dData>().FirstOrDefault(r => TableFields.U(r, 1) == activityId) is { } main)
+                {
+                    Grant(uid, TableFields.Map(main, 8).Select(p => new KeyValuePair<uint, uint>(p.Key, p.Value)), messages);
+                    state.Final = true;
+                    accountState.Set(uid, Amo3dKey(activityId), state);
+                }
+            }
+        }
+
+        public void HandleActivityThreeDimensionsAmoGetReward(CS_ActivityThreeDimensionsAmoGetReward request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            lock (AccountLock.For(uid))
+            {
+                Amo3dState state = accountState.Get<Amo3dState>(uid, Amo3dKey(request.IKDMNOBMIFE)) ?? new Amo3dState();
+                if (request.KNMAPOCKMCJ == 0)
+                {
+                    if (!state.Final && tableService.GetTable<AmoActivityMainclass3dData>().FirstOrDefault(r => TableFields.U(r, 1) == request.IKDMNOBMIFE) is { } main)
+                    {
+                        Grant(uid, TableFields.Map(main, 8).Select(p => new KeyValuePair<uint, uint>(p.Key, p.Value)), messages);
+                        state.Final = true;
+                    }
+                }
+                else if (!state.Rewarded.Contains(request.KNMAPOCKMCJ)
+                    && tableService.GetTable<AmoActivitySubclass3dData>().FirstOrDefault(r => TableFields.U(r, 1) == request.KNMAPOCKMCJ) is { } board)
+                {
+                    Grant(uid, TableFields.Map(board, 10).Select(p => new KeyValuePair<uint, uint>(p.Key, p.Value)), messages);
+                    state.Rewarded.Add(request.KNMAPOCKMCJ);
+                }
+
+                accountState.Set(uid, Amo3dKey(request.IKDMNOBMIFE), state);
+            }
+
+            messages.Add(new SC_ActivityThreeDimensionsAmoGetReward { IKDMNOBMIFE = request.IKDMNOBMIFE, KNMAPOCKMCJ = request.KNMAPOCKMCJ });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
         public override void HandleActivityCheckIn(CS_ActivityCheckIn request, Connection connection)
         {
             if (connection.Account is null)
