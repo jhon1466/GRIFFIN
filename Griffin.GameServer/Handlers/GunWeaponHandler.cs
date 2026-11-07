@@ -740,7 +740,10 @@ namespace Griffin.GameServer.Handlers
             if (request.GunId != 0)
             {
                 WeaponSkinData? skin = tableService.GetTable<WeaponSkinData>()
-                    .FirstOrDefault(candidate => candidate.Id == request.GunId && candidate.WeaponId == weapon.WeaponId);
+                    // Weapon-specific skins name their weapon; generic ones (e.g. 4133135, 4133235) have no weapon_id and the client
+                    // offers them for every weapon of their category. Requiring an exact weapon refused them: the skin looked equipped
+                    // in the menu but was never saved.
+                    .FirstOrDefault(candidate => candidate.Id == request.GunId && (candidate.WeaponId == weapon.WeaponId || candidate.WeaponId == 0));
                 if (skin is null)
                 {
                     connection.Refuse(MsgId.MsgCsReplaceGunWeaponSkin, HNINDAOJCKP.GunConfigNotExist);

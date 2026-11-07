@@ -21,7 +21,8 @@ namespace Griffin.GameServer.Services
     {
         const uint GoldResource = 2;
         const uint LockFlag = 1;
-        const uint MaxBreak = 5;
+        // WeaponBreakData lists break_num 0..6 for every weapon: the last calibration is 6 (5 stopped the player one short).
+        const uint MaxBreak = 6;
 
         /// <summary>Why the last refused call was refused; scoped per request.</summary>
         Common.Proto.HNINDAOJCKP LastError { get; }
