@@ -236,6 +236,9 @@ namespace Griffin.GameServer.Handlers
                 }
 
                 Gun reported = gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId), cooking.FoodBytes(connection.Account.Uid, gun.GunId));
+                LoveKeySlots.Slots loveKeys = LoveKeySlots.Of(accountState, connection.Account.Uid, gun.GunId);
+                reported.INKGHGACOKA.AddRange(loveKeys.Stc);
+                reported.HMKBFECHGJD.AddRange(loveKeys.Uid);
                 // the parts saved for the costume the character wears win over the copy kept in the character row (A-103: the preparation room "forgot" them at login)
                 if (savedParts.TryGetValue(PartsKey(reported.Costume, BAGPCFGACEF.Types.GCBADMLINMA.Barrack), out uint savedBarrack))
                     reported.CostumeParts = savedBarrack;
@@ -1143,54 +1146,64 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            // Affinity keys (契合键) go into the same three shared slots as the public keys; the request carries the slot (0-based,
-            // omitted when 0) and the key uid. This used to only echo the slots, so the key was never kept on the doll.
-            GunEntity[] guns = gunService.GetPlayerGuns(connection.Account.Uid);
-            (ulong Id, uint StcId) wanted = PublicTalentHandler.ItemsOf(accountState, connection.Account.Uid).FirstOrDefault(i => i.Id == request.PublicTalentSkillItemUid);
-            if ((request.PublicTalentSkillItemUid != 0 && wanted.Id == 0) || request.Slot > 2)
+            // Affinity keys (契合键) have their own slots on the doll (Gun fields 59/60, LoveKeySlots); the request carries the slot
+            // (0-based, omitted when 0) and the key uid (0 = take it off). They were only echoed before, so nothing was kept.
+            uint uid = connection.Account.Uid;
+            (ulong Id, uint StcId) wanted = PublicTalentHandler.ItemsOf(accountState, uid).FirstOrDefault(i => i.Id == request.PublicTalentSkillItemUid);
+            if ((request.PublicTalentSkillItemUid != 0 && wanted.Id == 0) || request.Slot >= LoveKeySlots.SlotCount)
             {
                 connection.Refuse(MsgId.MsgCsGunLoveTalentSkillItemBelong, HNINDAOJCKP.ClientInputInvalid);
                 return;
             }
 
-            int index = (int)request.Slot;
-            ulong occupant = gun.PublicTalentSkillItemsUid.Length > index ? gun.PublicTalentSkillItemsUid[index] : 0;
-            GunEntity? previousHolder = request.PublicTalentSkillItemUid == 0 ? null
-                : guns.FirstOrDefault(g => g.PublicTalentSkillItemsUid.Contains(request.PublicTalentSkillItemUid));
-
-            static void Set(GunEntity target, int slot, uint stcId, ulong uid)
+            SC_GunLoveTalentSkillItemBelong reply = new();
+            lock (AccountLock.For(uid))
             {
-                uint[] items = new uint[Math.Max(3, target.PublicTalentSkillItems.Length)];
-                ulong[] uids = new ulong[Math.Max(3, target.PublicTalentSkillItemsUid.Length)];
-                target.PublicTalentSkillItems.CopyTo(items, 0);
-                target.PublicTalentSkillItemsUid.CopyTo(uids, 0);
-                items[slot] = stcId;
-                uids[slot] = uid;
-                target.PublicTalentSkillItems = items;
-                target.PublicTalentSkillItemsUid = uids;
+                Dictionary<string, LoveKeySlots.Slots> all = LoveKeySlots.All(accountState, uid);
+                LoveKeySlots.Slots mine = LoveKeySlots.Of(accountState, uid, gun.GunId);
+                int index = (int)request.Slot;
+                ulong occupant = mine.Uid[index];
+
+                uint previousGun = LoveKeySlots.HolderOf(accountState, uid, request.PublicTalentSkillItemUid);
+                LoveKeySlots.Slots? previous = null;
+                if (previousGun != 0 && previousGun != gun.GunId)
+                {
+                    previous = LoveKeySlots.Of(accountState, uid, previousGun);
+                    int at = Array.IndexOf(previous.Uid, request.PublicTalentSkillItemUid);
+                    previous.Stc[at] = 0;
+                    previous.Uid[at] = 0;
+                    all[previousGun.ToString()] = previous;
+                }
+                else if (previousGun == gun.GunId)
+                {
+                    int at = Array.IndexOf(mine.Uid, request.PublicTalentSkillItemUid);
+                    mine.Stc[at] = 0;
+                    mine.Uid[at] = 0;
+                }
+
+                mine.Stc[index] = wanted.StcId;
+                mine.Uid[index] = wanted.Id;
+                all[gun.GunId.ToString()] = mine;
+                LoveKeySlots.Save(accountState, uid, all);
+
+                static GunAndSkills Describe(uint gunId, LoveKeySlots.Slots slots)
+                {
+                    GunAndSkills result = new() { GunId = gunId };
+                    result.PublicSkillItem.AddRange(slots.Stc);
+                    result.PublicSkillItemUid.AddRange(slots.Uid);
+                    return result;
+                }
+
+                reply.Gun1 = Describe(gun.GunId, mine);
+                if (previous is not null)
+                    reply.Gun2 = Describe(previousGun, previous);
+                if (wanted.Id != 0)
+                    reply.Public1 = PublicTalentHandler.ToProto(wanted.Id, wanted.StcId, gun.GunId);
+                if (occupant != 0 && occupant != request.PublicTalentSkillItemUid
+                    && PublicTalentHandler.ItemsOf(accountState, uid).FirstOrDefault(i => i.Id == occupant) is { Id: not 0 } displaced)
+                    reply.Public2 = PublicTalentHandler.ToProto(displaced.Id, displaced.StcId, 0);
             }
 
-            if (previousHolder is not null)
-                Set(previousHolder, Array.IndexOf(previousHolder.PublicTalentSkillItemsUid, request.PublicTalentSkillItemUid), 0, 0);
-            Set(gun, index, wanted.StcId, wanted.Id);
-            gunService.Save();
-
-            static GunAndSkills Describe(GunEntity target)
-            {
-                GunAndSkills result = new() { GunId = target.GunId };
-                result.PublicSkillItem.AddRange(target.PublicTalentSkillItems);
-                result.PublicSkillItemUid.AddRange(target.PublicTalentSkillItemsUid);
-                return result;
-            }
-
-            SC_GunLoveTalentSkillItemBelong reply = new() { Gun1 = Describe(gun) };
-            if (previousHolder is not null && previousHolder.GunId != gun.GunId)
-                reply.Gun2 = Describe(previousHolder);
-            if (wanted.Id != 0)
-                reply.Public1 = PublicTalentHandler.ToProto(wanted.Id, wanted.StcId, gun.GunId);
-            if (occupant != 0 && occupant != request.PublicTalentSkillItemUid
-                && PublicTalentHandler.ItemsOf(accountState, connection.Account.Uid).FirstOrDefault(i => i.Id == occupant) is { Id: not 0 } displaced)
-                reply.Public2 = PublicTalentHandler.ToProto(displaced.Id, displaced.StcId, 0);
             connection.Send(reply);
         }
 

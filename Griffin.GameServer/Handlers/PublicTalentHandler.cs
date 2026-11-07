@@ -40,6 +40,48 @@ namespace Griffin.GameServer.Handlers
         public static IReadOnlyList<(ulong Id, uint StcId)> ItemsOf(IAccountStateService state, uint uid) =>
             [.. Items, .. (state.Get<List<ExtraItem>>(uid, ExtraKey) ?? []).Select(e => (e.Id, e.StcId))];
 
+        /// <summary>
+        /// An earlier build put equipped affinity keys (TalentKeyData type 4, 911xxx) into the three shared slots; move each one to the
+        /// affinity-key slots of the doll so the client finds it where it looks (Gun fields 59/60).
+        /// </summary>
+        private void MoveAffinityKeysOutOfSharedSlots(uint uid)
+        {
+            lock (AccountLock.For(uid))
+            {
+                Dictionary<string, LoveKeySlots.Slots> all = LoveKeySlots.All(accountState, uid);
+                bool changed = false;
+                foreach (Database.Entities.GunEntity gun in gunService.GetPlayerGuns(uid))
+                    for (int i = 0; i < gun.PublicTalentSkillItems.Length && i < gun.PublicTalentSkillItemsUid.Length; i++)
+                    {
+                        uint stc = gun.PublicTalentSkillItems[i];
+                        if (stc < LoveBackfillService.AffinityKeyBase + 1000 || stc >= LoveBackfillService.AffinityKeyBase + 2000)
+                            continue;
+                        LoveKeySlots.Slots slots = LoveKeySlots.Of(accountState, uid, gun.GunId);
+                        int free = Array.IndexOf(slots.Uid, 0UL);
+                        if (free >= 0 && !slots.Uid.Contains(gun.PublicTalentSkillItemsUid[i]))
+                        {
+                            slots.Stc[free] = stc;
+                            slots.Uid[free] = gun.PublicTalentSkillItemsUid[i];
+                            all[gun.GunId.ToString()] = slots;
+                        }
+
+                        uint[] items = (uint[])gun.PublicTalentSkillItems.Clone();
+                        ulong[] uids = (ulong[])gun.PublicTalentSkillItemsUid.Clone();
+                        items[i] = 0;
+                        uids[i] = 0;
+                        gun.PublicTalentSkillItems = items;
+                        gun.PublicTalentSkillItemsUid = uids;
+                        changed = true;
+                    }
+
+                if (changed)
+                {
+                    LoveKeySlots.Save(accountState, uid, all);
+                    gunService.Save();
+                }
+            }
+        }
+
         // The names of this message come from an older build: the 4.0.5136 client (NEHFNMNLEHL) reads field 4 as the AFFIXES of the key (four 16-bit pairs)
         // and field 5 as its lock (A-75).
         public static PublicSkillItem ToProto(ulong id, uint stcId, uint gunId, ulong affixes = 0) =>
@@ -49,11 +91,15 @@ namespace Griffin.GameServer.Handlers
         {
             // dolls already at love level 5+ get their affinity key (契合键) if the server never gave it
             if (connection.Account is not null)
+            {
                 loveBackfill.BackfillAffinityKeys(connection.Account.Uid);
+                MoveAffinityKeysOutOfSharedSlots(connection.Account.Uid);
+            }
             Database.Entities.GunEntity[] guns = connection.Account is null ? [] : gunService.GetPlayerGuns(connection.Account.Uid);
             SC_PublicTalentSkillItems reply = new();
             foreach ((ulong id, uint stc) in connection.Account is null ? Items : ItemsOf(accountState, connection.Account.Uid))
-                reply.PublicSkillItems.Add(ToProto(id, stc, guns.FirstOrDefault(g => g.PublicTalentSkillItemsUid.Contains(id))?.GunId ?? 0,
+                reply.PublicSkillItems.Add(ToProto(id, stc, guns.FirstOrDefault(g => g.PublicTalentSkillItemsUid.Contains(id))?.GunId
+                    ?? (connection.Account is null ? 0 : LoveKeySlots.HolderOf(accountState, connection.Account.Uid, id)),
                     connection.Account is null ? 0 : AffixesOf(accountState, connection.Account.Uid, id)));
             connection.Send(reply);
         }
