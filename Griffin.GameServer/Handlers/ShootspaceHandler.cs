@@ -1,6 +1,7 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.GameServer.Services;
+using Griffin.GameServer.Extensions;
 
 namespace Griffin.GameServer.Handlers
 {
@@ -8,10 +9,10 @@ namespace Griffin.GameServer.Handlers
     /// 火线突围 (Shootspace): the auto-shooter mini game of the event. There was no handler, so Info came back empty and Start was
     /// refused with ShootspaceNotOpen (-13880, "undefined:13880" in the client). The client (OPOMAFGLNKP) only needs Start echoed to
     /// launch the run; Info carries per mode the plays (field 1) and best score (field 2), the learned upgrades and the experience;
-    /// Finish reports the run (field 3 experience, 4 best score, 5 this score, 8 plays). ASSUMPTION A-181: experience grows by the
-    /// score of each run and upgrades are kept without a server-side cost check (the client checks its own requirements).
+    /// Finish reports the run (field 3 experience, 4 best score, 5 this score, 8 plays). Upgrades cost StspTalentData column 7 (item 176022);
+    /// that item comes from the items the client reports at the end of each run.
     /// </summary>
-    public sealed class ShootspaceHandler(IAccountStateService accountState) : ShootspaceHandlerBase
+    public sealed class ShootspaceHandler(IAccountStateService accountState, IRewardService rewardService, IItemUseService itemUse, Griffin.Common.Table.ITableService tableService) : ShootspaceHandlerBase
     {
         public sealed class Record
         {
@@ -76,9 +77,16 @@ namespace Griffin.GameServer.Handlers
                     Score = request.Score,
                     Times = record.Times,
                 };
+                // the items the run earned (field 5, e.g. 176022 突围经验 that buys the upgrades) are granted for real
+                List<Google.Protobuf.IMessage> messages = [];
                 foreach ((uint key, uint value) in request.DPIODNMOADH)
+                {
                     reply.DPIODNMOADH[key] = value;
-                connection.Send(reply);
+                    if (key != 0 && value > 0)
+                        rewardService.Grant(uid, key, (int)Math.Min(value, int.MaxValue), messages);
+                }
+                messages.Add(reply);
+                connection.SendAutoEncrypted(messages.ToArray());
             }
         }
 
@@ -91,13 +99,32 @@ namespace Griffin.GameServer.Handlers
             lock (AccountLock.For(uid))
             {
                 State state = Load(uid, request.ThemeId);
+                List<Google.Protobuf.IMessage> messages = [];
                 if (request.TalentId != 0 && !state.Talents.Contains(request.TalentId))
+                {
+                    // StspTalentData column 7 = price (item -> amount), e.g. 176022 x 180 for talent 10
+                    Google.Protobuf.IMessage? row = tableService.GetTable<Griffin.Common.Table.StspTalentData>().FirstOrDefault(r => r.Id == request.TalentId);
+                    if (row is null)
+                    {
+                        connection.Refuse(Griffin.Common.Protocol.MsgId.MsgCsShootspaceGetTalent, HNINDAOJCKP.ClientInputInvalid);
+                        return;
+                    }
+
+                    Dictionary<uint, int> cost = TableFields.Map(row, 7).Where(p => p.Value > 0).ToDictionary(p => p.Key, p => (int)p.Value);
+                    if (cost.Count > 0 && !itemUse.Spend(uid, cost, messages))
+                    {
+                        connection.Refuse(Griffin.Common.Protocol.MsgId.MsgCsShootspaceGetTalent, HNINDAOJCKP.ItemNotEnough);
+                        return;
+                    }
+
                     state.Talents.Add(request.TalentId);
-                accountState.Set(uid, Key(request.ThemeId), state);
+                    accountState.Set(uid, Key(request.ThemeId), state);
+                }
 
                 SC_ShootspaceGetTalent reply = new() { ThemeId = request.ThemeId };
                 reply.IMOHEBMLOBE.AddRange(state.Talents);
-                connection.Send(reply);
+                messages.Add(reply);
+                connection.SendAutoEncrypted(messages.ToArray());
             }
         }
     }
