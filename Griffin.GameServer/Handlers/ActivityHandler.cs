@@ -1,4 +1,4 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.GameServer.Extensions;
 using Griffin.Common.Protocol;
@@ -8,7 +8,7 @@ using Google.Protobuf;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService) : ActivityHandlerBase
+    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService, IEventOverrideService eventOverrides) : ActivityHandlerBase
     {
         public override void HandlePlanActivity(CS_PlanActivity request, Connection connection)
         {
@@ -37,21 +37,25 @@ namespace Griffin.GameServer.Handlers
             }
             else if (request.Type == 6)
             {
-                List<ActivityListData> active = tableService.GetTable<ActivityListData>()
-                    .Where(row => TableFields.U64(row, 4) == 0 || TableFields.U64(row, 4) <= now)
-                    .Where(row => TableFields.U64(row, 5) == 0 || now <= TableFields.U64(row, 5))
-                    .OrderBy(row => TableFields.U(row, 1))
+                // the official dates, or the window of an event opened by hand from the GM tools (EventOverrideService)
+                List<(ActivityListData Row, ulong Open, ulong Close)> rows = tableService.GetTable<ActivityListData>()
+                    .Select(row => { (ulong open, ulong close) = eventOverrides.Effective(row); return (row, open, close); })
                     .ToList();
-                List<ActivityListData> upcoming = tableService.GetTable<ActivityListData>()
-                    .Where(row => TableFields.U64(row, 4) > now)
-                    .OrderBy(row => TableFields.U64(row, 4))
-                    .ThenBy(row => TableFields.U(row, 1))
+                List<(ActivityListData Row, ulong Open, ulong Close)> active = rows
+                    .Where(r => r.Open == 0 || r.Open <= now)
+                    .Where(r => r.Close == 0 || now <= r.Close)
+                    .OrderBy(r => TableFields.U(r.Row, 1))
+                    .ToList();
+                List<(ActivityListData Row, ulong Open, ulong Close)> upcoming = rows
+                    .Where(r => r.Open > now)
+                    .OrderBy(r => r.Open)
+                    .ThenBy(r => TableFields.U(r.Row, 1))
                     .ToList();
 
-                response.ActiveIds.AddRange(active.Select(row => TableFields.U(row, 1)));
-                response.NextIds.AddRange(upcoming.Select(row => TableFields.U(row, 1)));
-                response.ActivityPlan.AddRange(active.Select(ToActivityPlan));
-                response.WillOpenPlans.AddRange(upcoming.Select(ToActivityPlan));
+                response.ActiveIds.AddRange(active.Select(r => TableFields.U(r.Row, 1)));
+                response.NextIds.AddRange(upcoming.Select(r => TableFields.U(r.Row, 1)));
+                response.ActivityPlan.AddRange(active.Select(r => ToActivityPlan(r.Row, r.Open, r.Close)));
+                response.WillOpenPlans.AddRange(upcoming.Select(r => ToActivityPlan(r.Row, r.Open, r.Close)));
             }
 
             // Unknown types deliberately receive an empty typed response. Do not reuse the
@@ -59,13 +63,13 @@ namespace Griffin.GameServer.Handlers
             connection.Send(response);
         }
 
-        private static ActivityPlan ToActivityPlan(ActivityListData row)
+        private static ActivityPlan ToActivityPlan(ActivityListData row, ulong open, ulong close)
         {
             ActivityPlan plan = new()
             {
                 Id = TableFields.U(row, 1),
-                OpenTime = checked((long)TableFields.U64(row, 4)),
-                CloseTime = checked((long)TableFields.U64(row, 5)),
+                OpenTime = checked((long)open),
+                CloseTime = checked((long)close),
             };
             plan.Args.AddRange(TableFields.List(row, 15));
             return plan;

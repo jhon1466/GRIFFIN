@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -78,6 +78,21 @@ public static class GmAdminExtensions
             weaponIds = tables.GetTable<GunWeaponData>().Where(row => row.Id != 0).Select(row => row.Id).Distinct().Order().ToArray(),
             itemIds = tables.GetTable<ItemData>().Where(row => row.Id != 0).Select(row => row.Id).Distinct().Order().ToArray(),
         }));
+
+        // Events of the game (ActivityListData): list, open by hand for some days, or back to the official dates.
+        api.MapGet("/events", (ITableService tables, Griffin.GameServer.Services.IEventOverrideService overrides) =>
+            Results.Ok(Griffin.GameServer.Services.EventCatalog.All(tables, overrides)));
+
+        api.MapPost("/events/{id}", (uint id, EventOpenRequest request, ITableService tables, Griffin.GameServer.Services.IEventOverrideService overrides) =>
+        {
+            if (tables.GetTable<ActivityListData>().All(r => r.Id != id))
+                return Results.NotFound(new { error = "unknown event" });
+            var window = overrides.Open(id, request.Days <= 0 ? 14 : request.Days);
+            return Results.Ok(new { id, open = window.Open, close = window.Close });
+        });
+
+        api.MapDelete("/events/{id}", (uint id, Griffin.GameServer.Services.IEventOverrideService overrides) =>
+            Results.Ok(new { id, closed = overrides.Close(id) }));
 
         api.MapGet("/accounts", async (string? q, int? limit, GriffinDbContext db) =>
         {
@@ -533,3 +548,5 @@ public static class GmAdminExtensions
     public sealed record CleanRequest(uint ConfirmUid, string? Type);
     public sealed record CommandRequest(string Command);
 }
+
+public sealed record EventOpenRequest(int Days);
