@@ -1,4 +1,4 @@
-using Griffin.Common.Proto;
+﻿using Griffin.Common.Proto;
 using Griffin.Database.Entities;
 using Griffin.GameServer.Services;
 
@@ -42,7 +42,7 @@ public static class ProtoExtensions
 
         // peak keys (峰位键) have their own slots in the middle of the wheel (field 52), not in the private ones (A-61)
         uint[] peakKeys = Services.TalentKeySlots.Normalize(gun);
-        proto.NJKHKDCNJPK.AddRange(peakKeys);
+        proto.NJKHKDCNJPK.AddRange(Services.TalentKeySlots.ForClient(gun.GunId, peakKeys, 17));
         proto.HEENBCJCHFG = foodBytes;   // the points of the dishes given to the character (field 61, A-76)
         proto.PrivateTalentSkillItems.AddRange(gun.PrivateTalentSkillItems);
         proto.PublicTalentSkillItems.AddRange(gun.PublicTalentSkillItems);

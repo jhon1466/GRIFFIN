@@ -1,4 +1,4 @@
-using Griffin.Common.Table;
+﻿using Griffin.Common.Table;
 using Griffin.Database.Entities;
 
 namespace Griffin.GameServer.Services
@@ -54,6 +54,20 @@ namespace Griffin.GameServer.Services
             if (changed)
                 Store(gun, peak);
             return peak;
+        }
+
+        /// <summary>
+        /// The slots as the client must receive them: exactly as many as the doll has (SquadTalentGunData column 17 for the peak slot,
+        /// column 18 for the affinity slot; 1 for every doll). The key screen (KNNONABDNAG) builds a slot only for the first entry and
+        /// calls the second one on a null slot, so three entries stopped the screen before it built the affinity slot: the affinity key
+        /// could not be equipped on any doll with a peak key (Vector, ...).
+        /// </summary>
+        public static T[] ForClient<T>(uint gunId, T[] slots, int column)
+        {
+            int count = 1;
+            if (TalentBits.Tables?.GetTable<SquadTalentGunData>().FirstOrDefault(r => TableFields.U(r, 1) == gunId) is { } row)
+                count = (int)TableFields.U(row, column);
+            return slots.Take(Math.Min(count, slots.Length)).ToArray();
         }
 
         public static void Store(GunEntity gun, uint[] peak)

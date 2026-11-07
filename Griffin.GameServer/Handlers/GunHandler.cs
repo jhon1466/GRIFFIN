@@ -237,8 +237,8 @@ namespace Griffin.GameServer.Handlers
 
                 Gun reported = gun.ToProtoGunCharacter(RemouldingPlugins.SlotsOf(accountState, connection.Account.Uid, gun.GunId), cooking.FoodBytes(connection.Account.Uid, gun.GunId));
                 LoveKeySlots.Slots loveKeys = LoveKeySlots.Of(accountState, connection.Account.Uid, gun.GunId);
-                reported.INKGHGACOKA.AddRange(loveKeys.Stc);
-                reported.HMKBFECHGJD.AddRange(loveKeys.Uid);
+                reported.INKGHGACOKA.AddRange(TalentKeySlots.ForClient(gun.GunId, loveKeys.Stc, 18));
+                reported.HMKBFECHGJD.AddRange(TalentKeySlots.ForClient(gun.GunId, loveKeys.Uid, 18));
                 // the parts saved for the costume the character wears win over the copy kept in the character row (A-103: the preparation room "forgot" them at login)
                 if (savedParts.TryGetValue(PartsKey(reported.Costume, BAGPCFGACEF.Types.GCBADMLINMA.Barrack), out uint savedBarrack))
                     reported.CostumeParts = savedBarrack;
@@ -1189,8 +1189,8 @@ namespace Griffin.GameServer.Handlers
                 static GunAndSkills Describe(uint gunId, LoveKeySlots.Slots slots)
                 {
                     GunAndSkills result = new() { GunId = gunId };
-                    result.PublicSkillItem.AddRange(slots.Stc);
-                    result.PublicSkillItemUid.AddRange(slots.Uid);
+                    result.PublicSkillItem.AddRange(TalentKeySlots.ForClient(gunId, slots.Stc, 18));
+                    result.PublicSkillItemUid.AddRange(TalentKeySlots.ForClient(gunId, slots.Uid, 18));
                     return result;
                 }
 
@@ -1251,7 +1251,7 @@ namespace Griffin.GameServer.Handlers
             gunService.Save();
             SC_GunPrivateTalentSkillItemBelong2 reply = new() { GunId = gun.GunId };
             reply.GunPrivateTalents.AddRange(items);
-            reply.JKHPKIEMIEI.AddRange(peak);
+            reply.JKHPKIEMIEI.AddRange(TalentKeySlots.ForClient(gun.GunId, peak, 17));
             connection.Send(reply);
         }
 
