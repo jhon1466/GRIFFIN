@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -28,7 +28,8 @@ namespace Griffin.GameServer.Handlers
         IDailyQuestProgressService questProgress,
         IRewardService rewardService,
         IItemUseService itemUse,
-        ILoveService love) : LoveHandlerBase
+        ILoveService love,
+        ILoveBackfillService loveBackfill) : LoveHandlerBase
     {
         private readonly long maxExpInit = MaxExp = love.Threshold(love.Cap);
 
@@ -119,7 +120,7 @@ namespace Griffin.GameServer.Handlers
             gunService.Save();
             List<IMessage> bundle = [spent];
             if (promoted)
-                GrantLevelRewards(uid, beforeGift, gun.LoveLevel, bundle);
+                GrantLevelRewards(uid, gun.GunId, beforeGift, gun.LoveLevel, bundle);
             questProgress.AddCondition(uid, conditionClass: 1303, link: "4015", amount: (uint)spend.Values.Sum());
             Log.Information("LoveSendGift: account {Uid} gun {Gun} +{Gained} -> level {Level} exp {Exp}.", uid, gun.GunId, gained, gun.LoveLevel, gun.LoveExp);
             bundle.Add(new SC_LoveSendGift
@@ -204,7 +205,7 @@ namespace Griffin.GameServer.Handlers
             gunService.Save();
             List<IMessage> vow = [];
             if (atCap)
-                GrantLevelRewards(connection.Account.Uid, beforeVow, VowLevel, vow);
+                GrantLevelRewards(connection.Account.Uid, request.GunId, beforeVow, VowLevel, vow);
             vow.Add(new SC_LoveVow { GunId = gun.GunId, PCPEAMOJPCF = gun.GunTalentConsume.GetValueOrDefault(VowTimeKey) });
             // the client takes the new level from SC_LoveLevelUpdate (the vow answer only marks the vow): without it the character stayed at 8 on screen until the next login (A-108)
             if (atCap)
@@ -217,7 +218,7 @@ namespace Griffin.GameServer.Handlers
         /// 4 an accessory item, 8 diamonds). ASSUMPTION A-32: the server pays them when the level is reached (the client has no request to claim them; its
         /// reward dialog only lists them) and not retroactively for levels reached before this change.
         /// </summary>
-        private void GrantLevelRewards(uint uid, uint fromLevel, uint toLevel, List<IMessage> messages)
+        private void GrantLevelRewards(uint uid, uint gunId, uint fromLevel, uint toLevel, List<IMessage> messages)
         {
             for (uint level = fromLevel + 1; level <= toLevel; level++)
             {
@@ -230,14 +231,9 @@ namespace Griffin.GameServer.Handlers
 
                 // The level that opens the vow (LoveConfigData column 5, level 5) also lists LoveConfigData column 9 in its reward panel:
                 // 300002 铭契投影 there (310002 铭契之心 of the same column is already level 9's own reward). It was never granted.
-                if (level == VowStartLevel() && tableService.GetTable<LoveConfigData>().FirstOrDefault() is { } config)
-                {
-                    HashSet<uint> levelNine = tableService.GetTable<LoveLevelData>().Where(l => TableFields.U(l, 1) == VowLevel)
-                        .SelectMany(l => TableFields.Map(l, 7).Select(p => p.Key)).ToHashSet();
-                    foreach ((uint item, uint count) in TableFields.Map(config, 9))
-                        if (count > 0 && !levelNine.Contains(item))
-                            rewardService.Grant(uid, item, (int)count, messages);
-                }
+                if (level == VowStartLevel())
+                    foreach ((uint item, uint count) in loveBackfill.Claim(uid, gunId))
+                        rewardService.Grant(uid, item, (int)count, messages);
             }
         }
 

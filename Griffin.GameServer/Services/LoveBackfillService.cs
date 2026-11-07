@@ -1,4 +1,4 @@
-using Griffin.Common.Table;
+﻿using Griffin.Common.Table;
 using Griffin.Database.Entities;
 
 namespace Griffin.GameServer.Services
@@ -10,6 +10,9 @@ namespace Griffin.GameServer.Services
     public interface ILoveBackfillService : IGameService
     {
         void Backfill(uint accountUid);
+
+        /// <summary>Marks the doll as served and returns what it gets (empty when it already had it).</summary>
+        IReadOnlyList<(uint Item, uint Count)> Claim(uint accountUid, uint gunId);
     }
 
     public sealed class LoveBackfillService(
@@ -20,6 +23,30 @@ namespace Griffin.GameServer.Services
     {
         private const string StateKey = "love.vowprojection.granted";
         private const uint VowLevel = 9;
+
+        private List<(uint Item, uint Count)> Rewards(out uint startLevel)
+        {
+            startLevel = 5;
+            if (tableService.GetTable<LoveConfigData>().FirstOrDefault() is not { } config)
+                return [];
+            startLevel = TableFields.U(config, 5) is var configured and > 0 ? configured : 5;
+            HashSet<uint> levelNine = tableService.GetTable<LoveLevelData>().Where(l => TableFields.U(l, 1) == VowLevel)
+                .SelectMany(l => TableFields.Map(l, 7).Select(p => p.Key)).ToHashSet();
+            return TableFields.Map(config, 9).Where(p => p.Value > 0 && !levelNine.Contains(p.Key)).ToList();
+        }
+
+        public IReadOnlyList<(uint Item, uint Count)> Claim(uint accountUid, uint gunId)
+        {
+            List<(uint Item, uint Count)> rewards = Rewards(out _);
+            lock (AccountLock.For(accountUid))
+            {
+                HashSet<uint> served = accountState.Get<HashSet<uint>>(accountUid, StateKey) ?? [];
+                if (rewards.Count == 0 || !served.Add(gunId))
+                    return [];
+                accountState.Set(accountUid, StateKey, served);
+                return rewards;
+            }
+        }
 
         public void Backfill(uint accountUid)
         {
