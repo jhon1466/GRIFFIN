@@ -1143,10 +1143,55 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            GunAndSkills described = new() { GunId = gun.GunId };
-            described.PublicSkillItem.AddRange(gun.PublicTalentSkillItems);
-            described.PublicSkillItemUid.AddRange(gun.PublicTalentSkillItemsUid);
-            connection.Send(new SC_GunLoveTalentSkillItemBelong { Gun1 = described });
+            // Affinity keys (契合键) go into the same three shared slots as the public keys; the request carries the slot (0-based,
+            // omitted when 0) and the key uid. This used to only echo the slots, so the key was never kept on the doll.
+            GunEntity[] guns = gunService.GetPlayerGuns(connection.Account.Uid);
+            (ulong Id, uint StcId) wanted = PublicTalentHandler.ItemsOf(accountState, connection.Account.Uid).FirstOrDefault(i => i.Id == request.PublicTalentSkillItemUid);
+            if ((request.PublicTalentSkillItemUid != 0 && wanted.Id == 0) || request.Slot > 2)
+            {
+                connection.Refuse(MsgId.MsgCsGunLoveTalentSkillItemBelong, HNINDAOJCKP.ClientInputInvalid);
+                return;
+            }
+
+            int index = (int)request.Slot;
+            ulong occupant = gun.PublicTalentSkillItemsUid.Length > index ? gun.PublicTalentSkillItemsUid[index] : 0;
+            GunEntity? previousHolder = request.PublicTalentSkillItemUid == 0 ? null
+                : guns.FirstOrDefault(g => g.PublicTalentSkillItemsUid.Contains(request.PublicTalentSkillItemUid));
+
+            static void Set(GunEntity target, int slot, uint stcId, ulong uid)
+            {
+                uint[] items = new uint[Math.Max(3, target.PublicTalentSkillItems.Length)];
+                ulong[] uids = new ulong[Math.Max(3, target.PublicTalentSkillItemsUid.Length)];
+                target.PublicTalentSkillItems.CopyTo(items, 0);
+                target.PublicTalentSkillItemsUid.CopyTo(uids, 0);
+                items[slot] = stcId;
+                uids[slot] = uid;
+                target.PublicTalentSkillItems = items;
+                target.PublicTalentSkillItemsUid = uids;
+            }
+
+            if (previousHolder is not null)
+                Set(previousHolder, Array.IndexOf(previousHolder.PublicTalentSkillItemsUid, request.PublicTalentSkillItemUid), 0, 0);
+            Set(gun, index, wanted.StcId, wanted.Id);
+            gunService.Save();
+
+            static GunAndSkills Describe(GunEntity target)
+            {
+                GunAndSkills result = new() { GunId = target.GunId };
+                result.PublicSkillItem.AddRange(target.PublicTalentSkillItems);
+                result.PublicSkillItemUid.AddRange(target.PublicTalentSkillItemsUid);
+                return result;
+            }
+
+            SC_GunLoveTalentSkillItemBelong reply = new() { Gun1 = Describe(gun) };
+            if (previousHolder is not null && previousHolder.GunId != gun.GunId)
+                reply.Gun2 = Describe(previousHolder);
+            if (wanted.Id != 0)
+                reply.Public1 = PublicTalentHandler.ToProto(wanted.Id, wanted.StcId, gun.GunId);
+            if (occupant != 0 && occupant != request.PublicTalentSkillItemUid
+                && PublicTalentHandler.ItemsOf(accountState, connection.Account.Uid).FirstOrDefault(i => i.Id == occupant) is { Id: not 0 } displaced)
+                reply.Public2 = PublicTalentHandler.ToProto(displaced.Id, displaced.StcId, 0);
+            connection.Send(reply);
         }
 
         /// <summary>Puts a private talent item id in a slot (1..3) of a character and keeps it (<c>GunEntity.PrivateTalentSkillItems</c>). ASSUMPTION: no ownership or type check.</summary>
