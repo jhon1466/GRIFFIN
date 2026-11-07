@@ -8,9 +8,9 @@ namespace Griffin.GameServer.Handlers
 {
     /// <summary>The 3D wish board requests of their own message group; the logic lives in <see cref="ActivityHandler"/>.</summary>
     public sealed class ActivityThreeDimensionAmoHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService,
-        IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState, IItemUseService itemUse) : ActivityThreeDimensionAmoHandlerBase
+        IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState, IItemUseService itemUse, StoreHandler store) : ActivityThreeDimensionAmoHandlerBase
     {
-        private ActivityHandler Activity => new(eventSignin, activityBack, tableService, eventOverrides, rewardService, accountState, itemUse);
+        private ActivityHandler Activity => new(eventSignin, activityBack, tableService, eventOverrides, rewardService, accountState, itemUse, store);
 
         public override void HandleActivityThreeDimensionsAmoGetInfo(CS_ActivityThreeDimensionsAmoGetInfo request, Connection connection) =>
             Activity.HandleActivityThreeDimensionsAmoGetInfo(request, connection);

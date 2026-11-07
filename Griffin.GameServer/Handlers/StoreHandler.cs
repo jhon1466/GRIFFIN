@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using System.Collections.Concurrent;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
@@ -228,6 +228,13 @@ namespace Griffin.GameServer.Handlers
         /// Goods paid with real money are refused (there is no payment); the counters of limited goods never reset (the
         /// refresh periods are not in the tables).
         /// </summary>
+        /// <summary>A purchase made by another feature (the bargained skin of an event), under the same rules as the store.</summary>
+        public SC_StoreBuy BuyFor(uint uid, uint goodsId, List<IMessage> messages)
+        {
+            lock (AccountLock(uid))
+                return Buy(uid, new CS_StoreBuy { GoodsId = goodsId }, messages);
+        }
+
         private SC_StoreBuy Buy(uint uid, CS_StoreBuy request, List<IMessage> messages)
         {
             SC_StoreBuy Reply(MANKAOBLPBJ.Types.Code code) =>

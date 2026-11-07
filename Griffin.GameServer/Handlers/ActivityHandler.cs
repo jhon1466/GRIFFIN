@@ -8,7 +8,7 @@ using Google.Protobuf;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService, IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState, IItemUseService itemUse) : ActivityHandlerBase
+    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService, IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState, IItemUseService itemUse, StoreHandler store) : ActivityHandlerBase
     {
         public override void HandlePlanActivity(CS_PlanActivity request, Connection connection)
         {
@@ -791,6 +791,20 @@ namespace Griffin.GameServer.Handlers
             }
 
             messages.Add(new SC_ActivityBpTeamPickReward { ICJPKOJLLFD = request.Clone() });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
+        /// <summary>
+        /// Bargained skin of an event (PLIEFALNPJA): the client sends the store good (StoreGoodData) and the price it shows. The cut of the
+        /// price comes from friends helping, which a local server does not have, so the good is bought under the store rules.
+        /// </summary>
+        public override void HandleActivitySkinBargainBuy(CS_ActivitySkinBargainBuy request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            List<IMessage> messages = [];
+            SC_StoreBuy bought = store.BuyFor(connection.Account.Uid, request.BFOLFKPANIA, messages);
+            messages.Add(new SC_ActivitySkinBargainBuy { Code = bought.Code, GoodsId = bought.GoodsId, PriceType = bought.PriceType, DHJFICAKHKG = request.JKDGOMJCCDC });
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
