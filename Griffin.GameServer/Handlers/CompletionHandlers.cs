@@ -25,7 +25,8 @@ namespace Griffin.GameServer.Handlers
             LBMHFNEHFCP data = new();
             foreach (AfkAssistantData row in tableService.GetTable<AfkAssistantData>().OrderBy(r => r.Sort).ThenBy(r => r.Id))
             {
-                data.Data[row.Id] = new ABAHIONHKPP { Type = row.Id };
+                // type 0 = not configured: a non-zero type makes the panel divide by the system's stamina cost, which is 0 for PvP/guild entries.
+                data.Data[row.Id] = new ABAHIONHKPP();
                 data.LEKFONGLCIJ.Add(row.Id);
             }
 
