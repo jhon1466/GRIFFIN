@@ -1,4 +1,4 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Protocol;
 using Griffin.GameServer.Extensions;
 using Griffin.Common.Proto;
@@ -12,7 +12,7 @@ namespace Griffin.GameServer.Handlers
     /// source that grants more); which character wears each one is NOT stored here but read from the characters
     /// (<c>GunEntity.PublicTalentSkillItemsUid</c>), so it survives a relaunch and always agrees with <c>SC_Guns</c>.
     /// </summary>
-    public sealed class PublicTalentHandler(IGunService gunService, IAccountStateService accountState, Griffin.Common.Table.ITableService tableService, IItemUseService itemUse) : PublicTalentHandlerBase
+    public sealed class PublicTalentHandler(IGunService gunService, IAccountStateService accountState, Griffin.Common.Table.ITableService tableService, IItemUseService itemUse, ILoveBackfillService loveBackfill) : PublicTalentHandlerBase
     {
         public static readonly (ulong Id, uint StcId)[] Items =
         [
@@ -47,6 +47,9 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandlePublicTalentSkillItems(CS_PublicTalentSkillItems request, Connection connection)
         {
+            // dolls already at love level 5+ get their affinity key (契合键) if the server never gave it
+            if (connection.Account is not null)
+                loveBackfill.BackfillAffinityKeys(connection.Account.Uid);
             Database.Entities.GunEntity[] guns = connection.Account is null ? [] : gunService.GetPlayerGuns(connection.Account.Uid);
             SC_PublicTalentSkillItems reply = new();
             foreach ((ulong id, uint stc) in connection.Account is null ? Items : ItemsOf(accountState, connection.Account.Uid))

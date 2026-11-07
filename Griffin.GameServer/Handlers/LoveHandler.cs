@@ -236,8 +236,13 @@ namespace Griffin.GameServer.Handlers
                 // The level that opens the vow (LoveConfigData column 5, level 5) also lists LoveConfigData column 9 in its reward panel:
                 // 300002 铭契投影 there (310002 铭契之心 of the same column is already level 9's own reward). It was never granted.
                 if (level == VowStartLevel())
+                {
                     foreach ((uint item, uint count) in loveBackfill.Claim(uid, gunId))
                         rewardService.Grant(uid, item, (int)count, messages);
+                    // the affinity key of the doll (契合键, 910000 + doll) listed in the same reward panel
+                    foreach (PublicTalentHandler.ExtraItem key in loveBackfill.GrantAffinityKeys(uid, [gunId]))
+                        messages.Add(new SC_NewPublicTalentSkillItem { PublicSkillItem = PublicTalentHandler.ToProto(key.Id, key.StcId, 0) });
+                }
             }
         }
 

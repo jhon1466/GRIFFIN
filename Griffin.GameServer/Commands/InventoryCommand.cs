@@ -1,4 +1,4 @@
-using Griffin.Command;
+﻿using Griffin.Command;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -8,7 +8,7 @@ using Griffin.GameServer.Services;
 namespace Griffin.GameServer.Commands;
 
 [Command("inventory", "Gestiona el inventario del jugador", "inventory addall [type] | inventory provision", CommandSource.Client)]
-public sealed class InventoryCommand(IInventoryService inventoryService, ITableService tableService, IProvisioningService provisioning, IAccountStateService accountState) : ICommand
+public sealed class InventoryCommand(IInventoryService inventoryService, ITableService tableService, IProvisioningService provisioning, IAccountStateService accountState, ILoveBackfillService loveBackfill, IGunService gunService) : ICommand
 {
     private const int ItemsPerResponse = 7000;
 
@@ -147,6 +147,12 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
         }
 
         SendInventoryResponses(ctx, types);
+
+        // affinity keys (契合键) of every owned doll: they are public talent keys, not inventory items, so the loop above misses them
+        var keys = loveBackfill.GrantAffinityKeys(accountUid, gunService.GetPlayerGuns(accountUid).Select(g => g.GunId));
+        foreach (var key in keys)
+            ctx.Connection.SendAutoEncrypted(new SC_NewPublicTalentSkillItem { PublicSkillItem = Griffin.GameServer.Handlers.PublicTalentHandler.ToProto(key.Id, key.StcId, 0) });
+        ctx.Reply($"Teclas de afinidad añadidas: {keys.Count}.");
     }
 
     private void AddSingleType(uint accountUid, InventoryType type, CommandContext ctx)
