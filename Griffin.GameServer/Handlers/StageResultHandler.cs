@@ -22,7 +22,8 @@ namespace Griffin.GameServer.Handlers
         ILoveService love,
         IRougeService rouge,
         ISimCombatWeekService week,
-        IEndlessTowerService endlessTower) : StageResultHandlerBase
+        IEndlessTowerService endlessTower,
+        IRouge2Service rouge2) : StageResultHandlerBase
     {
         /// <summary>
         /// Winning the together-battle of an affection event (<c>LoveEventData</c> type 2, levels 5 to 7) completes it: the level rises and the
@@ -193,6 +194,8 @@ namespace Griffin.GameServer.Handlers
             // a floor of the endless tower of the events (EndlessTowerService)
             if (won)
                 endlessTower.OnStageWon(uid, stage.Id, push);
+            // a fight of a Rouge2 run (Rouge2Service)
+            rouge2.OnStageResult(uid, stage.Id, won, push);
 
             var records = accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? [];
             records.TryGetValue(stage.Id.ToString(), out StageRecord? prior);
