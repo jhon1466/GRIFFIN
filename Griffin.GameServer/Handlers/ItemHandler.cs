@@ -8,7 +8,7 @@ using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ItemHandler(IInventoryService inventoryService, IItemUseService itemUse, IEventTicketService eventTickets) : ItemHandlerBase
+    public sealed class ItemHandler(IInventoryService inventoryService, IItemUseService itemUse, IEventTicketService eventTickets, ILoveBackfillService loveBackfill) : ItemHandlerBase
     {
         private const int ItemsPerResponse = 7000;
 
@@ -18,6 +18,8 @@ namespace Griffin.GameServer.Handlers
 
             // daily event tickets (supply stages of the current event) are refilled before the list is reported
             eventTickets.Refill(connection.Account.Uid);
+            // dolls already at love level 5 or more get the vow projection the server used to forget (once each)
+            loveBackfill.Backfill(connection.Account.Uid);
 
             // resources (currencies) travel in SC_Resource, not in the item list
             ItemEntity[] items = inventoryService.GetPlayerInventory<ItemEntity>(connection.Account.Uid)
