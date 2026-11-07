@@ -8,13 +8,16 @@ using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ItemHandler(IInventoryService inventoryService, IItemUseService itemUse) : ItemHandlerBase
+    public sealed class ItemHandler(IInventoryService inventoryService, IItemUseService itemUse, IEventTicketService eventTickets) : ItemHandlerBase
     {
         private const int ItemsPerResponse = 7000;
 
         public override void HandleItems(CS_Items request, Connection connection)
         {
             if (connection.Account == null) return;
+
+            // daily event tickets (supply stages of the current event) are refilled before the list is reported
+            eventTickets.Refill(connection.Account.Uid);
 
             // resources (currencies) travel in SC_Resource, not in the item list
             ItemEntity[] items = inventoryService.GetPlayerInventory<ItemEntity>(connection.Account.Uid)
