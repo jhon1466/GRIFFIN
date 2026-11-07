@@ -227,6 +227,17 @@ namespace Griffin.GameServer.Handlers
 
                 foreach ((uint item, uint count) in TableFields.Map(row, 7))
                     rewardService.Grant(uid, item, (int)count, messages);
+
+                // The level that opens the vow (LoveConfigData column 5, level 5) also lists LoveConfigData column 9 in its reward panel:
+                // 300002 铭契投影 there (310002 铭契之心 of the same column is already level 9's own reward). It was never granted.
+                if (level == VowStartLevel() && tableService.GetTable<LoveConfigData>().FirstOrDefault() is { } config)
+                {
+                    HashSet<uint> levelNine = tableService.GetTable<LoveLevelData>().Where(l => TableFields.U(l, 1) == VowLevel)
+                        .SelectMany(l => TableFields.Map(l, 7).Select(p => p.Key)).ToHashSet();
+                    foreach ((uint item, uint count) in TableFields.Map(config, 9))
+                        if (count > 0 && !levelNine.Contains(item))
+                            rewardService.Grant(uid, item, (int)count, messages);
+                }
             }
         }
 
