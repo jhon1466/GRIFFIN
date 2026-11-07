@@ -1,12 +1,98 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.GameServer.Extensions;
 using Griffin.Common.Protocol;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class DarkZoneHandler(Griffin.GameServer.Services.IModProgressService modProgress) : DarkZoneHandlerBase
+    public sealed class DarkZoneHandler(Griffin.GameServer.Services.IModProgressService modProgress, Griffin.GameServer.Services.IAccountStateService accountState) : DarkZoneHandlerBase
     {
+        /// <summary>The menus of the Dark Zone kept per account: talents, weekly difficulty, egg stages opened and quest groups claimed.</summary>
+        public sealed class DzState
+        {
+            public List<uint> Talents { get; set; } = [];
+            public int Difficulty { get; set; } = (int)HBMBNIHMKLI.Types.FHOMGAKNIAF.Easy;
+            public List<uint> EggStages { get; set; } = [];
+            public List<uint> QuestsClaimed { get; set; } = [];
+        }
+
+        private const string DzKey = "darkzone.menus";
+
+        private DzState Dz(uint uid) => accountState.Get<DzState>(uid, DzKey) ?? new DzState();
+
+        public override void HandleDarkZoneTalentUnlock(CS_DarkZoneTalentUnlock request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            lock (Griffin.GameServer.Services.AccountLock.For(uid))
+            {
+                DzState state = Dz(uid);
+                if (!state.Talents.Contains(request.TalentId))
+                    state.Talents.Add(request.TalentId);
+                accountState.Set(uid, DzKey, state);
+            }
+            connection.Send(new SC_DarkZoneTalentUnlock { TalentId = request.TalentId });
+        }
+
+        public override void HandleDarkZoneTalentReset(CS_DarkZoneTalentReset request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            lock (Griffin.GameServer.Services.AccountLock.For(uid))
+            {
+                DzState state = Dz(uid);
+                state.Talents.Clear();
+                accountState.Set(uid, DzKey, state);
+            }
+            connection.Send(new SC_DarkZoneTalentReset());
+        }
+
+        public override void HandleDarkZoneSetWeeklyDifficulty(CS_DarkZoneSetWeeklyDifficulty request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            lock (Griffin.GameServer.Services.AccountLock.For(uid))
+            {
+                DzState state = Dz(uid);
+                state.Difficulty = (int)request.IFNEDNHKBJN;
+                accountState.Set(uid, DzKey, state);
+            }
+            connection.Send(new SC_DarkZoneSetWeeklyDifficulty { IFNEDNHKBJN = request.IFNEDNHKBJN });
+        }
+
+        public override void HandleDarkZoneUnlockEggStage(CS_DarkZoneUnlockEggStage request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            lock (Griffin.GameServer.Services.AccountLock.For(uid))
+            {
+                DzState state = Dz(uid);
+                if (!state.EggStages.Contains(request.StageId))
+                    state.EggStages.Add(request.StageId);
+                accountState.Set(uid, DzKey, state);
+            }
+            connection.Send(new SC_DarkZoneUnlockEggStage { StageId = request.StageId });
+        }
+
+        public override void HandleDarkZoneTakeQuestReward(CS_DarkZoneTakeQuestReward request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            lock (Griffin.GameServer.Services.AccountLock.For(uid))
+            {
+                DzState state = Dz(uid);
+                if (!state.QuestsClaimed.Contains(request.GroupId))
+                    state.QuestsClaimed.Add(request.GroupId);
+                accountState.Set(uid, DzKey, state);
+            }
+            connection.Send(new SC_DarkZoneTakeQuestReward { Quest = new DarkZoneQuestGroup { Id = request.GroupId, Status = DarkZoneQuestGroup.Types.Status.Finished } });
+        }
+
         public override void HandleDarkZoneStorage(CS_DarkZoneStorage request, Connection connection)
         {
                     connection.Send(new SC_DarkZoneStorage
@@ -89,8 +175,8 @@ namespace Griffin.GameServer.Handlers
                         BCCILNBHDAO = new HBMBNIHMKLI
                         {
                             ONMNEMDCEIJ = 1001,
-                            TalentId = { },
-                            IFNEDNHKBJN = HBMBNIHMKLI.Types.FHOMGAKNIAF.Easy,
+                            TalentId = { connection.Account is null ? [] : Dz(connection.Account.Uid).Talents },
+                            IFNEDNHKBJN = connection.Account is null ? HBMBNIHMKLI.Types.FHOMGAKNIAF.Easy : (HBMBNIHMKLI.Types.FHOMGAKNIAF)Dz(connection.Account.Uid).Difficulty,
                             Quests =
                             {
                                 new DJIPBLHIDPA { QuestId = 3018, JONLCAGBGJE = false },
@@ -128,7 +214,7 @@ namespace Griffin.GameServer.Handlers
         {
             connection.Send(new SC_DarkZoneGetUnlockEggStage
             {
-                NDINCEOKEOA = { },
+                NDINCEOKEOA = { connection.Account is null ? [] : Dz(connection.Account.Uid).EggStages },
             });
         }
 
