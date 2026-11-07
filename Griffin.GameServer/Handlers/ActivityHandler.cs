@@ -750,6 +750,50 @@ namespace Griffin.GameServer.Handlers
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
+        /// <summary>
+        /// Team pass gift (BattlepassTeamData: 1 = event, 3 = normal reward, 4 = extra reward of a paid pass). ASSUMPTION A-198: like the
+        /// other passes of a private server the paid tier is owned, so the extra reward is the one offered; taken once.
+        /// </summary>
+        private static string BpTeamKey(uint activityId) => $"bpteam:{activityId}";
+
+        public override void HandleActivityBpTeamInfo(CS_ActivityBpTeamInfo request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            ClaimState state = accountState.Get<ClaimState>(connection.Account.Uid, ClaimKey) ?? new ClaimState();
+            connection.Send(new SC_ActivityBpTeamInfo
+            {
+                Info = new POPPBFFKECA
+                {
+                    IKDMNOBMIFE = request.IKDMNOBMIFE,
+                    Level = POPPBFFKECA.Types.EMPCJMBGLCB.RewardLevelExtra,
+                    Status = state.Done.Contains(BpTeamKey(request.IKDMNOBMIFE)) ? POPPBFFKECA.Types.IKBAMNLCLPP.RewardStatusGot : POPPBFFKECA.Types.IKBAMNLCLPP.RewardStatusNone,
+                },
+            });
+        }
+
+        public override void HandleActivityBpTeamPickReward(CS_ActivityBpTeamPickReward request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            lock (AccountLock.For(uid))
+            {
+                ClaimState state = accountState.Get<ClaimState>(uid, ClaimKey) ?? new ClaimState();
+                if (!state.Done.Contains(BpTeamKey(request.IKDMNOBMIFE))
+                    && tableService.GetTable<BattlepassTeamData>().FirstOrDefault(r => TableFields.U(r, 1) == request.IKDMNOBMIFE) is { } row)
+                {
+                    Grant(uid, TableFields.Map(row, 4).Select(p => new KeyValuePair<uint, uint>(p.Key, p.Value)), messages);
+                    state.Done.Add(BpTeamKey(request.IKDMNOBMIFE));
+                    accountState.Set(uid, ClaimKey, state);
+                }
+            }
+
+            messages.Add(new SC_ActivityBpTeamPickReward { ICJPKOJLLFD = request.Clone() });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
         public override void HandleActivityCheckIn(CS_ActivityCheckIn request, Connection connection)
         {
             if (connection.Account is null)
