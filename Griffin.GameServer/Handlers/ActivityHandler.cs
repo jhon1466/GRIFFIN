@@ -8,7 +8,7 @@ using Google.Protobuf;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService, IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState) : ActivityHandlerBase
+    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService, IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState, IItemUseService itemUse) : ActivityHandlerBase
     {
         public override void HandlePlanActivity(CS_PlanActivity request, Connection connection)
         {
@@ -443,6 +443,36 @@ namespace Griffin.GameServer.Handlers
                 return;
             connection.Send(new SC_ActivityWorldBossVoucherBackup { IKDMNOBMIFE = request.IKDMNOBMIFE });
         }
+
+        /// <summary>
+        /// Character rerun (LMCPGHPAGCA): the state is one flag, "the opening reward was taken" (the red dot of the event stays until then).
+        /// Its tasks run through the quest system (TaskListData of the event).
+        /// </summary>
+        private static string RerunKey(uint activityId) => $"activity.rerun.{activityId}";
+
+        public override void HandleActivityGetCharacterRerunInfo(CS_ActivityGetCharacterRerunInfo request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            bool taken = accountState.Get<bool?>(connection.Account.Uid, RerunKey(request.IKDMNOBMIFE)) ?? false;
+            connection.Send(new SC_ActivityGetCharacterRerunInfo { PEDIIDPJFKI = new LGLIHGGBLHI { BHHGOBKHEHF = taken } });
+        }
+
+        public override void HandleActivityCharacterRerunGetReward(CS_ActivityCharacterRerunGetReward request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            accountState.Set(connection.Account.Uid, RerunKey(request.IKDMNOBMIFE), (bool?)true);
+            connection.Send(new SC_ActivityCharacterRerunGetReward { IKDMNOBMIFE = request.IKDMNOBMIFE });
+        }
+
+        private ActivityBoxGacha BoxGacha => new(accountState, tableService, rewardService, itemUse);
+
+        public override void HandleGetActivityGacha(CS_GetActivityGacha request, Connection connection) => BoxGacha.HandleGetActivityGacha(request, connection);
+
+        public override void HandleActivityGacha(CS_ActivityGacha request, Connection connection) => BoxGacha.HandleActivityGacha(request, connection);
+
+        public override void HandleActivityGachaSettle(CS_ActivityGachaSettle request, Connection connection) => BoxGacha.HandleActivityGachaSettle(request, connection);
 
         public override void HandleActivityCheckIn(CS_ActivityCheckIn request, Connection connection)
         {
