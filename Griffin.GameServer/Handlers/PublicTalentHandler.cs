@@ -87,6 +87,61 @@ namespace Griffin.GameServer.Handlers
         public static PublicSkillItem ToProto(ulong id, uint stcId, uint gunId, ulong affixes = 0) =>
             new() { Id = id, StcId = stcId, GunId = gunId, Locked = affixes, MDFIDAFPBJN = false };
 
+        /// <summary>State key of the copies made of each key (original uid as text -> uids of its copies).</summary>
+        public const string CopiesKey = "publictalent.copies";
+
+        private const ulong CopyIdBase = 1843289000000000000UL;
+
+        /// <summary>
+        /// 复制键 (copy a key): the client sends the uid of the key (field 1) and expects back the original and the new copy (fields 1, 2).
+        /// TalentKeyCopyableCostCsData gives per key the most copies (column 2), the item paid (column 3) and its amount for the 1st, 2nd... copy
+        /// (column 4). The message was unknown, so the button did nothing. Copies are kept as extra keys and listed in field 6 of the original.
+        /// </summary>
+        public override void HandlePublicTalentSkillItemCopy(CS_PublicTalentSkillItemCopy request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            List<Google.Protobuf.IMessage> messages = [];
+            lock (AccountLock.For(uid))
+            {
+                (ulong Id, uint StcId) original = ItemsOf(accountState, uid).FirstOrDefault(i => i.Id == request.Id);
+                Dictionary<string, List<ulong>> copies = accountState.Get<Dictionary<string, List<ulong>>>(uid, CopiesKey) ?? [];
+                List<ulong> mine = copies.GetValueOrDefault(request.Id.ToString()) ?? [];
+                Griffin.Common.Table.TalentKeyCopyableCostCsData? row = original.Id == 0 ? null
+                    : tableService.GetTable<Griffin.Common.Table.TalentKeyCopyableCostCsData>().FirstOrDefault(r => r.Id == original.StcId);
+                if (row is null || mine.Count >= row.MaxCopies)
+                {
+                    connection.Refuse(MsgId.MsgCsPublicTalentSkillItemCopy, HNINDAOJCKP.ClientInputInvalid);
+                    return;
+                }
+
+                int price = mine.Count < row.Costs.Count ? (int)row.Costs[mine.Count] : row.Costs.Count > 0 ? (int)row.Costs[^1] : 0;
+                if (row.CostItem != 0 && price > 0 && !itemUse.Spend(uid, new Dictionary<uint, int> { [row.CostItem] = price }, messages))
+                {
+                    connection.Refuse(MsgId.MsgCsPublicTalentSkillItemCopy, HNINDAOJCKP.ItemNotEnough);
+                    return;
+                }
+
+                HashSet<ulong> used = ItemsOf(accountState, uid).Select(i => i.Id).ToHashSet();
+                ulong copyId = CopyIdBase + (ulong)original.StcId * 100;
+                while (used.Contains(copyId))
+                    copyId++;
+
+                List<ExtraItem> extra = accountState.Get<List<ExtraItem>>(uid, ExtraKey) ?? [];
+                extra.Add(new ExtraItem { Id = copyId, StcId = original.StcId });
+                accountState.Set(uid, ExtraKey, extra);
+                mine.Add(copyId);
+                copies[request.Id.ToString()] = mine;
+                accountState.Set(uid, CopiesKey, copies);
+
+                messages.Add(new SC_PublicTalentSkillItemCopy { Id = request.Id, CopyId = copyId });
+            }
+
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
+
         public override void HandlePublicTalentSkillItems(CS_PublicTalentSkillItems request, Connection connection)
         {
             // dolls already at love level 5+ get their affinity key (契合键) if the server never gave it
@@ -101,6 +156,10 @@ namespace Griffin.GameServer.Handlers
                 reply.PublicSkillItems.Add(ToProto(id, stc, guns.FirstOrDefault(g => g.PublicTalentSkillItemsUid.Contains(id))?.GunId
                     ?? (connection.Account is null ? 0 : LoveKeySlots.HolderOf(accountState, connection.Account.Uid, id)),
                     connection.Account is null ? 0 : AffixesOf(accountState, connection.Account.Uid, id)));
+            if (connection.Account is not null)
+                foreach ((string original, List<ulong> made) in accountState.Get<Dictionary<string, List<ulong>>>(connection.Account.Uid, CopiesKey) ?? [])
+                    if (reply.PublicSkillItems.FirstOrDefault(i => i.Id.ToString() == original) is { } item)
+                        item.Copies.AddRange(made);
             connection.Send(reply);
         }
 

@@ -6728,6 +6728,15 @@ enum AEKGCDMHJMN {
    OperateActivitySubType_Magnet = 2;
 }
 
+message CS_PublicTalentSkillItemCopy {
+  uint64 id = 1;
+}
+
+message SC_PublicTalentSkillItemCopy {
+  uint64 id = 1;
+  uint64 copy_id = 2;
+}
+
 message SC_PublicTalentSkillItems {
   repeated PublicSkillItem public_skill_items = 1;
 }
@@ -11571,6 +11580,8 @@ enum FLEBMOMGGNF {
    MSG_SC_GunTransform = 11198;
    MSG_CS_GunSelected = 11128;
    MSG_SC_GunSelected = 11129;
+   MSG_CS_PublicTalentSkillItemCopy = 11130;
+   MSG_SC_PublicTalentSkillItemCopy = 11131;
    MSG_CS_Resource = 11200;
    MSG_SC_Resource = 11201;
    MSG_SC_ResourceUpdate = 11202;
@@ -13993,6 +14004,7 @@ message PublicSkillItem {
   uint32 gun_id = 3;
   uint64 locked = 4;
   bool MDFIDAFPBJN = 5;
+  repeated uint64 copies = 6;
 }
 
 message PBILPEAFFIC {
@@ -34966,6 +34978,7 @@ service PrefaceService {
 
 service PublicTalentService {
   rpc HandlePublicTalentSkillItems (CS_PublicTalentSkillItems) returns (google.protobuf.Empty);
+  rpc HandlePublicTalentSkillItemCopy (CS_PublicTalentSkillItemCopy) returns (google.protobuf.Empty);
 
   rpc HandlePublicTalentItemLevelUp (CS_PublicTalentItemLevelUp) returns (google.protobuf.Empty);
 

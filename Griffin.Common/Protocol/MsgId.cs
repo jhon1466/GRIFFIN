@@ -555,6 +555,8 @@
         MsgScGunTransform,
         MsgCsGunSelected = 11128,
         MsgScGunSelected,
+        MsgCsPublicTalentSkillItemCopy = 11130,
+        MsgScPublicTalentSkillItemCopy,
         MsgCsResource = 11200,
         MsgScResource,
         MsgScResourceUpdate,
