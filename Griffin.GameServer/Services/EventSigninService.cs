@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Serilog;
@@ -9,6 +9,9 @@ namespace Griffin.GameServer.Services
     {
         SC_GetActivityCheckIn GetStatus(uint accountUid);
         bool TryClaim(uint accountUid, uint activityId, List<IMessage> messages);
+
+        /// <summary>Today's check-in flag and the days claimed so far of one event (the delayed sign-in reads both).</summary>
+        (bool DoneToday, uint ClaimedDays) Progress(uint accountUid, uint activityId);
     }
 
     /// <summary>
@@ -29,7 +32,7 @@ namespace Griffin.GameServer.Services
         {
             EventSigninState state = CurrentState(uid);
             var response = new SC_GetActivityCheckIn();
-            foreach (uint activityId in CapturedActivityIds)
+            foreach (uint activityId in ActivityIds())
             {
                 List<EventSigninRewardData> rewards = Rewards(activityId);
                 if (rewards.Count == 0)
@@ -49,7 +52,7 @@ namespace Griffin.GameServer.Services
 
         public bool TryClaim(uint uid, uint activityId, List<IMessage> messages)
         {
-            if (!CapturedActivityIds.Contains(activityId))
+            if (Rewards(activityId).Count == 0)
                 return false;
 
             lock (AccountLocks.GetOrAdd(uid, static _ => new object()))
@@ -87,6 +90,28 @@ namespace Griffin.GameServer.Services
                 accountState.Set(uid, StateKey, state);
                 return true;
             }
+        }
+
+        public (bool DoneToday, uint ClaimedDays) Progress(uint uid, uint activityId)
+        {
+            EventSigninProgress progress = CurrentState(uid).Activities.GetValueOrDefault(activityId) ?? new EventSigninProgress();
+            uint claimed = (uint)Rewards(activityId).Count(row => row.Days <= progress.ClaimedThrough);
+            return (progress.LastClaimDate == ChinaDateKey(), claimed);
+        }
+
+        /// <summary>
+        /// Every event with sign-in rewards that is open now (ActivityListData columns 4/5, which carry the new dates of an event reopened from
+        /// the GM tools), plus the ones of the captured reply. Only the captured 14 were served before, so other sign-in events never counted.
+        /// </summary>
+        private IEnumerable<uint> ActivityIds()
+        {
+            ulong now = (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            HashSet<uint> withRewards = tableService.GetTable<EventSigninRewardData>().Select(row => row.ActivityId).ToHashSet();
+            HashSet<uint> open = tableService.GetTable<ActivityListData>()
+                .Where(row => withRewards.Contains(row.Id))
+                .Where(row => (ulong)row.OpenTime <= now && (row.CloseTime == 0 || now <= (ulong)row.CloseTime))
+                .Select(row => row.Id).ToHashSet();
+            return open.Union(CapturedActivityIds).OrderBy(id => id);
         }
 
         private List<EventSigninRewardData> Rewards(uint activityId) => tableService.GetTable<EventSigninRewardData>()
