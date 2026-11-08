@@ -929,6 +929,15 @@ if (scenario is "all" or "regress")
             && r10.FindIndex(m => m is SC_DropCollect) < r10.FindIndex(m => m is SC_StoreBuy));
     }
 
+    // R-11 (2026-11-08, players) the general store ignored the quantity selector (hope) and never showed the reward window nor the spent currency live.
+    main.Send(new CS_StoreBuy { GoodsId = 3011, PriceType = 1, Hope = 3 });   // 150 of item 1 -> 1 of item 45, three times
+    var r11 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    var r11Drop = r11.OfType<SC_DropCollect>().FirstOrDefault();
+    Check("regress R-11: buying 3 at once answers Normal and shows the 3 items in the reward window",
+        r11.OfType<SC_StoreBuy>().FirstOrDefault() is { Code: 0, PriceType: 0 } && r11Drop is not null && r11Drop.Drops.Any(d => d.ItemId == 45 && d.ItemNum == 3)
+        && r11.FindIndex(m => m is SC_DropCollect) < r11.FindIndex(m => m is SC_StoreBuy),
+        $"drops={r11Drop}");
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());

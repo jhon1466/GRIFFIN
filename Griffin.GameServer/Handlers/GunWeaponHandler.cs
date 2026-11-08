@@ -291,8 +291,40 @@ namespace Griffin.GameServer.Handlers
             }
         }
 
-        public override void HandleBuyGunWeaponSkin(CS_BuyGunWeaponSkin request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsBuyGunWeaponSkin, HNINDAOJCKP.WeaponSkinHasNoRequiredItem);
+        /// <summary>
+        /// Buys a weapon skin (gun_id = WeaponSkinData id) with the price in its item_id map (item:count). The client keeps nothing from the answer:
+        /// ownership comes from index 60 and SC_UpdateGunWeaponSkinItem (A-201). Skins without a price are not for sale.
+        /// </summary>
+        public override void HandleBuyGunWeaponSkin(CS_BuyGunWeaponSkin request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            WeaponSkinData? skin = tableService.GetTable<WeaponSkinData>().FirstOrDefault(row => row.Id == request.GunId);
+            if (skin is null || skin.ItemId.Count == 0)
+            {
+                connection.Refuse(MsgId.MsgCsBuyGunWeaponSkin, HNINDAOJCKP.WeaponSkinHasNoRequiredItem);
+                return;
+            }
+            if (inventoryService.GetPlayerInventory<WeaponSkinEntity>(uid).Any(owned => owned.WeaponSkinId == skin.Id))
+            {
+                connection.Refuse(MsgId.MsgCsBuyGunWeaponSkin, HNINDAOJCKP.WeaponSkinHasNoRequiredItem);
+                return;
+            }
+
+            List<Google.Protobuf.IMessage> messages = [];
+            if (!itemUse.Spend(uid, skin.ItemId.ToDictionary(pair => pair.Key, pair => (int)pair.Value), messages))
+            {
+                connection.Refuse(MsgId.MsgCsBuyGunWeaponSkin, HNINDAOJCKP.ItemNotEnough);
+                return;
+            }
+            inventoryService.Add(uid, new WeaponSkinEntity { WeaponSkinId = skin.Id });
+            messages.Add(new SC_AddIndex { Type = 60, Id = skin.Id, Ts = 0 });
+            messages.Add(new SC_UpdateGunWeaponSkinItem { PGMKLGCFAOF = { [skin.Id] = 1 } });
+            PurchaseFeedback.Add(messages, [(skin.Id, 1)]);
+            messages.Add(new SC_BuyGunWeaponSkin { GunId = skin.Id });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
 
         public override void HandleUnlockGunWeaponSkin(CS_UnlockGunWeaponSkin request, Connection connection)
         {
@@ -324,8 +356,32 @@ namespace Griffin.GameServer.Handlers
             connection.Send(new SC_AddIndex { Type = 60, Id = skin.Id, Ts = 0 });
         }
 
-        public override void HandleBuyGunWeaponModSkin(CS_BuyGunWeaponModSkin request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsBuyGunWeaponModSkin, HNINDAOJCKP.WeaponModSkinHasNoRequiredItem);
+        /// <summary>Buys an accessory skin (WeaponModSkinData id) with the price in its item_id map; ownership is index 61, as at login (A-201).</summary>
+        public override void HandleBuyGunWeaponModSkin(CS_BuyGunWeaponModSkin request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            WeaponModSkinData? skin = tableService.GetTable<WeaponModSkinData>().FirstOrDefault(row => row.Id == request.GunId);
+            if (skin is null || skin.ItemId.Count == 0
+                || inventoryService.GetPlayerInventory<WeaponModSkinEntity>(uid).Any(owned => owned.WeaponModSkinId == skin.Id))
+            {
+                connection.Refuse(MsgId.MsgCsBuyGunWeaponModSkin, HNINDAOJCKP.WeaponModSkinHasNoRequiredItem);
+                return;
+            }
+
+            List<Google.Protobuf.IMessage> messages = [];
+            if (!itemUse.Spend(uid, skin.ItemId.ToDictionary(pair => pair.Key, pair => (int)pair.Value), messages))
+            {
+                connection.Refuse(MsgId.MsgCsBuyGunWeaponModSkin, HNINDAOJCKP.ItemNotEnough);
+                return;
+            }
+            inventoryService.Add(uid, new WeaponModSkinEntity { WeaponModSkinId = skin.Id });
+            messages.Add(new SC_AddIndex { Type = 61, Id = skin.Id, Ts = 0 });
+            PurchaseFeedback.Add(messages, [(skin.Id, 1)]);
+            messages.Add(new SC_BuyGunWeaponModSkin { GunId = skin.Id });
+            connection.SendAutoEncrypted(messages.ToArray());
+        }
 
         // ---- mod lock plans: saved selections of mods to keep locked, per plan group and slot (stored in mod.lockplans)
         private sealed class LockSlot

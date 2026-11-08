@@ -99,7 +99,9 @@ namespace Griffin.GameServer.Handlers
             lock (AccountLock(connection.Account.Uid))
             {
                 List<IMessage> messages = [];
-                SC_StoreBuy result = Buy(connection.Account.Uid, request, messages);
+                List<(uint ItemId, int Count)> obtained = [];
+                SC_StoreBuy result = Buy(connection.Account.Uid, request, messages, obtained);
+                PurchaseFeedback.Add(messages, obtained);
                 messages.Add(result);
                 connection.SendAutoEncrypted(messages.ToArray());
             }
@@ -114,8 +116,10 @@ namespace Griffin.GameServer.Handlers
             {
                 List<IMessage> messages = [];
                 SC_StoreBatchBuy batch = new();
+                List<(uint ItemId, int Count)> obtained = [];
                 foreach (CS_StoreBuy buy in request.HDNGMDLJHGJ)
-                    batch.HDNGMDLJHGJ.Add(Buy(connection.Account.Uid, buy, messages));
+                    batch.HDNGMDLJHGJ.Add(Buy(connection.Account.Uid, buy, messages, obtained));
+                PurchaseFeedback.Add(messages, obtained);
 
                 messages.Add(batch);
                 connection.SendAutoEncrypted(messages.ToArray());
@@ -200,6 +204,7 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            PurchaseFeedback.Add(messages, rewards);
             messages.Add(new SC_StoreBlackBuy
             {
                 TagId = request.TagId,
@@ -233,10 +238,17 @@ namespace Griffin.GameServer.Handlers
         public SC_StoreBuy BuyFor(uint uid, uint goodsId, List<IMessage> messages)
         {
             lock (AccountLock(uid))
-                return Buy(uid, new CS_StoreBuy { GoodsId = goodsId }, messages);
+            {
+                // the store checks the price type the client names: take the catalog's own one
+                uint priceType = tableService.GetTable<StoreGoodData>().FirstOrDefault(g => g.Id == goodsId)?.PriceType ?? 0;
+                List<(uint ItemId, int Count)> obtained = [];
+                SC_StoreBuy result = Buy(uid, new CS_StoreBuy { GoodsId = goodsId, PriceType = priceType }, messages, obtained);
+                PurchaseFeedback.Add(messages, obtained);
+                return result;
+            }
         }
 
-        private SC_StoreBuy Buy(uint uid, CS_StoreBuy request, List<IMessage> messages)
+        private SC_StoreBuy Buy(uint uid, CS_StoreBuy request, List<IMessage> messages, List<(uint ItemId, int Count)> obtained)
         {
             SC_StoreBuy Reply(MANKAOBLPBJ.Types.Code code) =>
                 new() { Code = code, GoodsId = request.GoodsId, PriceType = request.PriceType };
@@ -255,7 +267,9 @@ namespace Griffin.GameServer.Handlers
 
             Dictionary<uint, uint> purchases = Purchases(uid);
             uint bought = purchases.GetValueOrDefault(good.Id);
-            if (good.Limit > 0 && bought >= good.Limit)
+            // hope = how many the player asked for with the quantity selector (1 when absent)
+            uint quantity = Math.Clamp(request.Hope, 1u, 999u);
+            if (good.Limit > 0 && bought + quantity > good.Limit)
                 return Reply(MANKAOBLPBJ.Types.Code.LimitAgain);
 
             bool paidWithResource = good.PriceType != 0
@@ -292,7 +306,10 @@ namespace Griffin.GameServer.Handlers
                 return Reply(MANKAOBLPBJ.Types.Code.Locked);
             }
 
-            Dictionary<uint, int> cost = new() { [good.PriceType] = (int)Math.Ceiling(good.Price) };
+            long totalPrice = (long)Math.Ceiling(good.Price) * quantity;
+            if (totalPrice > int.MaxValue)
+                return Reply(MANKAOBLPBJ.Types.Code.CostError);
+            Dictionary<uint, int> cost = new() { [good.PriceType] = (int)totalPrice };
             IMessage spent;
             if (paidWithItem)
             {
@@ -308,7 +325,7 @@ namespace Griffin.GameServer.Handlers
             }
 
             List<IMessage> granted = [];
-            int delivered = rewards.Count(reward => rewardService.Grant(uid, reward.ItemId, reward.Count, granted).Granted);
+            int delivered = rewards.Count(reward => rewardService.Grant(uid, reward.ItemId, (int)Math.Min(int.MaxValue, (long)reward.Count * quantity), granted).Granted);
             if (delivered != rewards.Count)
             {
                 // nothing could be delivered: give the money back instead of charging for nothing
@@ -320,24 +337,14 @@ namespace Griffin.GameServer.Handlers
                 return Reply(MANKAOBLPBJ.Types.Code.Locked);
             }
 
-            purchases[good.Id] = bought + 1;
+            purchases[good.Id] = bought + quantity;
+            obtained.AddRange(rewards.Select(reward => (reward.ItemId, (int)Math.Min(int.MaxValue, (long)reward.Count * quantity))));
             accountState.Set(uid, PurchasesKey, purchases);
 
             messages.AddRange(granted);
             messages.Add(spent);
-            // SC_Items only stores the new counts; SC_UpdateItem also tells the open screens (client event 5000), so the
-            // event currency shown in the shop goes down at once (A-200)
-            foreach (IMessage message in granted.Append(spent))
-                if (message is SC_Items items)
-                    foreach (KeyValuePair<uint, int> item in items.Items)
-                        messages.Add(new SC_UpdateItem { ItemId = item.Key, ItemNum = item.Value });
-            // the "obtained" window is built from SC_DropCollect (ECDDLOFFOAM.GJJGLBKHGJP), shown once SC_StoreBuy arrives
-            SC_DropCollect drops = new();
-            foreach ((uint itemId, int count) in rewards)
-                drops.Drops.Add(new UserDropCache { ItemId = itemId, ItemNum = (uint)count });
-            messages.Add(drops);
             Log.Information("Store: account {Uid} bought goods {GoodsId} for {Cost} ({Bought}/{Limit}).",
-                uid, good.Id, $"{good.PriceType}x{cost[good.PriceType]}", bought + 1, good.Limit == 0 ? "unlimited" : good.Limit);
+                uid, good.Id, $"{good.PriceType}x{cost[good.PriceType]}", bought + quantity, good.Limit == 0 ? "unlimited" : good.Limit);
             // field 3 must be 0 on success: the client only shows the reward window and runs the buy callback when it is 0 (LODBPMDNMIG.FCMKPNCGMEK, A-200)
             return new() { Code = MANKAOBLPBJ.Types.Code.Normal, GoodsId = request.GoodsId, PriceType = 0 };
         }
