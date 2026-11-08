@@ -406,10 +406,15 @@ if (scenario is "all" or "unite")
     // Expanded drill (SimCombatUnite): open mission state, history, and star rewards that stay locked without stars (A-156).
     main.Send(new CS_SimCombatUniteEnter());
     var uniteEnter = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SimCombatUniteEnter>().FirstOrDefault();
-    Check("unite: Enter answers the open mission 1173", uniteEnter is not null && uniteEnter.MNIFLHHOPHK.Any(m => m.OHPHNKCEGCM == 1173 && m.PlanId == 90077));
+    // the open mission rotates with the date (PlanData type 9: 90077/1173 until 2026-11-02, then 90078/1174...): check that one is open,
+    // not a fixed id (the old fixed 1173 failed once its plan ended although the server was right)
+    Check("unite: Enter answers the mission open today", uniteEnter is not null && uniteEnter.MNIFLHHOPHK.Count == 1
+        && uniteEnter.MNIFLHHOPHK.All(m => m.OHPHNKCEGCM >= 1173 && m.PlanId >= 90077),
+        uniteEnter is null ? "no reply" : string.Join(',', uniteEnter.MNIFLHHOPHK.Select(m => $"{m.PlanId}/{m.OHPHNKCEGCM}")));
+    uint openUnite = uniteEnter?.MNIFLHHOPHK.FirstOrDefault()?.OHPHNKCEGCM ?? 1173;
     main.Send(new CS_SimCombatUniteGetHistory());
     Check("unite: GetHistory is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_SimCombatUniteGetHistory));
-    main.Send(new CS_SimCombatUniteClaimReward { OHPHNKCEGCM = 1173, KNAHJGMNKIL = 4 });
+    main.Send(new CS_SimCombatUniteClaimReward { OHPHNKCEGCM = openUnite, KNAHJGMNKIL = 4 });
     Check("unite: a reward without the stars is not given", !main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_SimCombatUniteClaimReward));
 }
 
@@ -647,12 +652,16 @@ if (scenario is "all" or "weapon")
     Check("weapon: the account has a weapon to level", w0 is not null);
     if (w0 is not null)
     {
+        // the blueprints held before the level-up (the starting amount changes with provisioning, so compare with it)
+        main.Send(new CS_Items());
+        int blueprintsBefore = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Items>().LastOrDefault()?.Items.GetValueOrDefault(8301u) ?? 0;
         main.Send(new CS_GunWeaponLvUp { Id = w0.Id, Level = 10 });
         var wl = main.ReadFor(TimeSpan.FromSeconds(3));
         var wUp = wl.Select(p => p.Message).OfType<SC_GunWeaponUp>().FirstOrDefault();
         var wItems = wl.Select(p => p.Message).OfType<SC_Items>().FirstOrDefault();
         Check("weapon: level-up to 10 answered", wUp is not null && wUp.Level == 10 && wUp.Id == w0.Id, $"level={wUp?.Level}");
-        Check("weapon: analysis blueprints (8301) were charged", wItems is not null && wItems.Items.ContainsKey(8301u) && wItems.Items[8301u] < 400000, $"left={wItems?.Items.GetValueOrDefault(8301u)}");
+        Check("weapon: analysis blueprints (8301) were charged", wItems is not null && wItems.Items.ContainsKey(8301u) && wItems.Items[8301u] < blueprintsBefore,
+            $"before={blueprintsBefore} left={wItems?.Items.GetValueOrDefault(8301u)}");
 
         main.Send(new CS_GunWeaponLockUnlock { Id = w0.Id });
         var lk = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunWeaponLockUnlock>().FirstOrDefault();
