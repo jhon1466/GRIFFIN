@@ -924,6 +924,9 @@ if (scenario is "all" or "regress")
         var r10Buy = r10.OfType<SC_StoreBuy>().FirstOrDefault();
         Check("regress R-10: event shop goods paid with the event currency item can be bought (reply field 3 = 0 so the reward window shows)", r10Buy is { Code: 0, PriceType: 0 } && r10.OfType<SC_Items>().Any(i => i.Items.ContainsKey(179201u)),
             $"code={r10Buy?.Code}");
+        Check("regress R-10: the spent event currency is pushed live with SC_UpdateItem", r10.OfType<SC_UpdateItem>().Any(u => u.ItemId == 179201u));
+        Check("regress R-10: the purchase sends SC_DropCollect with the goods (reward window)", r10.OfType<SC_DropCollect>().Any(d => d.Drops.Count > 0)
+            && r10.FindIndex(m => m is SC_DropCollect) < r10.FindIndex(m => m is SC_StoreBuy));
     }
 
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).

@@ -325,6 +325,17 @@ namespace Griffin.GameServer.Handlers
 
             messages.AddRange(granted);
             messages.Add(spent);
+            // SC_Items only stores the new counts; SC_UpdateItem also tells the open screens (client event 5000), so the
+            // event currency shown in the shop goes down at once (A-200)
+            foreach (IMessage message in granted.Append(spent))
+                if (message is SC_Items items)
+                    foreach (KeyValuePair<uint, int> item in items.Items)
+                        messages.Add(new SC_UpdateItem { ItemId = item.Key, ItemNum = item.Value });
+            // the "obtained" window is built from SC_DropCollect (ECDDLOFFOAM.GJJGLBKHGJP), shown once SC_StoreBuy arrives
+            SC_DropCollect drops = new();
+            foreach ((uint itemId, int count) in rewards)
+                drops.Drops.Add(new UserDropCache { ItemId = itemId, ItemNum = (uint)count });
+            messages.Add(drops);
             Log.Information("Store: account {Uid} bought goods {GoodsId} for {Cost} ({Bought}/{Limit}).",
                 uid, good.Id, $"{good.PriceType}x{cost[good.PriceType]}", bought + 1, good.Limit == 0 ? "unlimited" : good.Limit);
             // field 3 must be 0 on success: the client only shows the reward window and runs the buy callback when it is 0 (LODBPMDNMIG.FCMKPNCGMEK, A-200)
