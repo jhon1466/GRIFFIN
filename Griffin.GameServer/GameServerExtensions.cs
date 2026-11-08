@@ -34,6 +34,7 @@ namespace Griffin.GameServer
 
             services.AddScoped<IRawPacketHandler, Services.Darkov.DarkovRawHandler>();
             services.AddScoped<IRawPacketHandler, Services.CustomwallRawHandler>();
+            services.AddScoped<IRawPacketHandler, Services.LobbyHallRawHandler>();
             services.AddScoped<IFallbackResponder, Services.PreferenceResponder>();
             services.AddScoped<IFallbackResponder, Services.QueryResponder>();
             services.AddScoped<IFallbackResponder, Services.EchoResponder>();
