@@ -154,7 +154,12 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account is null)
                 return info;
 
-            foreach (uint unlockedRoom in accountState.Get<List<uint>>(connection.Account.Uid, RoomsKey) ?? [])
+            // rooms without a cleaning cost (LobbyRoomData column 21 empty, e.g. 110 历战连廊) are open from the start on the official server; the
+            // client cannot clean them (it reads the first cost entry) and showed "clear the area first" on their furniture
+            IEnumerable<uint> freeRooms = tableService.GetTable<LobbyRoomData>()
+                .Where(r => TableFields.Map(r, 21).All(p => p.Value == 0))
+                .Select(r => TableFields.U(r, 1));
+            foreach (uint unlockedRoom in (accountState.Get<List<uint>>(connection.Account.Uid, RoomsKey) ?? []).Concat(freeRooms))
                 if (!info.CPJOGIOCNMM.ContainsKey(unlockedRoom))
                     info.CPJOGIOCNMM[unlockedRoom] = new OICGGHHHFBI();
 
