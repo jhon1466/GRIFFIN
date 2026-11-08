@@ -52,13 +52,13 @@ namespace Griffin.GameServer.Handlers
                         continue;
 
                     uint bought = purchases.GetValueOrDefault(good.Id);
-                    if (good.Limit > 0 && bought >= good.Limit)
+                    if (LimitOf(good) > 0 && bought >= LimitOf(good))
                         continue;
 
                     marketTag.Goods.Add(new MarketGood
                     {
                         Id = good.Id,
-                        Num = good.Limit > 0 ? good.Limit - bought : 0,
+                        Num = LimitOf(good) > 0 ? LimitOf(good) - bought : 0,
                         PriceType = good.PriceType,
                         Price = good.Price,
                         CBGAEKOCDOL = good.BuyReward,
@@ -74,11 +74,12 @@ namespace Griffin.GameServer.Handlers
                     response.Refresh.Tags[tagId] = (long)endsAt;
             }
 
-            foreach (StoreGoodData good in goods.Values.Where(good => good.Limit > 0 || purchases.ContainsKey(good.Id)))
+            // the client knows the limit from its own table; only bought goods need a history (the answer must stay under 64 KB)
+            foreach (StoreGoodData good in goods.Values.Where(good => purchases.ContainsKey(good.Id)))
                 response.Histories[good.Id] = new StoreHistory
                 {
                     Count = purchases.GetValueOrDefault(good.Id),
-                    Total = good.Limit,
+                    Total = LimitOf(good),
                 };
 
             if (connection.Account is not null)
@@ -269,7 +270,7 @@ namespace Griffin.GameServer.Handlers
             uint bought = purchases.GetValueOrDefault(good.Id);
             // hope = how many the player asked for with the quantity selector (1 when absent)
             uint quantity = Math.Clamp(request.Hope, 1u, 999u);
-            if (good.Limit > 0 && bought + quantity > good.Limit)
+            if (LimitOf(good) > 0 && bought + quantity > LimitOf(good))
                 return Reply(MANKAOBLPBJ.Types.Code.LimitAgain);
 
             bool paidWithResource = good.PriceType != 0
@@ -306,7 +307,11 @@ namespace Griffin.GameServer.Handlers
                 return Reply(MANKAOBLPBJ.Types.Code.Locked);
             }
 
-            long totalPrice = (long)Math.Ceiling(good.Price) * quantity;
+            // the client sends the unit price it shows (field 7): a discounted goods costs that, never more than the catalog price
+            long unitPrice = (long)Math.Ceiling(good.Price);
+            if (request.CBGAEKOCDOL > 0 && request.CBGAEKOCDOL < unitPrice)
+                unitPrice = request.CBGAEKOCDOL;
+            long totalPrice = unitPrice * quantity;
             if (totalPrice > int.MaxValue)
                 return Reply(MANKAOBLPBJ.Types.Code.CostError);
             Dictionary<uint, int> cost = new() { [good.PriceType] = (int)totalPrice };
@@ -338,16 +343,24 @@ namespace Griffin.GameServer.Handlers
             }
 
             purchases[good.Id] = bought + quantity;
+            // the client counts purchases from SC_StoreHistoryUp (LODBPMDNMIG.LIEKIMODFLE): without it a limited goods never showed sold out
+            messages.Add(new SC_StoreHistoryUp { Id = good.Id, History = new StoreHistory { Count = bought + quantity, Total = LimitOf(good) } });
             obtained.AddRange(rewards.Select(reward => (reward.ItemId, (int)Math.Min(int.MaxValue, (long)reward.Count * quantity))));
             accountState.Set(uid, PurchasesKey, purchases);
 
             messages.AddRange(granted);
             messages.Add(spent);
             Log.Information("Store: account {Uid} bought goods {GoodsId} for {Cost} ({Bought}/{Limit}).",
-                uid, good.Id, $"{good.PriceType}x{cost[good.PriceType]}", bought + quantity, good.Limit == 0 ? "unlimited" : good.Limit);
+                uid, good.Id, $"{good.PriceType}x{cost[good.PriceType]}", bought + quantity, LimitOf(good) == 0 ? "unlimited" : LimitOf(good));
             // field 3 must be 0 on success: the client only shows the reward window and runs the buy callback when it is 0 (LODBPMDNMIG.FCMKPNCGMEK, A-200)
             return new() { Code = MANKAOBLPBJ.Types.Code.Normal, GoodsId = request.GoodsId, PriceType = 0 };
         }
+
+        /// <summary>
+        /// How many times a goods can be bought. Client 4.0.5142 reads it from column 16 of StoreGoodData (LGPMJLOHBIM.HJIMJPHENDN, tag 128);
+        /// column 11 (the generated "limit") no longer holds it, so every limited goods looked unlimited and never sold out (A-202).
+        /// </summary>
+        private static uint LimitOf(StoreGoodData good) => TableFields.U(good, 16);
 
         private Dictionary<uint, uint> Purchases(uint uid) =>
             accountState.Get<Dictionary<uint, uint>>(uid, PurchasesKey) ?? [];

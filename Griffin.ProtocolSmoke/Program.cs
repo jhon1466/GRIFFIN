@@ -938,6 +938,30 @@ if (scenario is "all" or "regress")
         && r11.FindIndex(m => m is SC_DropCollect) < r11.FindIndex(m => m is SC_StoreBuy),
         $"drops={r11Drop}");
 
+    // R-12 (2026-11-08, players) limited goods never sold out: the limit moved to column 16 of StoreGoodData and the client counts purchases
+    // from SC_StoreHistoryUp. Goods 106134 can be bought once (price 100 of item 1610000).
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        string acc12 = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var uid12 = System.Text.RegularExpressions.Regex.Match(acc12, @"""uid""\s*:\s*(\d+)");
+        if (uid12.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uid12.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":1610000,\"count\":500}", System.Text.Encoding.UTF8, "application/json"));
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_Store());
+        var r12Store = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Store>().FirstOrDefault();
+        var r12Good = r12Store?.Tags.Values.SelectMany(t => t.Goods).FirstOrDefault(g => g.Id == 106134);
+        Check("regress R-12: the store lists limited goods 106134 with 1 left (not sold out)", r12Good is { Num: 1 }, $"good={r12Good}");
+        main.Send(new CS_StoreBuy { GoodsId = 106134, PriceType = 1610000, Hope = 1 });
+        var r12 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        Check("regress R-12: buying it pushes SC_StoreHistoryUp with 1 of 1 bought",
+            r12.OfType<SC_StoreBuy>().FirstOrDefault() is { Code: 0 } && r12.OfType<SC_StoreHistoryUp>().Any(h => h.Id == 106134 && h.History.Count == 1 && h.History.Total == 1),
+            $"history={r12.OfType<SC_StoreHistoryUp>().FirstOrDefault()}");
+        main.Send(new CS_StoreBuy { GoodsId = 106134, PriceType = 1610000, Hope = 1 });
+        var r12Again = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StoreBuy>().FirstOrDefault();
+        Check("regress R-12: a second purchase is refused as sold out (LimitAgain)", r12Again is not null && r12Again.Code == MANKAOBLPBJ.Types.Code.LimitAgain, $"code={r12Again?.Code}");
+    }
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());
