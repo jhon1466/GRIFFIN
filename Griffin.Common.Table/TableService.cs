@@ -30,6 +30,54 @@ namespace Griffin.Common.Table
             "DailyQuestData", "DailyRewardData", "DailyRewardGroupData", "EventSigninRewardData",
         ];
 
+        private static readonly object UpdateGate = new();
+
+        public bool UpdateTo(string version)
+        {
+            lock (UpdateGate)
+            {
+                if (string.Equals(version, StaticConfig.StcVersion, StringComparison.Ordinal))
+                    return true;
+
+                string previous = StaticConfig.StcVersion;
+                logger.LogInformation("The official tables changed to {Version}; updating from {Previous} without restarting", version, previous);
+                StaticConfig.StcVersion = version;
+                try
+                {
+                    PrepareTables();
+                    var problems = ValidateTables();
+                    if (problems.Count == 0)
+                    {
+                        ClearCache();
+                        Griffin.Common.Utils.OfficialResourceCatalog.RememberStc(version);
+                        logger.LogInformation("Now using the official tables {Version}", version);
+                        return true;
+                    }
+
+                    foreach (var problem in problems)
+                        logger.LogWarning("Official tables {Version}: {Problem}", version, problem);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "The official tables {Version} could not be prepared", version);
+                }
+
+                logger.LogWarning("Keeping the tables {Version}", previous);
+                StaticConfig.StcVersion = previous;
+                try
+                {
+                    PrepareTables();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "The tables {Version} could not be restored", previous);
+                }
+
+                ClearCache();
+                return false;
+            }
+        }
+
         public void EnsureTables()
         {
             string? official = StaticConfig.StcVersionPinnedByEnv ? null : OfficialStcVersion();
@@ -453,5 +501,11 @@ namespace Griffin.Common.Table
         IReadOnlyList<string> ValidateTables();
 
         void ClearCache();
+
+        /// <summary>
+        /// Moves the server to another official table version while it runs: the new set is restored or downloaded, checked and loaded;
+        /// on any problem the previous set comes back. Returns true when the server now uses <paramref name="version"/>.
+        /// </summary>
+        bool UpdateTo(string version);
     }
 }

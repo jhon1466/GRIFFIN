@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Griffin.Common.Utils;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -10,7 +10,7 @@ namespace Griffin.GameServer.Services
     /// client build, allowing connected clients to download official CDN data without restarting Griffin. Table and
     /// binary versions are never changed automatically. Explicit GRIFFIN_AB_RESOURCE_VERSION pins take precedence.
     /// </summary>
-    public sealed class OfficialVersionWatcher(ILogger<OfficialVersionWatcher> logger) : Microsoft.Extensions.Hosting.BackgroundService
+    public sealed class OfficialVersionWatcher(ILogger<OfficialVersionWatcher> logger, Griffin.Common.Table.ITableService tables) : Microsoft.Extensions.Hosting.BackgroundService
     {
         public sealed record Snapshot(string ResVersion, string StcVersion, string BinaryVersion, bool UpdateAvailable, DateTime CheckedAtUtc);
 
@@ -62,6 +62,12 @@ namespace Griffin.GameServer.Services
                         {
                             bool newer = res != StaticConfig.AbResourceVersion || stc != StaticConfig.StcVersion;
                             Latest = new Snapshot(res, stc, binary, newer, DateTime.UtcNow);
+
+                            // the tables follow the official ones while the server runs too (both platforms share them), so the client
+                            // never has to download an older set when it comes from the official server
+                            if (!string.IsNullOrWhiteSpace(stc) && !StaticConfig.StcVersionPinnedByEnv && stc != StaticConfig.StcVersion
+                                && tables.UpdateTo(stc))
+                                EventOverrideService.Apply(tables);
                         }
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
