@@ -119,6 +119,19 @@ namespace Griffin.Common.Table
                 logger.LogInformation("Previous tables moved to {Dir}", backupDir);
             }
 
+            // a set of this version moved aside earlier (Tables.bak-VERSION) comes back without downloading it again
+            string? kept = Directory.GetDirectories(Path.GetDirectoryName(tablesDir)!, Path.GetFileName(tablesDir) + ".bak-" + expectedVersion + "*")
+                .Where(dir => File.Exists(Path.Combine(dir, "version.txt"))
+                    && string.Equals(File.ReadAllText(Path.Combine(dir, "version.txt")).Trim(), expectedVersion, StringComparison.Ordinal))
+                .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+            if (kept is not null)
+            {
+                Directory.Move(kept, tablesDir);
+                logger.LogInformation("Restored tables {Version} from {Dir}", expectedVersion, kept);
+                return;
+            }
+
             Directory.CreateDirectory(tablesDir);
 
             if (TryCopyFromClientCache(tablesDir, expectedVersion))
@@ -295,19 +308,34 @@ namespace Griffin.Common.Table
         /// <summary>The table version the official servers announce now, or null when they cannot be reached.</summary>
         private string? OfficialStcVersion()
         {
-            try
+            // the official service sometimes answers slowly: three tries, then the version seen last time, so a slow start does not
+            // fall back to the old built-in tables (which made the client download everything again)
+            for (int attempt = 1; attempt <= 3; attempt++)
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-                string json = client.GetStringAsync(StaticConfig.OfficialStcVersionUrl).GetAwaiter().GetResult();
-                using var doc = System.Text.Json.JsonDocument.Parse(json);
-                string? stc = doc.RootElement.GetProperty("data").GetProperty("StcVersion").GetString();
-                return string.IsNullOrWhiteSpace(stc) ? null : stc.Trim();
+                try
+                {
+                    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                    string json = client.GetStringAsync(StaticConfig.OfficialStcVersionUrl).GetAwaiter().GetResult();
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    string? stc = doc.RootElement.GetProperty("data").GetProperty("StcVersion").GetString();
+                    if (!string.IsNullOrWhiteSpace(stc))
+                    {
+                        Griffin.Common.Utils.OfficialResourceCatalog.RememberStc(stc.Trim());
+                        return stc.Trim();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning("The official table version could not be read (try {Attempt}/3: {Message})", attempt, ex.Message);
+                }
             }
-            catch (Exception ex)
-            {
-                logger.LogWarning("The official table version could not be read ({Message}); keeping {Version}", ex.Message, StaticConfig.StcVersion);
-                return null;
-            }
+
+            string? remembered = Griffin.Common.Utils.OfficialResourceCatalog.RememberedStc;
+            if (remembered is not null)
+                logger.LogWarning("Using the official table version seen last time: {Version}", remembered);
+            else
+                logger.LogWarning("No official table version known; keeping {Version}", StaticConfig.StcVersion);
+            return remembered;
         }
 
         private static byte[] FetchTables(string url)
