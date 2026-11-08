@@ -327,7 +327,8 @@ namespace Griffin.GameServer.Handlers
             messages.Add(spent);
             Log.Information("Store: account {Uid} bought goods {GoodsId} for {Cost} ({Bought}/{Limit}).",
                 uid, good.Id, $"{good.PriceType}x{cost[good.PriceType]}", bought + 1, good.Limit == 0 ? "unlimited" : good.Limit);
-            return Reply(MANKAOBLPBJ.Types.Code.Normal);
+            // field 3 must be 0 on success: the client only shows the reward window and runs the buy callback when it is 0 (LODBPMDNMIG.FCMKPNCGMEK, A-200)
+            return new() { Code = MANKAOBLPBJ.Types.Code.Normal, GoodsId = request.GoodsId, PriceType = 0 };
         }
 
         private Dictionary<uint, uint> Purchases(uint uid) =>

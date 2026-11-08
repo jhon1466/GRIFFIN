@@ -922,7 +922,7 @@ if (scenario is "all" or "regress")
         main.Send(new CS_StoreBuy { GoodsId = 75403, PriceType = 179201 });
         var r10 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
         var r10Buy = r10.OfType<SC_StoreBuy>().FirstOrDefault();
-        Check("regress R-10: event shop goods paid with the event currency item can be bought", r10Buy is { Code: 0 } && r10.OfType<SC_Items>().Any(i => i.Items.ContainsKey(179201u)),
+        Check("regress R-10: event shop goods paid with the event currency item can be bought (reply field 3 = 0 so the reward window shows)", r10Buy is { Code: 0, PriceType: 0 } && r10.OfType<SC_Items>().Any(i => i.Items.ContainsKey(179201u)),
             $"code={r10Buy?.Code}");
     }
 
