@@ -397,3 +397,17 @@ GriffinPatcher/*.exe
 # local server data
 Resources/
 logs/
+
+# ---- local tools and notes of this machine (kept in the folder, not published) ----
+/AGENTS.md
+/CLAUDE.local.md
+/docs/
+/client-patcher/
+/language-patcher/
+/Griffin.DarkovAnalyze/
+/Griffin.WeeklyReport/
+/Griffin.GMTools/
+/GriffinPatcher/source/
+/Griffin.ProtocolSmoke/capture/
+/scripts/*
+!/scripts/start-server.ps1

@@ -1,9 +1,9 @@
-// Protocol smoke test for the private server. Plays the client side of the documented flow:
+﻿// Protocol smoke test for the private server. Plays the client side of the documented flow:
 //   HTTP /email/login -> TCP CS_Login -> startup requests -> inventory/gacha/dorm requests -> reconnect.
 // It never touches the user's game client. Test account credentials come from args/env, never hardcoded secrets.
 //
 // Usage: dotnet run --project Griffin.ProtocolSmoke -- [--http https://127.0.0.1] [--tcp 127.0.0.1:7001]
-//            [--email smoke@local.test] [--password <pw>] [--scenario all|darkov|darkovroom|weekly|party|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm]
+//            [--email smoke@local.test] [--password <pw>] [--scenario all|darkov|darkovroom|weekly|party|rouge|roguelegacy|roguemigrate|bugs|login|calendar|inventory|store|mail|profile|prefs|formation|gun|weapon|love|items|cumulative|controlroom|restored|provision|provisionlogin|mods|talents|garden|cooking|equip|lobby|display|locked|battlepass|gacha|dorm|regress]
 using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -778,6 +778,81 @@ if (scenario is "all" or "lobbyroom")
     main.Send(new CS_LobbyGetBuildInfo());
     var buildInfo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_LobbyGetBuildInfo>().FirstOrDefault();
     Check("lobby: the cleaned room is listed in the build info", buildInfo is not null && buildInfo.CPJOGIOCNMM.ContainsKey(108));
+}
+// ---------- regressions of fixed player reports (scenario "regress", part of "all") ----------
+// Each check pins a bug that was fixed after a player report; it must fail on the code before the fix.
+if (scenario is "all" or "regress")
+{
+    // R-1 (2026-11-07) rooms without a cleaning cost (LobbyRoomData col 21 empty: 110 历战连廊, 105) are open from the start;
+    // otherwise their furniture showed "clear the area first" and could not be bought.
+    main.Send(new CS_LobbyGetBuildInfo());
+    var build = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_LobbyGetBuildInfo>().FirstOrDefault();
+    Check("regress R-1: free room 110 (Lizhan corridor) is open", build is not null && build.CPJOGIOCNMM.ContainsKey(110));
+    Check("regress R-1: free room 105 is open", build is not null && build.CPJOGIOCNMM.ContainsKey(105));
+
+    // R-2 (2026-11-07) the display wall (CustomizeRoom) is saved and returned; it used to vanish after a restart.
+    var wallSet = new CS_LobbySetCustomizeRoom { RoomId = 109 };
+    wallSet.HGILICCNAMJ[7] = new OPEMDOEHKCD();
+    wallSet.GPDJEHNOMDF.Add(3);
+    main.Send(wallSet);
+    var wallReply = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    Check("regress R-2: setting the display wall is answered", wallReply.OfType<SC_LobbySetCustomizeRoom>().Any(r => r.RoomId == 109 && r.HGILICCNAMJ.ContainsKey(7)),
+        string.Join(',', wallReply.Select(m => m.GetType().Name)));
+    main.Send(new CS_LobbyCustomizeRoomInfo { RoomId = 109 });
+    var wallInfo = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyCustomizeRoomInfo>().FirstOrDefault();
+    Check("regress R-2: the display wall comes back from the room info", wallInfo?.EGOMNOLAAID?.Items.ContainsKey(7) == true);
+
+    // R-3 (2026-11-07) custom wall messages of the 4.0.5142 client (29056 save → 29057, 29054 info → 29055) keep what was saved.
+    byte[] wallBody = [0x08, 0x05, 0x12, 0x02, 0x08, 0x2A];          // {1: 5, 2: {1: 42}}
+    main.SendRaw(29056, wallBody);
+    var cwSet = main.ReadFor(TimeSpan.FromSeconds(2));
+    Check("regress R-3: custom wall save is answered with 29057", cwSet.Any(p => p.RawMsgId == 29057));
+    main.SendRaw(29054, []);
+    var cwInfo = main.ReadFor(TimeSpan.FromSeconds(2)).FirstOrDefault(p => p.RawMsgId == 29055);
+    Check("regress R-3: custom wall info returns the saved wall", cwInfo is not null && Convert.ToHexString(cwInfo.RawIMessageData).Contains("08051202082A"),
+        cwInfo is null ? "no 29055" : Convert.ToHexString(cwInfo.RawIMessageData));
+
+    // R-4 (2026-11-07) pinning badges on the 辉策战服 uniform (29782) got no answer and froze the screen; nothing was kept.
+    byte[] pins = Convert.FromHexString("0A0608011091846C0A0608021095846C");   // the request the client really sent
+    main.SendRaw(29782, pins);
+    var pinReply = main.ReadFor(TimeSpan.FromSeconds(2));
+    Check("regress R-4: pinning badges is answered (no frozen screen)", pinReply.Any(p => p.RawMsgId == 29783));
+    main.SendRaw(29780, []);
+    var uniform = main.ReadFor(TimeSpan.FromSeconds(2)).FirstOrDefault(p => p.RawMsgId == 29781);
+    Check("regress R-4: the uniform keeps both badges", uniform is not null
+        && Convert.ToHexString(uniform.RawIMessageData).Contains("91846C") && Convert.ToHexString(uniform.RawIMessageData).Contains("95846C"));
+
+    // R-5 (2026-11-07) the relic showcase (29760/29764) keeps the wall of a season.
+    main.SendRaw(29764, [0x08, 0x02, 0x10, 0x09]);                    // {1: season 2, 2: wall 9}
+    Check("regress R-5: showcase wall change is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.RawMsgId == 29765));
+    main.SendRaw(29760, []);
+    var showcase = main.ReadFor(TimeSpan.FromSeconds(2)).FirstOrDefault(p => p.RawMsgId == 29761);
+    Check("regress R-5: the showcase returns the season wall", showcase is not null && Convert.ToHexString(showcase.RawIMessageData).Contains("08021009"));
+
+    // R-6 (2026-11-07) the peak (SP) and affinity key slots are sent with as many entries as the doll has (1); three entries made the key
+    // screen stop before it built the affinity slot of every doll with a peak key (Vector...).
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory addall gun" });
+    main.ReadFor(TimeSpan.FromSeconds(8));
+    main.Send(new CS_Guns());
+    var gunList = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault();
+    Check("regress R-6: dolls are listed", gunList is not null && gunList.Guns.Count > 0);
+    if (gunList is not null)
+    {
+        var tooMany = gunList.Guns.Where(g => g.NJKHKDCNJPK.Count > 1 || g.INKGHGACOKA.Count > 1 || g.HMKBFECHGJD.Count > 1).Select(g => g.Id).ToList();
+        Check("regress R-6: peak and affinity slots have at most one entry", tooMany.Count == 0, $"dolls={string.Join(',', tooMany.Take(10))}");
+    }
+
+    // R-8 (found 2026-11-08 in the local checkout) the SDK banners ended in September 2026; Android hides expired cards, so the lobby
+    // showed no banner at all even though /banner answered 200.
+    string banners = await httpClient.GetStringAsync($"{http}/banner");
+    long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    var bannerEnds = System.Text.RegularExpressions.Regex.Matches(banners, @"""(?:end_time_ts|EndTimeTs|endTimeTs)""\s*:\s*(\d+)")
+        .Select(m => long.Parse(m.Groups.Cast<System.Text.RegularExpressions.Group>().Skip(1).First(g => g.Success).Value)).ToList();
+    Check("regress R-8: every SDK banner is still running", bannerEnds.Count > 0 && bannerEnds.All(t => t > nowTs), $"ends={string.Join(',', bannerEnds.Take(5))}");
+
+    // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
+    main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
+    Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());
 }
 if (scenario is "all" or "formation")
 {
@@ -2823,7 +2898,7 @@ if (scenario is "all" or "rouge")
     var loPrepare = new CS_RougePrepare { PlanId = losePlan, IFNEDNHKBJN = 1, HIGHJLJPCPB = loTrend, ODMEICDCEDP = loChip };
     loPrepare.NDKGOAHEAMJ.AddRange(new uint[] { 1001, 1008, 1021, 1022 });
     LoSend(loPrepare);
-    var loMap = LoSend(new CS_RougeStart { PlanId = losePlan }).OfType<SC_RougeStart>().FirstOrDefault()?.Map;
+    var loMap = LoSend(new CS_RougeStart { PlanId = losePlan }, 2000).OfType<SC_RougeStart>().FirstOrDefault()?.Map;
     var loNode = loMap!.GILKCKNOBGM[0].NNHPACALJEI.Values.OrderBy(n => n.KCIMLBLCCHP).First(n => n.AIODFHGMBME == 1);
     LoSend(new CS_RougeNodeOpen { Id = loNode.KCIMLBLCCHP, PlanId = losePlan });
     LoSend(new CS_StageStart { StcStageId = loNode.ANJHKELIAFF, Other = new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = loNode.KCIMLBLCCHP, PlanId = losePlan } } }, 400);
