@@ -158,8 +158,8 @@ namespace Griffin.GameServer.Handlers
             foreach (WeaponEntity weapon in inventoryService.GetPlayerInventory<WeaponEntity>(uid))
             {
                 message.Weapons.Add(weapon.ToProtoWeapon(WeaponModSkins.Of(accountState, uid, weapon.Id)));
-                if (weapon.GunId != 0)
-                    message.FEDCFGGDNBN[weapon.Id] = weapon.GunId;
+                // no equipped-weapon map here: the client Add()s it into its own map and a resend threw on the first equipped weapon (A-199);
+                // a mod answer does not change which doll holds which weapon (SC_GunWeaponBelong does)
             }
 
             return message;
@@ -503,7 +503,8 @@ namespace Griffin.GameServer.Handlers
 
             List<Google.Protobuf.IMessage> messages = [new SC_GunWeaponUp { Id = result.WeaponUid, Level = result.Level, Exp = result.Exp }];
             messages.AddRange(result.Updates);
-            messages.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, connection.Account.Uid));
+            // SC_GunWeaponUp updates the weapon object the screens hold; resending the weapon list replaced every weapon object (stale level on screen,
+            // wrong weapon types in the equip list until a restart) and threw on the client's equipped-weapon map (A-199)
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
@@ -545,8 +546,8 @@ namespace Griffin.GameServer.Handlers
 
             if (progress.Break(connection.Account.Uid, request.Id, request.MaterialUid) is { } times)
             {
-                List<Google.Protobuf.IMessage> messages = [new SC_GunWeaponBreak { Id = request.Id, BreakTimes = times }];
-                messages.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, connection.Account.Uid));
+                // the duplicate used as material leaves the client's list with SC_RemoveGunWeapon; no weapon list resend (A-199)
+                List<Google.Protobuf.IMessage> messages = [new SC_RemoveGunWeapon { Id = request.MaterialUid }, new SC_GunWeaponBreak { Id = request.Id, BreakTimes = times }];
                 connection.SendAutoEncrypted(messages.ToArray());
             }
             else

@@ -859,6 +859,57 @@ if (scenario is "all" or "regress")
         .Select(m => long.Parse(m.Groups.Cast<System.Text.RegularExpressions.Group>().Skip(1).First(g => g.Success).Value)).ToList();
     Check("regress R-8: every SDK banner is still running", bannerEnds.Count > 0 && bannerEnds.All(t => t > nowTs), $"ends={string.Join(',', bannerEnds.Take(5))}");
 
+    // R-9 (2026-11-08, players) after a weapon level-up or break the server resent the whole weapon list: the client rebuilt every weapon object
+    // (level not shown, calibration stuck at 2, assault rifles offered to a shotgun doll until a restart) and threw on its equipped-weapon map.
+    // seven copies (the store currency of a fresh account pays for five): granted through the GM API when the harness gives a token
+    string? gmToken = Environment.GetEnvironmentVariable("GRIFFIN_GM_TOKEN");
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        httpClient.DefaultRequestHeaders.Remove("X-GM-Token");
+        httpClient.DefaultRequestHeaders.Add("X-GM-Token", gmToken);
+        string acc = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var uidMatch = System.Text.RegularExpressions.Regex.Match(acc, @"""uid""\s*:\s*(\d+)");
+        if (uidMatch.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uidMatch.Groups[1].Value}/weapons",
+                new StringContent("{\"weaponId\":11016,\"count\":7}", System.Text.Encoding.UTF8, "application/json"));
+        main.ReadFor(TimeSpan.FromSeconds(2));
+    }
+    else
+        for (int i = 0; i < 7; i++)
+        {
+            main.Send(new CS_StoreBuy { GoodsId = 5002, PriceType = 47 });
+            main.ReadFor(TimeSpan.FromSeconds(3));
+        }
+    main.Send(new CS_GunWeapons());
+    var r9List = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().FirstOrDefault();
+    var r9 = r9List?.Weapons.Where(w => w.StcId == 11016 && !r9List.FEDCFGGDNBN.ContainsKey(w.Id)).OrderByDescending(w => w.Id).Take(7).ToList() ?? [];
+    Check("regress R-9: seven loose copies of weapon 11016", r9.Count == 7, $"count={r9.Count}");
+    if (r9.Count == 7)
+    {
+        main.Send(new CS_GunWeaponLvUp { Id = r9[0].Id, Level = 5 });
+        var r9Up = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        Check("regress R-9: weapon level-up answers SC_GunWeaponUp without resending the weapon list",
+            r9Up.OfType<SC_GunWeaponUp>().Any() && !r9Up.OfType<SC_GunWeapons>().Any(), $"lists={r9Up.OfType<SC_GunWeapons>().Count()}");
+        // calibrate the same weapon 1 -> 6 in a row (the in-game counter got stuck at 2), then a seventh is refused
+        List<uint> steps = [];
+        bool clean = true;
+        for (int m = 1; m <= 5; m++)
+        {
+            main.Send(new CS_GunWeaponBreak { Id = r9[0].Id, MaterialUid = r9[m].Id });
+            var r9Br = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+            steps.Add(r9Br.OfType<SC_GunWeaponBreak>().FirstOrDefault()?.BreakTimes ?? 0);
+            clean &= r9Br.OfType<SC_RemoveGunWeapon>().Any(r => r.Id == r9[m].Id) && !r9Br.OfType<SC_GunWeapons>().Any();
+        }
+        Check("regress R-9: calibration climbs 2,3,4,5,6 on the same weapon", string.Join(',', steps) == "2,3,4,5,6", $"steps={string.Join(',', steps)}");
+        Check("regress R-9: every calibration removes its material with SC_RemoveGunWeapon and does not resend the weapon list", clean);
+        main.Send(new CS_GunWeaponBreak { Id = r9[0].Id, MaterialUid = r9[6].Id });
+        var r9Max = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        Check("regress R-9: a seventh calibration is refused", !r9Max.OfType<SC_GunWeaponBreak>().Any());
+        main.Send(new CS_GunWeapons());
+        var r9After = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().FirstOrDefault();
+        Check("regress R-9: calibration 6 is saved", r9After?.Weapons.FirstOrDefault(w => w.Id == r9[0].Id) is { BreakTimes: 6 }, $"{r9After?.Weapons.FirstOrDefault(w => w.Id == r9[0].Id)}");
+    }
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());
