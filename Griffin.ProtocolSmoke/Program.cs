@@ -910,6 +910,22 @@ if (scenario is "all" or "regress")
         Check("regress R-9: calibration 6 is saved", r9After?.Weapons.FirstOrDefault(w => w.Id == r9[0].Id) is { BreakTimes: 6 }, $"{r9After?.Weapons.FirstOrDefault(w => w.Id == r9[0].Id)}");
     }
 
+    // R-10 (2026-11-08, players) event shop goods are priced in an ordinary item (event currency 179201): the store refused them as real money.
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        string acc10 = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var uid10 = System.Text.RegularExpressions.Regex.Match(acc10, @"""uid""\s*:\s*(\d+)");
+        if (uid10.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uid10.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":179201,\"count\":5000}", System.Text.Encoding.UTF8, "application/json"));
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StoreBuy { GoodsId = 75403, PriceType = 179201 });
+        var r10 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        var r10Buy = r10.OfType<SC_StoreBuy>().FirstOrDefault();
+        Check("regress R-10: event shop goods paid with the event currency item can be bought", r10Buy is { Code: 0 } && r10.OfType<SC_Items>().Any(i => i.Items.ContainsKey(179201u)),
+            $"code={r10Buy?.Code}");
+    }
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());

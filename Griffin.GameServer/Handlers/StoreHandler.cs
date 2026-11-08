@@ -15,6 +15,7 @@ namespace Griffin.GameServer.Handlers
         IResourceService resourceService,
         IRewardService rewardService,
         IItemUseService itemUse,
+        IItemService itemService,
         IAccountStateService accountState) : StoreHandlerBase
     {
         private const string PurchasesKey = "store.purchases";
@@ -259,7 +260,10 @@ namespace Griffin.GameServer.Handlers
 
             bool paidWithResource = good.PriceType != 0
                 && tableService.GetTable<ItemData>().Any(i => i.Id == good.PriceType && i.Type == ResourceService.ResourceItemType);
-            if (!paidWithResource)
+            // event shops price their goods in an ordinary item (the event currency, e.g. 179201) that the player holds in the bag
+            bool paidWithItem = !paidWithResource && good.PriceType != 0
+                && tableService.GetTable<ItemData>().Any(i => i.Id == good.PriceType);
+            if (!paidWithResource && !paidWithItem)
             {
                 Log.Warning("Store: goods {GoodsId} is paid with real money or an untracked currency (price type {PriceType}); not supported.",
                     good.Id, good.PriceType);
@@ -289,15 +293,29 @@ namespace Griffin.GameServer.Handlers
             }
 
             Dictionary<uint, int> cost = new() { [good.PriceType] = (int)Math.Ceiling(good.Price) };
-            if (!resourceService.TrySpend(uid, cost, out SC_ResourceUpdate spent))
-                return Reply(MANKAOBLPBJ.Types.Code.CostError);
+            IMessage spent;
+            if (paidWithItem)
+            {
+                if (!itemService.TrySpend(uid, cost, out SC_Items itemsSpent))
+                    return Reply(MANKAOBLPBJ.Types.Code.CostError);
+                spent = itemsSpent;
+            }
+            else
+            {
+                if (!resourceService.TrySpend(uid, cost, out SC_ResourceUpdate resourcesSpent))
+                    return Reply(MANKAOBLPBJ.Types.Code.CostError);
+                spent = resourcesSpent;
+            }
 
             List<IMessage> granted = [];
             int delivered = rewards.Count(reward => rewardService.Grant(uid, reward.ItemId, reward.Count, granted).Granted);
             if (delivered != rewards.Count)
             {
                 // nothing could be delivered: give the money back instead of charging for nothing
-                resourceService.Add(uid, cost);
+                if (paidWithItem)
+                    rewardService.Grant(uid, good.PriceType, cost[good.PriceType], []);
+                else
+                    resourceService.Add(uid, cost);
                 Log.Warning("Store: goods {GoodsId} could not be delivered; refunded.", good.Id);
                 return Reply(MANKAOBLPBJ.Types.Code.Locked);
             }
