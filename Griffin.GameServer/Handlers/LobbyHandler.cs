@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -1432,16 +1432,44 @@ namespace Griffin.GameServer.Handlers
             });
         }
 
+        /// <summary>
+        /// The custom display wall (自定义展示墙) and the other customisable rooms. The placed items came back empty and the save
+        /// (CS_LobbySetCustomizeRoom) had no handler, so whatever was put on the wall vanished on the next login. The room is stored per
+        /// account as the client sent it (field 2 = item map, 3..6 = lists) and the map is returned in the room info.
+        /// </summary>
+        public sealed class CustomizeRoomState
+        {
+            public string Saved { get; set; } = string.Empty;
+        }
+
+        private static string CustomizeRoomKey(uint roomId) => $"lobby.customizeroom.{roomId}";
+
         public override void HandleLobbyCustomizeRoomInfo(CS_LobbyCustomizeRoomInfo request, Connection connection)
         {
-            connection.Send(new SC_LobbyCustomizeRoomInfo
+            LobbyCustomizeRoomData data = new();
+            if (connection.Account is not null
+                && accountState.Get<CustomizeRoomState>(connection.Account.Uid, CustomizeRoomKey(request.RoomId)) is { Saved.Length: > 0 } saved)
             {
-                RoomId = request.RoomId,
-                EGOMNOLAAID = new AFICNAJOLBB
-                {
-                    KFJDLALJNDI = NDHFANCENHD.Types.GLGHIGHBFOC.PhaseNone,
-                },
-            });
+                CS_LobbySetCustomizeRoom room = CS_LobbySetCustomizeRoom.Parser.ParseFrom(Convert.FromBase64String(saved.Saved));
+                data.Items.Add(room.HGILICCNAMJ);
+            }
+
+            connection.Send(new SC_LobbyCustomizeRoomInfo { RoomId = request.RoomId, EGOMNOLAAID = data });
+        }
+
+        public override void HandleLobbySetCustomizeRoom(CS_LobbySetCustomizeRoom request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            accountState.Set(connection.Account.Uid, CustomizeRoomKey(request.RoomId), new CustomizeRoomState { Saved = Convert.ToBase64String(request.ToByteArray()) });
+            SC_LobbySetCustomizeRoom reply = new() { RoomId = request.RoomId };
+            reply.HGILICCNAMJ.Add(request.HGILICCNAMJ);
+            reply.GPDJEHNOMDF.AddRange(request.GPDJEHNOMDF);
+            reply.AJDOMCNEJPA.AddRange(request.AJDOMCNEJPA);
+            reply.CCKNGLIMGHJ.AddRange(request.CCKNGLIMGHJ);
+            reply.NKIILDLJOOD.AddRange(request.NKIILDLJOOD);
+            connection.Send(reply);
         }
 
         private sealed class PlacedGun

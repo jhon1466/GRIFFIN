@@ -19429,7 +19429,13 @@ message HDFHOKBBPKE {
 
 message SC_LobbyCustomizeRoomInfo {
   uint32 room_id = 1;
-  AFICNAJOLBB EGOMNOLAAID = 2;
+  LobbyCustomizeRoomData EGOMNOLAAID = 2;
+}
+
+// the content of a customised room as the 4.0.5142 client reads it (EMKHOHDKNCO): the placed items, same map as CS_LobbySetCustomizeRoom field 2
+message LobbyCustomizeRoomData {
+  map<uint32, OPEMDOEHKCD> items = 1;
+  uint32 EEDPGOKMBEI = 2;
 }
 
 message SC_Assistant {
