@@ -975,6 +975,34 @@ if (scenario is "all" or "regress")
         Check("regress R-12: a second purchase is refused as sold out (LimitAgain)", r12Again is not null && r12Again.Code == MANKAOBLPBJ.Types.Code.LimitAgain, $"code={r12Again?.Code}");
     }
 
+    // R-13 (2026-11-08, players) daily/weekly/monthly goods (StoreGoodData column 44) never came back: the store now resets them at the
+    // 05:00 China reset and tells the client when (StoreRefresh.goods, sent for bought goods). Goods 5002 refreshes monthly, 90102 weekly.
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        string acc13 = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var uid13 = System.Text.RegularExpressions.Regex.Match(acc13, @"""uid""\s*:\s*(\d+)");
+        if (uid13.Success)
+        {
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uid13.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":47,\"count\":1000}", System.Text.Encoding.UTF8, "application/json"));
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uid13.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":191004,\"count\":1000}", System.Text.Encoding.UTF8, "application/json"));
+        }
+        main.ReadFor(TimeSpan.FromSeconds(2));
+    }
+    main.Send(new CS_StoreBuy { GoodsId = 5002, PriceType = 47, Hope = 1 });
+    main.ReadFor(TimeSpan.FromSeconds(3));
+    main.Send(new CS_StoreBuy { GoodsId = 90102, PriceType = 191004, Hope = 1 });
+    main.ReadFor(TimeSpan.FromSeconds(3));
+    main.Send(new CS_Store());
+    var r13 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Store>().FirstOrDefault();
+    long r13Now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    long r13Monthly = r13?.Refresh?.Goods.GetValueOrDefault(5002u) ?? 0, r13Weekly = r13?.Refresh?.Goods.GetValueOrDefault(90102u) ?? 0;
+    Check("regress R-13: the store sends the next refresh of monthly goods 5002 (within a month) and weekly goods 90102 (within a week)",
+        r13Monthly > r13Now && r13Monthly <= r13Now + 31 * 86400 && r13Weekly > r13Now && r13Weekly <= r13Now + 7 * 86400
+        && DateTimeOffset.FromUnixTimeSeconds(r13Weekly).ToOffset(TimeSpan.FromHours(8)) is { DayOfWeek: DayOfWeek.Monday, Hour: 5 },
+        $"monthly={r13Monthly} weekly={r13Weekly} now={r13Now}");
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());

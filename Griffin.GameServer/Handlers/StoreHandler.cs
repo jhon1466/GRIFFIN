@@ -72,6 +72,10 @@ namespace Griffin.GameServer.Handlers
                 ulong endsAt = TableFields.U64(tag, 13);
                 if (endsAt > (ulong)storeNow)
                     response.Refresh.Tags[tagId] = (long)endsAt;
+                // only bought goods: the whole answer must stay under 64 KB and an unbought goods has nothing to count down to
+                foreach (uint goodId in group.Id.Where(purchases.ContainsKey))
+                    if (goods.TryGetValue(goodId, out StoreGoodData? refreshing) && NextRefresh(refreshing) is > 0 and long nextRefresh)
+                        response.Refresh.Goods[goodId] = nextRefresh;
             }
 
             // the client knows the limit from its own table; only bought goods need a history (the answer must stay under 64 KB)
@@ -346,7 +350,7 @@ namespace Griffin.GameServer.Handlers
             // the client counts purchases from SC_StoreHistoryUp (LODBPMDNMIG.LIEKIMODFLE): without it a limited goods never showed sold out
             messages.Add(new SC_StoreHistoryUp { Id = good.Id, History = new StoreHistory { Count = bought + quantity, Total = LimitOf(good) } });
             obtained.AddRange(rewards.Select(reward => (reward.ItemId, (int)Math.Min(int.MaxValue, (long)reward.Count * quantity))));
-            accountState.Set(uid, PurchasesKey, purchases);
+            SavePurchases(uid, purchases, good);
 
             messages.AddRange(granted);
             messages.Add(spent);
@@ -362,8 +366,77 @@ namespace Griffin.GameServer.Handlers
         /// </summary>
         private static uint LimitOf(StoreGoodData good) => TableFields.U(good, 16);
 
-        private Dictionary<uint, uint> Purchases(uint uid) =>
-            accountState.Get<Dictionary<uint, uint>>(uid, PurchasesKey) ?? [];
+        private const string PurchasePeriodsKey = "store.purchases.period";
+
+        /// <summary>
+        /// The bought counters that still count: a goods with a refresh period (StoreGoodData column 44, LGPMJLOHBIM.FEGEDGCLDNI: 1 daily, 2 weekly,
+        /// 3 monthly, the client shows "x/limit" with the matching label) starts again at 0 once its period is over (A-203).
+        /// </summary>
+        private Dictionary<uint, uint> Purchases(uint uid)
+        {
+            Dictionary<uint, uint> purchases = accountState.Get<Dictionary<uint, uint>>(uid, PurchasesKey) ?? [];
+            Dictionary<uint, string> periods = accountState.Get<Dictionary<uint, string>>(uid, PurchasePeriodsKey) ?? [];
+            Dictionary<uint, StoreGoodData> goods = tableService.GetTable<StoreGoodData>().ToDictionary(good => good.Id);
+            bool changed = false;
+            foreach (uint goodId in purchases.Keys.ToList())
+            {
+                if (!goods.TryGetValue(goodId, out StoreGoodData? good) || PeriodKey(good) is not { } current)
+                    continue;
+                if (periods.GetValueOrDefault(goodId) != current)
+                {
+                    purchases.Remove(goodId);
+                    periods.Remove(goodId);
+                    changed = true;
+                }
+            }
+            if (changed)
+            {
+                accountState.Set(uid, PurchasesKey, purchases);
+                accountState.Set(uid, PurchasePeriodsKey, periods);
+            }
+            return purchases;
+        }
+
+        private void SavePurchases(uint uid, Dictionary<uint, uint> purchases, StoreGoodData bought)
+        {
+            accountState.Set(uid, PurchasesKey, purchases);
+            if (PeriodKey(bought) is { } period)
+            {
+                Dictionary<uint, string> periods = accountState.Get<Dictionary<uint, string>>(uid, PurchasePeriodsKey) ?? [];
+                periods[bought.Id] = period;
+                accountState.Set(uid, PurchasePeriodsKey, periods);
+            }
+        }
+
+        private static uint RefreshTypeOf(StoreGoodData good) => TableFields.U(good, 44);
+
+        /// <summary>The current period of a refreshing goods (game day, ISO week or month, all from the 05:00 China reset), or null when it never refreshes.</summary>
+        private static string? PeriodKey(StoreGoodData good)
+        {
+            DateTimeOffset now = GameDay.Now();
+            return RefreshTypeOf(good) switch
+            {
+                1 => now.ToString("yyyy-MM-dd"),
+                2 => $"{System.Globalization.ISOWeek.GetYear(now.DateTime)}-W{System.Globalization.ISOWeek.GetWeekOfYear(now.DateTime)}",
+                3 => now.ToString("yyyy-MM"),
+                _ => null,
+            };
+        }
+
+        /// <summary>Unix time of the next refresh of a goods (for the client's countdown, StoreRefresh.goods), or 0 when it never refreshes.</summary>
+        private static long NextRefresh(StoreGoodData good)
+        {
+            DateTimeOffset now = GameDay.Now();
+            DateTimeOffset dayStart = new(now.Year, now.Month, now.Day, 0, 0, 0, GameDay.ResetShift);
+            DateTimeOffset next = RefreshTypeOf(good) switch
+            {
+                1 => dayStart.AddDays(1),
+                2 => dayStart.AddDays(((int)DayOfWeek.Monday - (int)now.DayOfWeek + 7) % 7 is 0 ? 7 : ((int)DayOfWeek.Monday - (int)now.DayOfWeek + 7) % 7),
+                3 => new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, GameDay.ResetShift).AddMonths(1),
+                _ => DateTimeOffset.MinValue,
+            };
+            return next == DateTimeOffset.MinValue ? 0 : next.ToUnixTimeSeconds();
+        }
 
         private static bool IsActive(StoreTagData tag, long gameNow)
         {
