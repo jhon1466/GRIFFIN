@@ -33,8 +33,14 @@ namespace Griffin.GameServer.Handlers
                     inventoryService.Add(accountUid, new CostumeEntity { CostumeId = costumeId });
             }
 
+            // outfit items bought before they unlocked anything (ItemData type 13, column 18 = the outfit) give their outfit now (A-204)
+            Dictionary<uint, ItemData> itemRows = tableService.GetTable<ItemData>().Where(row => row.Type == RewardService.CostumeItemType).ToDictionary(row => row.Id);
             foreach (ItemEntity item in inventoryService.GetPlayerInventory<ItemEntity>(accountUid))
+            {
                 OwnCostume(item.ItemId);
+                if (itemRows.TryGetValue(item.ItemId, out ItemData? outfitItem) && RewardService.CostumeOfItem(tableService, outfitItem) is { } outfit)
+                    OwnCostume(outfit);
+            }
 
             foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(accountUid))
                 OwnCostume(gun.CostumeId);

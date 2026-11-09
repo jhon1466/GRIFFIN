@@ -1003,6 +1003,30 @@ if (scenario is "all" or "regress")
         && DateTimeOffset.FromUnixTimeSeconds(r13Weekly).ToOffset(TimeSpan.FromHours(8)) is { DayOfWeek: DayOfWeek.Monday, Hour: 5 },
         $"monthly={r13Monthly} weekly={r13Weekly} now={r13Now}");
 
+    // R-14 (2026-11-08, players) a store outfit (goods 2088 -> item 31131, ItemData type 13 whose column 18 is outfit 1108801) went to the bag
+    // and the outfit was lost unless worn at once: it must unlock the outfit and stay in the collection.
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        string acc14 = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var uid14 = System.Text.RegularExpressions.Regex.Match(acc14, @"""uid""\s*:\s*(\d+)");
+        if (uid14.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uid14.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":11,\"count\":5000}", System.Text.Encoding.UTF8, "application/json"));
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_StoreBuy { GoodsId = 2088, PriceType = 11, Hope = 1, CBGAEKOCDOL = 880 });
+        var r14 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        Check("regress R-14: buying store outfit 2088 unlocks outfit 1108801 (index 13)",
+            r14.OfType<SC_StoreBuy>().FirstOrDefault() is { Code: 0 } && r14.OfType<SC_AddIndex>().Any(i => i.Type == 13 && i.Id == 1108801),
+            $"code={r14.OfType<SC_StoreBuy>().FirstOrDefault()?.Code}");
+        main.Send(new CS_Index());
+        // the collection index is a heavy answer (several seconds on a loaded machine): wait for it, not for a fixed time
+        SC_Index? r14Index = null;
+        for (int wait = 0; wait < 10 && r14Index is null; wait++)
+            r14Index = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_Index>().FirstOrDefault();
+        Check("regress R-14: the outfit stays in the collection without wearing it",
+            r14Index is not null && r14Index.Indices.TryGetValue(13u, out var r14Outfits) && r14Outfits.Details.ContainsKey(1108801u));
+    }
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());

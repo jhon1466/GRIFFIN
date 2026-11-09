@@ -121,6 +121,11 @@ namespace Griffin.GameServer.Services
                 return new GrantResult(false);
             }
 
+            // An outfit sold in the store comes as an ItemData row of type 13 whose column 18 names the ClothesData it unlocks (31131 -> 1108801):
+            // it unlocks the outfit like the official game instead of sitting in the bag (the outfit was lost unless worn at once) (A-204)
+            if (CostumeOfItem(tableService, data) is { } costumeId)
+                return Grant(accountUid, costumeId, 1, messages) with { Relate = costumeId };
+
             if (data.Type == ResourceService.ResourceItemType)
                 messages.Add(resourceService.Add(accountUid, new Dictionary<uint, int> { [itemId] = count }));
             else
@@ -146,6 +151,16 @@ namespace Griffin.GameServer.Services
 
             return rewards;
         }
+
+        /// <summary>The ClothesData an outfit item (ItemData type 13, column 18) unlocks, or null for any other item.</summary>
+        public static uint? CostumeOfItem(ITableService tables, ItemData item)
+        {
+            if (item.Type != CostumeItemType || !uint.TryParse(TableFields.S(item, 18), out uint costumeId))
+                return null;
+            return tables.GetTable<ClothesData>().Any(clothes => clothes.Id == costumeId) ? costumeId : null;
+        }
+
+        public const int CostumeItemType = 13;
 
         private GrantResult GrantGun(uint uid, AccountEntity account, uint gunId, List<IMessage> messages)
         {
