@@ -275,10 +275,11 @@ if (scenario is "all" or "store")
         main.Send(new CS_StoreBuy { GoodsId = 5002, PriceType = 47 });
         var r = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StoreBuy>().FirstOrDefault();
         if (r is not null && (int)r.Code == 0) ok++;
-        else if (r is not null && (int)r.Code == 4) refused++;
+        else if (r is not null && (r.Code == MANKAOBLPBJ.Types.Code.CostError || r.Code == MANKAOBLPBJ.Types.Code.LimitAgain)) refused++;
     }
     var (_, weaponsStoreAfter) = CountOwned(main);
-    Check("store: purchases stop when the currency runs out (CostError)", ok >= 1 && refused >= 1, $"ok={ok} refused={refused}");
+    // goods 5002 is limited to one purchase in client 4.0.5142 (StoreGoodData column 16): it stops at the limit or when the currency runs out
+    Check("store: purchases stop at the goods limit or when the currency runs out (LimitAgain/CostError)", ok >= 1 && refused >= 1, $"ok={ok} refused={refused}");
     Check("store: every successful purchase delivered one weapon", weaponsStoreAfter - weaponsStoreBefore == ok, $"weapons {weaponsStoreBefore} -> {weaponsStoreAfter}, ok={ok}");
 }
 
@@ -671,13 +672,25 @@ if (scenario is "all" or "weapon")
         Check("weapon: lock toggled off", ul is not null && !ul.Locked);
     }
 
-    // two identical loose weapons from the shop (goods 5002 = weapon 11016, 900 of item 47 each)
+    // two identical loose weapons of 11016: goods 5002 can be bought once (client 4.0.5142), so the harness grants them through the GM API
     var (_, wBefore) = CountOwned(main);
-    for (int i = 0; i < 2; i++)
+    if (Environment.GetEnvironmentVariable("GRIFFIN_GM_TOKEN") is { Length: > 0 } wToken)
     {
-        main.Send(new CS_StoreBuy { GoodsId = 5002, PriceType = 47 });
-        main.ReadFor(TimeSpan.FromSeconds(3));
+        httpClient.DefaultRequestHeaders.Remove("X-GM-Token");
+        httpClient.DefaultRequestHeaders.Add("X-GM-Token", wToken);
+        string wAcc = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var wUid = System.Text.RegularExpressions.Regex.Match(wAcc, @"""uid""\s*:\s*(\d+)");
+        if (wUid.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{wUid.Groups[1].Value}/weapons",
+                new StringContent("{\"weaponId\":11016,\"count\":2}", System.Text.Encoding.UTF8, "application/json"));
+        main.ReadFor(TimeSpan.FromSeconds(2));
     }
+    else
+        for (int i = 0; i < 2; i++)
+        {
+            main.Send(new CS_StoreBuy { GoodsId = 5002, PriceType = 47 });
+            main.ReadFor(TimeSpan.FromSeconds(3));
+        }
     main.Send(new CS_GunWeapons());
     var after = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GunWeapons>().FirstOrDefault();
     var loose = after?.Weapons.Where(w => w.StcId == 11016 && !after.FEDCFGGDNBN.ContainsKey(w.Id)).OrderByDescending(w => w.Id).Take(2).ToList() ?? [];
