@@ -82,8 +82,10 @@ namespace Griffin.GameServer.Handlers
             }
 
             List<IMessage> messages = [];
+            using RewardDrops drops = RewardDrops.Begin();
             Claim(uid, mail, messages);
             accountState.Set(uid, InboxKey, inbox);
+            drops.Finish(messages);   // the "obtained" window and live counts (A-206)
 
             messages.Add(new SC_MailGetAttachment { Id = mail.Id, Type = request.Type, Attached = mail.Attached });
             connection.SendAutoEncrypted(messages.ToArray());
@@ -98,6 +100,7 @@ namespace Griffin.GameServer.Handlers
             List<MailRecord> inbox = Inbox(uid);
             List<IMessage> messages = [];
             SC_MailGetAttachments response = new();
+            using RewardDrops drops = RewardDrops.Begin();
 
             foreach (MailRecord mail in inbox.Where(m => !m.Attached && m.Items.Count > 0))
             {
@@ -106,6 +109,7 @@ namespace Griffin.GameServer.Handlers
             }
 
             accountState.Set(uid, InboxKey, inbox);
+            drops.Finish(messages);
             messages.Add(response);
             connection.SendAutoEncrypted(messages.ToArray());
         }

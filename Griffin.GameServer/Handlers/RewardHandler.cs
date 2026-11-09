@@ -46,6 +46,7 @@ namespace Griffin.GameServer.Handlers
 
             uint uid = connection.Account.Uid;
             List<IMessage> messages = [];
+            using RewardDrops drops = RewardDrops.Begin();
             bool granted = request.RewardType == BpRewardGetType.GetTypeExtra
                 ? battlepass.ClaimExtra(uid, messages) > 0
                 : battlepass.Claim(uid, request.RewardLevel, request.Type, messages, out _);
@@ -55,6 +56,7 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            drops.Finish(messages);   // the "obtained" window and live counts (A-206)
             messages.Add(new SC_GetBattlepassReward
             {
                 Type = request.Type,
