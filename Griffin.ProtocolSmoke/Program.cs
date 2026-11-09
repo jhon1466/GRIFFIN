@@ -1027,6 +1027,30 @@ if (scenario is "all" or "regress")
             r14Index is not null && r14Index.Indices.TryGetValue(13u, out var r14Outfits) && r14Outfits.Details.ContainsKey(1108801u));
     }
 
+    // R-15 (2026-11-08, players) daily quests showed 0/x even when done: the client reads progress from player counters (system 3 for type
+    // Daily), not from SC_QuestCount. Claiming must also show the "obtained" window.
+    main.Send(new CS_DailyCheckIn());
+    main.ReadFor(TimeSpan.FromSeconds(3));
+    main.Send(new CS_QuestCount());
+    var r15 = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).ToList();
+    Check("regress R-15: the daily sign-in quest (1) reaches the client as player counter 3 = 1",
+        r15.OfType<SC_PlayerStatusCounterSync>().Any(s => s.Num == 1 && s.Watchers.Any(w => w.SystemId == 3 && w.UniqueId == 1)));
+    main.Send(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.Daily, QuestId = { 1u } });
+    var r15Take = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("regress R-15: claiming daily quest 1 pays it and shows the reward window (SC_DropCollect before the answer)",
+        r15Take.OfType<SC_CommonQuestTakeReward>().Any(t => t.QuestId.Contains(1u)) && r15Take.OfType<SC_DropCollect>().Any(d => d.Drops.Count > 0)
+        && r15Take.FindIndex(m => m is SC_DropCollect) < r15Take.FindIndex(m => m is SC_CommonQuestTakeReward));
+
+    // R-16 (2026-11-08, players) battle pass tasks never showed progress nor could be claimed (the server paid them by itself).
+    var r16Syncs = r15.OfType<SC_PlayerStatusCounterSync>().Where(s => s.Watchers.Any(w => w.SystemId == 7)).ToList();
+    Check("regress R-16: the pass daily tasks reach the client as player counters 7", r16Syncs.Count > 0);
+    var r16Done = r16Syncs.Where(s => s.Num > 0).SelectMany(s => s.Watchers.Where(w => w.SystemId == 7).Select(w => w.UniqueId)).ToList();
+    main.Send(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.BattlepassDaily, QuestId = { r16Done } });
+    var r16Take = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("regress R-16: a finished pass task can be claimed and shows the reward window",
+        r16Done.Count > 0 && r16Take.OfType<SC_CommonQuestTakeReward>().Any(t => t.QuestId.Count > 0) && r16Take.OfType<SC_DropCollect>().Any(),
+        $"done={string.Join(',', r16Done)}");
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());

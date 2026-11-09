@@ -1,4 +1,5 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
+using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Services;
@@ -42,8 +43,20 @@ namespace Griffin.GameServer.Services
 
         uint LeftRewards(uint uid);
 
-        /// <summary>Counts a game event on the battle pass tasks (same condition classes as the daily quests); a finished task pays its experience once per period.</summary>
+        /// <summary>Counts a game event on the battle pass tasks (same condition classes as the daily quests); a finished task waits to be claimed.</summary>
         void OnCondition(uint uid, uint conditionClass, string? link, uint amount);
+
+        /// <summary>The quest counters (claimed flags) of the pass tasks for SC_QuestCount: types BattlepassDaily, BattlepassWeekly, BattlepassSeason.</summary>
+        IEnumerable<CommonQuestCounters> Counters(uint uid);
+
+        /// <summary>The task progress as the client reads it (player counters 7 / 9 / 56).</summary>
+        IReadOnlyList<SC_PlayerStatusCounterSync> CounterSyncs(uint uid);
+
+        /// <summary>True when <paramref name="type"/> is a pass task type this service claims.</summary>
+        bool IsTaskType(CommonQuestCounters.Types.Type type);
+
+        /// <summary>Claims finished, unclaimed tasks (pays their table reward once per period); returns the claimed ids.</summary>
+        List<uint> ClaimTasks(uint uid, CommonQuestCounters.Types.Type type, IEnumerable<uint> ids, List<IMessage> messages);
     }
 
     public sealed class BattlepassState
@@ -68,8 +81,93 @@ namespace Griffin.GameServer.Services
         ITableService tableService,
         IAccountStateService accountState,
         IItemService itemService,
-        IRewardService rewardService) : IBattlepassService
+        IRewardService rewardService,
+        ConnectionManager? connections = null) : IBattlepassService
     {
+        /// <summary>
+        /// The pass tasks are quests of their own type: the client reads their progress from the player counters that SC_QuestCount maps to
+        /// the type (BattlepassDaily 3 -> 7, BattlepassWeekly 6 -> 9, BattlepassSeason 45 -> 56) and claims each one with CS_CommonQuestTakeReward.
+        /// The old server paid them by itself and never sent progress, so the pass showed 0/x and "go" forever (A-207).
+        /// </summary>
+        private static readonly (uint Kind, CommonQuestCounters.Types.Type Type, uint Counter)[] Kinds =
+        [
+            (1, CommonQuestCounters.Types.Type.BattlepassDaily, 7),
+            (2, CommonQuestCounters.Types.Type.BattlepassWeekly, 9),
+            (5, CommonQuestCounters.Types.Type.BattlepassSeason, 56),
+        ];
+
+        public bool IsTaskType(CommonQuestCounters.Types.Type type) => Kinds.Any(k => k.Type == type);
+
+        private IMessage? TaskRow(uint id) => tableService.GetTable<BpTaskData>().FirstOrDefault(r => r.Id == id);
+
+        private static uint Need(IMessage row) => Math.Max(1, TableFields.U(row, 6));
+
+        private static List<uint> TasksOf(BattlepassState state, uint kind) => kind switch { 1 => state.Daily, 2 => state.Weekly, _ => state.Season };
+
+        public IEnumerable<CommonQuestCounters> Counters(uint uid)
+        {
+            BattlepassState state = Sync(uid);
+            List<CommonQuestCounters> all = [];
+            foreach ((uint kind, CommonQuestCounters.Types.Type type, _) in Kinds)
+            {
+                CommonQuestCounters counters = new() { Type = type };
+                foreach (uint id in TasksOf(state, kind))
+                {
+                    counters.Rewards[id] = state.Done.Contains(id);
+                    counters.JGOJBNHMJJH[id] = state.Progress.GetValueOrDefault(id);
+                }
+                all.Add(counters);
+            }
+            return all;
+        }
+
+        public IReadOnlyList<SC_PlayerStatusCounterSync> CounterSyncs(uint uid) => Syncs(Sync(uid), null);
+
+        private static List<SC_PlayerStatusCounterSync> Syncs(BattlepassState state, HashSet<uint>? only)
+        {
+            List<SC_PlayerStatusCounterSync> syncs = [];
+            foreach ((uint kind, _, uint counter) in Kinds)
+                foreach (IGrouping<uint, uint> group in TasksOf(state, kind).Where(id => only is null || only.Contains(id))
+                             .GroupBy(id => state.Progress.GetValueOrDefault(id)))
+                {
+                    SC_PlayerStatusCounterSync sync = new() { Num = group.Key };
+                    foreach (uint id in group)
+                        sync.Watchers.Add(new PELLFAAPKOL { SystemId = counter, UniqueId = id });
+                    syncs.Add(sync);
+                }
+            return syncs;
+        }
+
+        private void Push(uint uid, BattlepassState state, HashSet<uint> changed)
+        {
+            if (connections is null || changed.Count == 0)
+                return;
+            IMessage[] syncs = Syncs(state, changed).Cast<IMessage>().ToArray();
+            foreach (Connection connection in connections.Connections.Where(c => c.Account?.Uid == uid))
+                connection.SendAutoEncrypted(syncs);
+        }
+
+        public List<uint> ClaimTasks(uint uid, CommonQuestCounters.Types.Type type, IEnumerable<uint> ids, List<IMessage> messages)
+        {
+            BattlepassState state = Sync(uid);
+            uint kind = Kinds.First(k => k.Type == type).Kind;
+            List<uint> claimed = [];
+            foreach (uint id in ids.Distinct())
+            {
+                if (!TasksOf(state, kind).Contains(id) || state.Done.Contains(id) || TaskRow(id) is not { } row
+                    || state.Progress.GetValueOrDefault(id) < Need(row))
+                    continue;
+                foreach ((uint item, uint count) in TableFields.Map(row, 7))
+                    if (count > 0)
+                        rewardService.Grant(uid, item, (int)count, messages);
+                state.Done.Add(id);
+                claimed.Add(id);
+                Log.Information("Battle pass task {Task} of account {Uid} claimed.", id, uid);
+            }
+            if (claimed.Count > 0)
+                Save(uid, state);
+            return claimed;
+        }
         public const uint ExpItem = 601;
         private const string StateKey = "battlepass";
         private const int DailyCount = 4;
@@ -110,10 +208,10 @@ namespace Griffin.GameServer.Services
 
             foreach (uint id in state.Daily.Concat(state.Weekly).Concat(state.Season))
             {
-                if (state.Done.Contains(id) || tableService.GetTable<BpTaskData>().FirstOrDefault(r => r.Id == id) is not { } row || Observable(row))
+                if (state.Done.Contains(id) || TaskRow(id) is not { } row || Observable(row) || state.Progress.GetValueOrDefault(id) >= Need(row))
                     continue;
 
-                Complete(uid, state, id, row);
+                Complete(state, id, row);
                 changed = true;
             }
 
@@ -122,15 +220,8 @@ namespace Griffin.GameServer.Services
             return state;
         }
 
-        private void Complete(uint uid, BattlepassState state, uint id, IMessage row)
-        {
-            state.Done.Add(id);
-            List<IMessage> sink = [];
-            foreach ((uint item, uint count) in TableFields.Map(row, 7))
-                if (count > 0)
-                    rewardService.Grant(uid, item, (int)count, sink);
-            Log.Information("Battle pass task {Task} of account {Uid} completed.", id, uid);
-        }
+        /// <summary>A finished task: its progress reaches the goal; the reward is paid when the player claims it (<see cref="ClaimTasks"/>).</summary>
+        private static void Complete(BattlepassState state, uint id, IMessage row) => state.Progress[id] = Need(row);
 
         public void OnCondition(uint uid, uint conditionClass, string? link, uint amount)
         {
@@ -138,23 +229,26 @@ namespace Griffin.GameServer.Services
                 return;
 
             BattlepassState state = Sync(uid);
-            bool changed = false;
+            HashSet<uint> changed = [];
             foreach (uint id in state.Daily.Concat(state.Weekly).Concat(state.Season))
             {
-                if (state.Done.Contains(id) || tableService.GetTable<BpTaskData>().FirstOrDefault(r => r.Id == id) is not { } row
+                if (state.Done.Contains(id) || TaskRow(id) is not { } row
                     || TableFields.U(row, 5) != conditionClass || (link is not null && TableFields.S(row, 8) != link && TableFields.S(row, 8) != string.Empty))
                     continue;
 
-                uint need = Math.Max(1, TableFields.U(row, 6));
-                uint progress = state.Progress.GetValueOrDefault(id) + amount;
+                uint before = state.Progress.GetValueOrDefault(id);
+                uint progress = Math.Min(Need(row), before + amount);
+                if (progress == before)
+                    continue;
                 state.Progress[id] = progress;
-                changed = true;
-                if (progress >= need)
-                    Complete(uid, state, id, row);
+                changed.Add(id);
             }
 
-            if (changed)
+            if (changed.Count > 0)
+            {
                 Save(uid, state);
+                Push(uid, state, changed);
+            }
         }
 
         public Battlepass Build(uint uid)

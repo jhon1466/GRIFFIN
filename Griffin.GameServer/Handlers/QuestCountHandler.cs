@@ -11,8 +11,24 @@ namespace Griffin.GameServer.Handlers
         IDailyQuestProgressService questProgress,
         IAchievementService achievements,
         ISimCombatWeekService week,
-        ILobbyMiniGameService miniGames) : QuestCountHandlerBase
+        ILobbyMiniGameService miniGames,
+        IResourceService resourceService,
+        IBattlepassService battlepass) : QuestCountHandlerBase
     {
+        private const string PointsDayKey = "quest.daily.points-day";
+
+        /// <summary>The daily activity points start again at 0 every game day, as in the official game (A-206).</summary>
+        private void ResetDailyPoints(uint uid)
+        {
+            string today = GameDay.Key();
+            if (accountState.Get<string>(uid, PointsDayKey) == today)
+                return;
+            int balance = resourceService.GetBalance(uid, CommonQuestHandler.DailyPointsItem);
+            if (balance > 0)
+                resourceService.TrySpend(uid, new Dictionary<uint, int> { [CommonQuestHandler.DailyPointsItem] = balance }, out _);
+            accountState.Set(uid, PointsDayKey, today);
+        }
+
         public override void HandleQuestCount(CS_QuestCount request, Connection connection)
         {
             var quest = new Quest
@@ -26,6 +42,7 @@ namespace Griffin.GameServer.Handlers
 
             if (connection.Account is not null)
             {
+                ResetDailyPoints(connection.Account.Uid);
                 DailyQuestClaimState state = accountState.Get<DailyQuestClaimState>(connection.Account.Uid, "quest.daily.claims")
                     ?? new DailyQuestClaimState();
                 if (!string.Equals(state.Day, CommonQuestHandler.ChinaDateKey(), StringComparison.Ordinal))
@@ -51,6 +68,7 @@ namespace Griffin.GameServer.Handlers
                 quest.Counters.Add(achievements.Counters(connection.Account.Uid));
                 quest.Counters.Add(week.QuestCounters(connection.Account.Uid));
                 quest.Counters.Add(miniGames.Counters(connection.Account.Uid));
+                quest.Counters.AddRange(battlepass.Counters(connection.Account.Uid));
             }
 
             connection.Send(1, new SC_QuestCount
@@ -116,6 +134,9 @@ namespace Griffin.GameServer.Handlers
                     new CounterTypeCombination { CommonType = (CommonQuestCounters.Types.Type)72, CounterType = (PlayerCounterSystem)87 },
                 },
             });
+            if (connection.Account is not null)
+                connection.SendAutoEncrypted(questProgress.CounterSyncs(connection.Account.Uid)
+                    .Concat(battlepass.CounterSyncs(connection.Account.Uid)).Cast<Google.Protobuf.IMessage>().ToArray());
         }
     }
 }

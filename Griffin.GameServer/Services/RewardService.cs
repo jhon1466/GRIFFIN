@@ -45,6 +45,22 @@ namespace Griffin.GameServer.Services
 
         public GrantResult Grant(uint accountUid, uint itemId, int count, List<IMessage> messages)
         {
+            RewardDrops.depth++;
+            try
+            {
+                GrantResult result = GrantCore(accountUid, itemId, count, messages);
+                if (result.Granted && RewardDrops.depth == 1)
+                    RewardDrops.current?.Add((itemId, count));
+                return result;
+            }
+            finally
+            {
+                RewardDrops.depth--;
+            }
+        }
+
+        private GrantResult GrantCore(uint accountUid, uint itemId, int count, List<IMessage> messages)
+        {
             if (itemId == 0 || count <= 0)
                 return new GrantResult(false);
 

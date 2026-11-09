@@ -1,3 +1,5 @@
+﻿using Griffin.Common.Networking;
+using Griffin.Common.Proto;
 using Griffin.Common.Table;
 
 namespace Griffin.GameServer.Services;
@@ -11,6 +13,9 @@ public interface IDailyQuestProgressService : IGameService
     uint GetPoints(uint accountUid);
 
     void AddCondition(uint accountUid, uint conditionClass, string? link = null, uint amount = 1);
+
+    /// <summary>The daily quest progress as the client reads it: player counters of system 3 (one sync per value).</summary>
+    IReadOnlyList<SC_PlayerStatusCounterSync> CounterSyncs(uint accountUid);
 }
 
 /// <summary>
@@ -21,8 +26,40 @@ public interface IDailyQuestProgressService : IGameService
 public sealed class DailyQuestProgressService(
     ITableService tableService,
     IAccountStateService accountState,
-    IBattlepassService? battlepass = null) : IDailyQuestProgressService
+    IBattlepassService? battlepass = null,
+    ConnectionManager? connections = null) : IDailyQuestProgressService
 {
+    /// <summary>
+    /// The client shows a daily quest's progress from the player counters of the system that SC_QuestCount maps to the Daily type
+    /// (PlayerCounterSystem 3 for type Daily = 12; BOEEGCDCJEG.KDGIMOGCBPG -> IKKGFEGEINB.LPDFLMODCLG), never from the counters inside SC_QuestCount, so every
+    /// quest showed 0 even when done (A-205).
+    /// </summary>
+    public const uint DailyCounterSystem = 3;
+
+    public IReadOnlyList<SC_PlayerStatusCounterSync> CounterSyncs(uint accountUid) =>
+        Syncs(tableService.GetTable<DailyQuestData>().Where(row => row.Id != 0).Select(row => (row.Id, GetProgress(accountUid, row.Id))));
+
+    private static List<SC_PlayerStatusCounterSync> Syncs(IEnumerable<(uint QuestId, uint Value)> values) =>
+        values.GroupBy(pair => pair.Value)
+            .Select(group =>
+            {
+                SC_PlayerStatusCounterSync sync = new() { Num = group.Key };
+                foreach ((uint questId, _) in group)
+                    sync.Watchers.Add(new PELLFAAPKOL { SystemId = DailyCounterSystem, UniqueId = questId });
+                return sync;
+            }).ToList();
+
+    private void Push(uint accountUid, IEnumerable<uint> questIds)
+    {
+        if (connections is null)
+            return;
+        List<SC_PlayerStatusCounterSync> syncs = Syncs(questIds.Distinct().Select(id => (id, GetProgress(accountUid, id))));
+        if (syncs.Count == 0)
+            return;
+        foreach (Connection connection in connections.Connections.Where(c => c.Account?.Uid == accountUid))
+            connection.SendAutoEncrypted(syncs.Cast<Google.Protobuf.IMessage>().ToArray());
+    }
+
     private const string StateKey = "quest.daily.progress";
 
     /// <summary>
@@ -75,6 +112,7 @@ public sealed class DailyQuestProgressService(
         lock (Locks.GetOrAdd(accountUid, static _ => new object()))
         {
             DailyQuestProgressState state = GetState(accountUid);
+            List<uint> changed = [];
             foreach (DailyQuestData row in tableService.GetTable<DailyQuestData>()
                          .Where(candidate => candidate.Reward == conditionClass
                              && (link is null || candidate.Link == link)))
@@ -84,9 +122,11 @@ public sealed class DailyQuestProgressService(
 
                 uint current = state.Progress.GetValueOrDefault(row.Id);
                 state.Progress[row.Id] = (uint)Math.Min((ulong)row.MFGPFKBGFKF, (ulong)current + amount);
+                changed.Add(row.Id);
             }
 
             accountState.Set(accountUid, StateKey, state);
+            Push(accountUid, changed);
         }
     }
 

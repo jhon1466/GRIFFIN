@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -21,8 +21,12 @@ namespace Griffin.GameServer.Handlers
         IRewardService rewardService,
         IAchievementService achievements,
         ISimCombatWeekService week,
-        ILobbyMiniGameService miniGames) : CommonQuestHandlerBase
+        ILobbyMiniGameService miniGames,
+        IResourceService resourceService,
+        IBattlepassService battlepass) : CommonQuestHandlerBase
     {
+        /// <summary>The daily activity points (DailyQuestData rewards 8000:20/8000:10): the client fills the chest bar from this balance.</summary>
+        internal const uint DailyPointsItem = 8000;
         private const string StateKey = "quest.daily.claims";
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, object> AccountLocks = new();
 
@@ -30,6 +34,9 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account is null)
                 return;
+
+            // every claim shows the client's "obtained" window and pushes the new counts live (A-206)
+            using RewardDrops drops = RewardDrops.Begin();
 
             if (request.Type == CommonQuestCounters.Types.Type.Achievement)
             {
@@ -42,6 +49,7 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
+                drops.Finish(achievementMessages);
                 achievementMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { taken } });
                 connection.SendAutoEncrypted(achievementMessages.ToArray());
                 return;
@@ -58,7 +66,8 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
-                gameMessages.Insert(0, new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenGame } });
+                drops.Finish(gameMessages);
+                gameMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenGame } });
                 // the client only marks the taken ids in its phase-reward map: the counters follow so its reward map says "taken" too (otherwise the red dot of the button stays lit)
                 gameMessages.Add(new SC_CommonQuestCountUpdate { Counters = miniGames.Counters(connection.Account.Uid) });
                 connection.SendAutoEncrypted(gameMessages.ToArray());
@@ -76,8 +85,26 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
+                drops.Finish(weekMessages);
                 weekMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenWeek } });
                 connection.SendAutoEncrypted(weekMessages.ToArray());
+                return;
+            }
+
+            if (battlepass.IsTaskType(request.Type))
+            {
+                // the battle pass tasks (A-207): finished ones are paid once per period
+                List<IMessage> bpMessages = [];
+                List<uint> takenBp = battlepass.ClaimTasks(connection.Account.Uid, request.Type, request.QuestId, bpMessages);
+                if (takenBp.Count == 0)
+                {
+                    connection.Refuse(MsgId.MsgCsCommonQuestTakeReward, HNINDAOJCKP.QuestCondNotMatch);
+                    return;
+                }
+
+                drops.Finish(bpMessages);
+                bpMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenBp } });
+                connection.SendAutoEncrypted(bpMessages.ToArray());
                 return;
             }
 
@@ -124,6 +151,7 @@ namespace Griffin.GameServer.Handlers
                 foreach (uint id in granted)
                     state.ClaimedQuests.Add(id);
                 SaveState(uid, state);
+                drops.Finish(messages);
                 messages.Add(new SC_CommonQuestTakeReward
                 {
                     Type = request.Type,
@@ -138,6 +166,7 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account is null)
                 return;
 
+            using RewardDrops drops = RewardDrops.Begin();
             if (request.Type != CommonQuestCounters.Types.Type.Daily)
             {
                 Log.Warning("Daily quest phase handler received unsupported quest type {Type} for account {Uid}.",
@@ -158,7 +187,7 @@ namespace Griffin.GameServer.Handlers
                     .ToDictionary(row => row!.Id, row => row!.Value);
                 List<uint> accepted = request.PhaseId
                     .Where(id => configuredPhases.TryGetValue(id, out uint threshold)
-                        && questProgress.GetPoints(uid) >= threshold
+                        && Math.Max(questProgress.GetPoints(uid), resourceService.GetBalance(uid, DailyPointsItem)) >= threshold
                         && !state.ClaimedPhases.Contains(id))
                     .Distinct()
                     .ToList();
@@ -186,6 +215,7 @@ namespace Griffin.GameServer.Handlers
                 foreach (uint id in granted)
                     state.ClaimedPhases.Add(id);
                 SaveState(uid, state);
+                drops.Finish(messages);
                 messages.Add(new SC_CommonQuestTakePhaseReward
                 {
                     Type = request.Type,
