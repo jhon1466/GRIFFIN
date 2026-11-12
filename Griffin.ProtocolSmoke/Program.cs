@@ -1076,6 +1076,11 @@ if (scenario is "all" or "regress")
     Check("regress R-22: TpsShoot theme 901 lists its stages and the first one is open",
         r22 is not null && r22.KNMAKEJFGDK.Count > 0 && r22.KNMAKEJFGDK.Values.Any(s => s.MPNGHAKGLDM), $"stages={r22?.KNMAKEJFGDK.Count}");
 
+    // R-FreeSkin (2026-11-12) the free skin activity had no handler: its info must list activity 60301 (with its claimed rewards)
+    main.Send(new CS_FreeSkinInfo { IKDMNOBMIFE = 60301u });
+    var rFreeSkin = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    Check("regress R-FreeSkin: the free skin info answers with activity 60301",
+        rFreeSkin.OfType<SC_FreeSkinInfo>().Any(i => i.BDMFDKACPPI.ContainsKey(60301u)));
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
