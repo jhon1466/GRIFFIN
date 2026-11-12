@@ -1069,6 +1069,13 @@ if (scenario is "all" or "regress")
         await httpClient.DeleteAsync($"{http}/api/gm/events/61201");
     }
 
+    // R-22 (2026-11-12, players) the event shooter "强袭演绎" (TpsShoot, theme 901) showed an empty stage panel (TEXTTEXT): its stages are
+    // found through ActivityEntranceData -> ActivityModuleData[21001] -> TpsshootBaseData 101 -> mission group 101, not by the theme id.
+    main.Send(new CS_TpsShootInfo { ThemeId = 901 });
+    var r22 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_TpsShootInfo>().FirstOrDefault();
+    Check("regress R-22: TpsShoot theme 901 lists its stages and the first one is open",
+        r22 is not null && r22.KNMAKEJFGDK.Count > 0 && r22.KNMAKEJFGDK.Values.Any(s => s.MPNGHAKGLDM), $"stages={r22?.KNMAKEJFGDK.Count}");
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

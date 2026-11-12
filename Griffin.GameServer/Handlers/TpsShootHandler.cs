@@ -1,4 +1,4 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.GameServer.Services;
@@ -30,7 +30,12 @@ namespace Griffin.GameServer.Handlers
         {
             Dictionary<uint, Record> records = Load(uid, theme);
             SC_TpsShootInfo reply = new() { ThemeId = theme };
-            foreach (Google.Protobuf.IMessage row in tableService.GetTable<TpsshootMissionData>().Where(r => TableFields.U(r, 3) == theme))
+            // the stages belong to the TpsshootBaseData row of the theme (column 4 = mission group = TpsshootMissionData column 3), not to
+            // the theme id: theme 901 -> base 101 -> group 101. Matching the theme id left the stage list empty (TEXTTEXT panel) (A-213)
+            uint config = ThemeModules.Config(tableService, theme, ThemeModules.TpsShoot);
+            var baseRow = tableService.GetTable<TpsshootBaseData>().FirstOrDefault(r => TableFields.U(r, 1) == config);
+            uint group = baseRow is null ? theme : TableFields.U(baseRow, 4);
+            foreach (Google.Protobuf.IMessage row in tableService.GetTable<TpsshootMissionData>().Where(r => TableFields.U(r, 3) == group))
             {
                 uint stage = TableFields.U(row, 1);
                 uint previous = TableFields.U(row, 7);
