@@ -20,4 +20,7 @@
     <ProjectReference Include="..\Griffin.Command\Griffin.Command.csproj" />
     <ProjectReference Include="..\Griffin.Common.Table\Griffin.Common.Table.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Data\event-names.json" LogicalName="event-names.json" />
+  </ItemGroup>
 </Project>
