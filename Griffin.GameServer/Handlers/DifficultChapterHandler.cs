@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -146,6 +146,8 @@ public sealed class DifficultChapterHandler(
                 Dictionary<uint, uint> storyRaids = accountState.Get<Dictionary<uint, uint>>(uid, "difficult.story_raids") ?? [];
                 progress = checked(progress + relation.Id.Aggregate(0u,
                     (sum, storyId) => checked(sum + storyRaids.GetValueOrDefault(storyId))));
+                // the client's survey degree (勘测度) is the stars won in the chapter's hard stages (A-210)
+                progress = Math.Max(progress, Stars(uid, relation.Id));
             }
             HashSet<uint> grantedIds = [];
             List<IMessage> updates = [];
@@ -183,6 +185,23 @@ public sealed class DifficultChapterHandler(
             });
             connection.SendAutoEncrypted(updates.ToArray());
         }
+    }
+
+    private uint Stars(uint uid, IEnumerable<uint> storyIds)
+    {
+        Dictionary<string, StageRecord> records = accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? [];
+        Dictionary<string, HashSet<uint>> met = accountState.Get<Dictionary<string, HashSet<uint>>>(uid, "stage.challenge_ids") ?? [];
+        Dictionary<uint, StageData> stages = tableService.GetTable<StageData>().ToDictionary(s => s.Id);
+        uint stars = 0;
+        foreach (uint storyId in storyIds)
+        {
+            string key = storyId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!records.TryGetValue(key, out StageRecord? record) || record.FirstPassTime == 0)
+                continue;
+            uint mask = stages.TryGetValue(storyId, out StageData? stage) ? StageResultHandler.ChallengeMask(stage, met.GetValueOrDefault(key) ?? []) : 0;
+            stars += (uint)System.Numerics.BitOperations.PopCount(mask | (uint)record.CompleteChallenges);
+        }
+        return stars;
     }
 
     private IEnumerable<DifficultyChapterData> Chapters() => tableService.GetTable<DifficultyChapterData>();

@@ -1506,7 +1506,7 @@ if (scenario == "stage")
     main.ReadFor(TimeSpan.FromSeconds(2));
     // The stars of chapter 1 come from the records (bitmask popcount, opening stages keep their seeded objectives): the first chapter reward
     // (14 stars; item 12 x1, 1 x50, 25 x1000 in ChapterData column 29) must be GRANTED, not only acknowledged.
-    main.Send(new CS_ChapterTakeReward { ChapterId = 1, RewardId = { ChapterRewardClass.RewardFirst } });
+    main.Send(new CS_ChapterTakeReward { ChapterId = 1, RewardIds = { 1u } }); // like client 4.0.5142 (field 3)
     var chapterClaim = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
     Check("stage: the chapter star reward is granted with its items and confirmed (not just acknowledged)",
         chapterClaim.OfType<SC_ChapterTakeReward>().Any(c => c.RewardId.Contains(ChapterRewardClass.RewardFirst))

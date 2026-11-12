@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
@@ -85,7 +85,8 @@ namespace Griffin.GameServer.Handlers
                 List<ChapterRewardClass> confirmedClaimed = [];
                 List<IMessage> messages = [];
                 string[] rewardTiers = (chapter.ChapterReward ?? string.Empty).Split('|', StringSplitOptions.TrimEntries);
-                ChapterRewardClass[] requested = request.RewardId.Distinct().ToArray();
+                // client 4.0.5142 sends the tiers in reward_ids (field 3, 1..3), not in the old enum field 2 (A-210)
+                ChapterRewardClass[] requested = request.RewardId.Concat(request.RewardIds.Select(id => (ChapterRewardClass)id)).Distinct().ToArray();
                 foreach (ChapterRewardClass rewardClass in requested)
                 {
                     int tier = rewardClass switch
@@ -140,6 +141,7 @@ namespace Griffin.GameServer.Handlers
                 {
                     ChapterId = chapter.Id,
                     RewardId = { confirmedClaimed },
+                    RewardIds = { confirmedClaimed.Select(c => (uint)c) },
                 });
                 connection.SendAutoEncrypted(messages.ToArray());
             }
