@@ -23,7 +23,8 @@ namespace Griffin.GameServer.Handlers
         ISimCombatWeekService week,
         ILobbyMiniGameService miniGames,
         IResourceService resourceService,
-        IBattlepassService battlepass) : CommonQuestHandlerBase
+        IBattlepassService battlepass,
+        IActivityLotteryService lottery) : CommonQuestHandlerBase
     {
         /// <summary>The daily activity points (DailyQuestData rewards 8000:20/8000:10): the client fills the chest bar from this balance.</summary>
         internal const uint DailyPointsItem = 8000;
@@ -167,6 +168,18 @@ namespace Griffin.GameServer.Handlers
                 return;
 
             using RewardDrops drops = RewardDrops.Begin();
+            if (request.Type == CommonQuestCounters.Types.Type.Lottery)
+            {
+                // the tickets of the lottery activity (ActivityLotteryService): no item reward, the reply marks them taken
+                List<uint> tickets = lottery.ClaimPhases(connection.Account.Uid, request.PhaseId);
+                if (tickets.Count == 0)
+                {
+                    connection.Refuse(MsgId.MsgCsCommonQuestTakePhaseReward, HNINDAOJCKP.ActivityLotteryPhaseScoreNotEnough);
+                    return;
+                }
+                connection.SendAutoEncrypted(new SC_CommonQuestTakePhaseReward { Type = request.Type, PhaseId = { tickets } });
+                return;
+            }
             if (request.Type != CommonQuestCounters.Types.Type.Daily)
             {
                 Log.Warning("Daily quest phase handler received unsupported quest type {Type} for account {Uid}.",
