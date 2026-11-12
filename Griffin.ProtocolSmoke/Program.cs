@@ -1031,6 +1031,14 @@ if (scenario is "all" or "regress")
     // Daily), not from SC_QuestCount. Claiming must also show the "obtained" window.
     main.Send(new CS_DailyCheckIn());
     var r18 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
+    try
+    {
+        string r19 = await httpClient.GetStringAsync($"{http}/banner?game_channel_id=5&type_id=1");
+        Check("regress R-19: the lobby banners come from the official list, not the old fixed one",
+            !r19.Contains("1786011907866.png") && r19.Contains("\"pic_url\""), r19.Length > 200 ? r19[..200] : r19);
+    }
+    catch (Exception ex) { Check("regress R-19: /banner answers", false, ex.Message); }
     // R-18 (2026-11-12, players) the monthly sign-in and every other claim paid without the "obtained" window: the dispatcher adds it
     Check("regress R-18: the daily sign-in shows the reward window before its answer",
         r18.OfType<SC_DropCollect>().Any(d => d.Drops.Count > 0) && r18.FindIndex(m => m is SC_DropCollect) < r18.FindIndex(m => m is SC_DailyCheckIn));

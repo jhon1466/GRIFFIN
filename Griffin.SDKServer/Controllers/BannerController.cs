@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Griffin.SDKServer.Models;
 
 namespace Griffin.SDKServer.Controllers
@@ -23,9 +23,42 @@ namespace Griffin.SDKServer.Controllers
             [FromQuery] string? language,
             [FromQuery(Name = "sub_id")] string? subId)
         {
+            // the lobby banners follow the official list (they change with every event); the old fixed list is only the fallback
+            if (Official(Request.QueryString.Value ?? "") is { } official)
+                return Results.Content(official, "application/json");
             int channel = int.TryParse(gameChannelId, out int parsedChannel) ? parsedChannel : 5;
             int type = int.TryParse(typeId, out int parsedType) ? parsedType : 1;
             return Results.Json(CreateBannerList(channel, type));
+        }
+
+        private const string OfficialBannerUrl = "https://gf2-zoneinfo.sunborngame.com/banner";
+        private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, string Body)> Cache = new();
+
+        private static string? Official(string query)
+        {
+            if (Cache.TryGetValue(query, out var hit) && DateTime.UtcNow - hit.At < TimeSpan.FromMinutes(10))
+                return hit.Body;
+            try
+            {
+                string body = Http.GetStringAsync(OfficialBannerUrl + query).GetAwaiter().GetResult();
+                if (System.Text.Json.Nodes.JsonNode.Parse(body) is not System.Text.Json.Nodes.JsonObject root
+                    || root["code"]?.GetValue<int>() != 0 || root["data"] is not System.Text.Json.Nodes.JsonArray items)
+                    return hit.Body;
+                // with a local CDN origin the pictures go through its /website proxy, like the patched client expects
+                string? cdnOrigin = Environment.GetEnvironmentVariable("GRIFFIN_CDN_ORIGIN")?.TrimEnd('/');
+                if (cdnOrigin is not null && !cdnOrigin.Contains("sunborngame.com", StringComparison.OrdinalIgnoreCase))
+                    foreach (System.Text.Json.Nodes.JsonNode? item in items)
+                        if (item?["pic_name"]?.GetValue<string>() is { } pic)
+                            item["pic_url"] = $"{cdnOrigin}/website/platform/{pic}";
+                body = root.ToJsonString();
+                Cache[query] = (DateTime.UtcNow, body);
+                return body;
+            }
+            catch (Exception)
+            {
+                return hit.Body;
+            }
         }
 
         private static BannerDto CreateBannerList(int channelId, int typeId)
