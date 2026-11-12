@@ -13,7 +13,8 @@ namespace Griffin.GameServer.Handlers
         ISimCombatWeekService week,
         ILobbyMiniGameService miniGames,
         IResourceService resourceService,
-        IBattlepassService battlepass) : QuestCountHandlerBase
+        IBattlepassService battlepass,
+        IEventTaskService eventTasks) : QuestCountHandlerBase
     {
         private const string PointsDayKey = "quest.daily.points-day";
 
@@ -69,6 +70,8 @@ namespace Griffin.GameServer.Handlers
                 quest.Counters.Add(week.QuestCounters(connection.Account.Uid));
                 quest.Counters.Add(miniGames.Counters(connection.Account.Uid));
                 quest.Counters.AddRange(battlepass.Counters(connection.Account.Uid));
+                // the free skin and ruby shop event tasks (EventTaskService)
+                quest.Counters.AddRange(eventTasks.Counters(connection.Account.Uid));
             }
 
             connection.Send(1, new SC_QuestCount
@@ -136,7 +139,7 @@ namespace Griffin.GameServer.Handlers
             });
             if (connection.Account is not null)
                 connection.SendAutoEncrypted(questProgress.CounterSyncs(connection.Account.Uid)
-                    .Concat(battlepass.CounterSyncs(connection.Account.Uid)).Cast<Google.Protobuf.IMessage>().ToArray());
+                    .Concat(battlepass.CounterSyncs(connection.Account.Uid)).Concat(eventTasks.CounterSyncs(connection.Account.Uid)).Cast<Google.Protobuf.IMessage>().ToArray());
         }
     }
 }

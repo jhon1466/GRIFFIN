@@ -27,6 +27,7 @@ public sealed class DailyQuestProgressService(
     ITableService tableService,
     IAccountStateService accountState,
     IBattlepassService? battlepass = null,
+    IEventTaskService? eventTasks = null,
     ConnectionManager? connections = null) : IDailyQuestProgressService
 {
     /// <summary>
@@ -109,6 +110,7 @@ public sealed class DailyQuestProgressService(
             return;
 
         battlepass?.OnCondition(accountUid, conditionClass, link, amount);
+        eventTasks?.OnCondition(accountUid, conditionClass, link, amount);
         lock (Locks.GetOrAdd(accountUid, static _ => new object()))
         {
             DailyQuestProgressState state = GetState(accountUid);

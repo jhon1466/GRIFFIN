@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Protocol;
 using Griffin.Common.Proto;
@@ -14,7 +14,7 @@ namespace Griffin.GameServer.Handlers
     /// 5 = the skin). EventFreeSkinGuideRewardData (1 = reward id, 2 = group, 3 = reward map item -> count, 4 = progress needed) lists
     /// the milestones; the client marks a milestone claimable when progress >= column 4 and its id is not in the claimed list that
     /// SC_FreeSkinInfo carries (map activity id -> claimed reward ids). The tasks that give the progress item are the common quests of
-    /// type ActivityFreeSkin and are not handled here.
+    /// type ActivityFreeSkin, counted and paid by IEventTaskService.
     /// </summary>
     public sealed class FreeSkinHandler(
         IAccountStateService accountState,
@@ -73,8 +73,7 @@ namespace Griffin.GameServer.Handlers
                 List<uint> claimed = Claimed(uid, activity);
                 if (claimed.Contains(request.RewardId))
                 {
-                    // ASSUMPTION: error code for a milestone already taken (no FreeSkin-specific code exists).
-                    connection.Refuse(MsgId.MsgCsFreeSkinGetReward, HNINDAOJCKP.ActivityMediumCannotGetReward);
+                    connection.Refuse(MsgId.MsgCsFreeSkinGetReward, HNINDAOJCKP.FreeSkinAlreadyClaimed);
                     return;
                 }
 
@@ -82,7 +81,7 @@ namespace Griffin.GameServer.Handlers
                 long progress = itemService.GetPlayerItems(uid).Where(i => i.ItemId == progressItem).Sum(i => (long)i.Count);
                 if (progress < TableFields.U(reward, 4))
                 {
-                    connection.Refuse(MsgId.MsgCsFreeSkinGetReward, HNINDAOJCKP.ItemNotEnough);
+                    connection.Refuse(MsgId.MsgCsFreeSkinGetReward, HNINDAOJCKP.FreeSkinScoreNotEnough);
                     return;
                 }
 
