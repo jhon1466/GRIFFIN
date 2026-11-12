@@ -1104,6 +1104,7 @@ if (scenario is "all" or "regress")
         var rsbBuy = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ActivitySkinBargainBuy>().FirstOrDefault();
         Check("regress R-SkinBargain: goods outside an open bargain activity are refused", rsbBuy is not null && rsbBuy.Code != 0, $"code={rsbBuy?.Code}");
         await httpClient.DeleteAsync($"{http}/api/gm/events/61804");
+    }
     // R-Amo (2026-11-12) the Amo wish board (CS_GetActivityAmo) always came back empty: every wish showed locked. Opening wish event
     // 63805 lists it with the wishes of day 0 (AmoActivitySubData column 14) unlocked.
     if (!string.IsNullOrEmpty(gmToken))
