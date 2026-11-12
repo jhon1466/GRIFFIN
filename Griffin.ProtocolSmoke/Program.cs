@@ -1076,6 +1076,22 @@ if (scenario is "all" or "regress")
     Check("regress R-22: TpsShoot theme 901 lists its stages and the first one is open",
         r22 is not null && r22.KNMAKEJFGDK.Count > 0 && r22.KNMAKEJFGDK.Values.Any(s => s.MPNGHAKGLDM), $"stages={r22?.KNMAKEJFGDK.Count}");
 
+    // R-SkinBargain (2026-11-12) the skin bargain event (ActivityListData type 25, e.g. 61804 selling goods 2041) answered an empty info.
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        await httpClient.PostAsync($"{http}/api/gm/events/61804",
+            new StringContent("{\"days\":30}", System.Text.Encoding.UTF8, "application/json"));
+        main.Send(new CS_ActivitySkinBargainInfo());
+        var rsb = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ActivitySkinBargainInfo>().FirstOrDefault();
+        Check("regress R-SkinBargain: an open skin bargain lists its goods and catalog price",
+            rsb is not null && rsb.Info.TryGetValue(61804, out var sb) && sb.Goods.BFOLFKPANIA == 2041 && sb.Goods.GHIAAHHLOON > 0,
+            rsb is null ? "no reply" : $"entries={rsb.Info.Count}");
+        main.Send(new CS_ActivitySkinBargainBuy { IKDMNOBMIFE = 1, BFOLFKPANIA = 2041 });
+        var rsbBuy = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ActivitySkinBargainBuy>().FirstOrDefault();
+        Check("regress R-SkinBargain: goods outside an open bargain activity are refused", rsbBuy is not null && rsbBuy.Code != 0, $"code={rsbBuy?.Code}");
+        await httpClient.DeleteAsync($"{http}/api/gm/events/61804");
+    }
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
