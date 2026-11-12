@@ -1031,6 +1031,30 @@ if (scenario is "all" or "regress")
     // Daily), not from SC_QuestCount. Claiming must also show the "obtained" window.
     main.Send(new CS_DailyCheckIn());
     var r18 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    // R-20 (2026-11-12, players) unlocking a doll not owned yet with its 30 心智存档 (core item 4000+id) answered GunNotFound (10100)
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        main.Send(new CS_Guns());
+        var r20Owned = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault()?.Guns.Select(g => g.Id).ToHashSet() ?? [];
+        uint r20Gun = new uint[] { 1001, 1008, 1009, 1032, 1033, 1034, 1035, 1036, 1037, 1038, 1039, 1050, 1051, 1052, 1053, 1054, 1055, 1056, 1057, 1058, 1059, 1080, 1081, 1082, 1083, 1084, 1085, 1088, 1013, 1015, 1017, 1021, 1022, 1023, 1024, 1025, 1026, 1027, 1028, 1029, 1040, 1041, 1042, 1043, 1044, 1045, 1047, 1048, 1049, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067, 1068, 1069, 1070, 1071, 1072, 1073, 1074, 1075, 1076, 1077, 1078, 1079 }.FirstOrDefault(g => !r20Owned.Contains(g));
+        string acc20 = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var uid20 = System.Text.RegularExpressions.Regex.Match(acc20, @"""uid""\s*:\s*(\d+)");
+        if (uid20.Success && r20Gun == 0)
+        {
+            r20Gun = 1088;
+            await httpClient.DeleteAsync($"{http}/api/gm/accounts/{uid20.Groups[1].Value}/characters/{r20Gun}");
+        }
+        if (uid20.Success && r20Gun != 0)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uid20.Groups[1].Value}/items",
+                new StringContent($"{{\"itemId\":{r20Gun + 3000},\"count\":30}}", System.Text.Encoding.UTF8, "application/json"));
+        main.ReadFor(TimeSpan.FromSeconds(2));
+        main.Send(new CS_GunUpgrade { GunId = r20Gun });
+        var r20 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        Check("regress R-20: a doll not owned is unlocked with its 30 fragments",
+            r20.OfType<SC_NewGun>().Any() && r20.OfType<SC_GunUpgrade>().Any() && !r20.OfType<SC_ReportError>().Any(),
+            $"gun={r20Gun} owned={r20Owned.Count} {string.Join(",", r20.Select(m => m.GetType().Name))}");
+    }
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

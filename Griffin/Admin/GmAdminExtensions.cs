@@ -286,6 +286,16 @@ public static class GmAdminExtensions
             return Results.Ok(new { uid, gunId = request.GunId, level = existing.Level, online = connections.Connections.Any(c => c.Account?.Uid == uid) });
         });
 
+        // removes one character from an account (to hand it out again, or to test unlocking it with its fragments)
+        api.MapDelete("/accounts/{uid}/characters/{gunId}", async (uint uid, uint gunId, IGunService guns) =>
+        {
+            GunEntity? gun = guns.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == gunId);
+            if (gun is null) return Results.NotFound(new { error = "La cuenta no tiene ese personaje." });
+            bool removed = guns.RemoveGun(uid, gun);
+            await AuditAsync(app, uid, "character.remove", new { gunId });
+            return Results.Ok(new { uid, gunId, removed });
+        });
+
         api.MapPost("/accounts/{uid}/weapons", async (uint uid, GrantWeaponRequest request,
             GriffinDbContext db, ITableService tables, IInventoryService inventory,
             IAccountStateService accountState,

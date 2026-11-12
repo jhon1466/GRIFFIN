@@ -316,7 +316,37 @@ namespace Griffin.GameServer.Handlers
                 return;
 
             List<Google.Protobuf.IMessage> spent = [];
-            if (progress.GradeUp(connection.Account.Uid, request.GunId, spent) is { } grade)
+            uint uid = connection.Account.Uid;
+            // a doll not owned yet is unlocked here with its 心智存档 (GunData core_item_id): GunGradeData row gun*100+1 cost_piece;
+            // the server answered GunNotFound (10100) (A-211)
+            if (!gunService.GetPlayerGuns(uid).Any(g => g.GunId == request.GunId))
+            {
+                GunData? data = tableService.GetTable<GunData>().FirstOrDefault(g => g.Id == request.GunId);
+                uint core = data?.CoreItemId ?? 0;
+                uint pieces = tableService.GetTable<GunGradeData>().FirstOrDefault(g => g.Id == request.GunId * 100 + 1)?.CostPiece ?? 0;
+                if (pieces == 0)
+                    pieces = tableService.GetTable<GunGradeData>().FirstOrDefault(g => g.Id == request.GunId * 100 + 2)?.CostPiece ?? 30;
+                if (data is null || core == 0)
+                {
+                    connection.Refuse(MsgId.MsgCsGunUpgrade, HNINDAOJCKP.GunNotFound);
+                    return;
+                }
+                if (!itemUse.Spend(uid, new Dictionary<uint, int> { [core] = (int)pieces }, spent))
+                {
+                    connection.Refuse(MsgId.MsgCsGunUpgrade, HNINDAOJCKP.ItemNotEnough);
+                    return;
+                }
+                using (RewardDrops drops = RewardDrops.Begin())
+                {
+                    rewardService.Grant(uid, request.GunId, 1, spent);
+                    drops.Finish(spent);
+                }
+                spent.Add(new SC_GunUpgrade { GunId = request.GunId, Grade = 0 });
+                connection.SendAutoEncrypted(spent.ToArray());
+                return;
+            }
+
+            if (progress.GradeUp(uid, request.GunId, spent) is { } grade)
             {
                 spent.Add(new SC_GunUpgrade { GunId = request.GunId, Grade = grade });
                 connection.SendAutoEncrypted(spent.ToArray());
