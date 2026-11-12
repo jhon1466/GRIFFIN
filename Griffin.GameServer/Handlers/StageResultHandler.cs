@@ -218,6 +218,9 @@ namespace Griffin.GameServer.Handlers
                         break;
                 }
 
+                // the first clear of a hard story stage gives the clue that unlocks the next one (A-208)
+                DifficultStoryClues.OnStageWon(tableService, accountState, rewardService, uid, stage.Id, push);
+
                 bool firstClear = prior is null || prior.FirstPassTime == 0;
                 var validChallenges = stageProgress?.Challenges
                     .Where(stage.ChallengeList.Contains)

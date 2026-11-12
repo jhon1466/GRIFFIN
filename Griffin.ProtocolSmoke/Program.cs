@@ -1051,6 +1051,32 @@ if (scenario is "all" or "regress")
         r16Done.Count > 0 && r16Take.OfType<SC_CommonQuestTakeReward>().Any(t => t.QuestId.Count > 0) && r16Take.OfType<SC_DropCollect>().Any(),
         $"done={string.Join(',', r16Done)}");
 
+    // R-17 (2026-11-12, players) hard story "field echoes": winning HD-1-1 (stage 24101) must give its clue (1 x 8119 "一本旧书"), the clue
+    // unlocks 1-2 (24102), and sweeps keep answering past 20 (the 20-per-day cap was invented; only stamina limits a sweep).
+    main.Send(new CS_StageStart { StcStageId = 24101 });
+    main.ReadFor(TimeSpan.FromSeconds(3));
+    main.Send(new CS_StageResult { BattleResult = BattleResult.Win, Count = 1 });
+    var r17Win = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).ToList();
+    Check("regress R-17: winning HD-1-1 gives its clue 8119", r17Win.OfType<SC_Items>().Any(i => i.Items.TryGetValue(8119u, out int n) && n >= 1));
+    main.Send(new CS_DifficultUnlockStory { StoryId = 24102 });
+    var r17Unlock = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    int r17Had = r17Win.OfType<SC_Items>().Where(i => i.Items.ContainsKey(8119u)).Select(i => i.Items[8119u]).LastOrDefault();
+    Check("regress R-17: the clue unlocks HD-1-2 and one is spent",
+        r17Unlock.OfType<SC_DifficultUnlockStory>().Any(u => u.StoryId == 24102) && r17Unlock.OfType<SC_Items>().Any(i => i.Items.TryGetValue(8119u, out int left) && left == r17Had - 1),
+        $"had={r17Had}");
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        string acc17 = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var uid17 = System.Text.RegularExpressions.Regex.Match(acc17, @"""uid""\s*:\s*(\d+)");
+        if (uid17.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{uid17.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":101,\"count\":2000}", System.Text.Encoding.UTF8, "application/json"));
+        main.ReadFor(TimeSpan.FromSeconds(2));
+    }
+    main.Send(new CS_DifficultStoryRaid { StageId = 24101, Num = 25 });
+    var r17Raid = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_DifficultStoryRaid>().FirstOrDefault();
+    Check("regress R-17: a sweep of 25 runs is answered with 25 (no invented 20-per-day cap)", r17Raid is { Num: 25 }, $"num={r17Raid?.Num}");
+
     // R-7 (2026-11-07) the delayed sign-in of an event answers its state (it was left without a handler).
     main.Send(new CS_ActivityDelaySignInGetInfo { IKDMNOBMIFE = 0 });
     Check("regress R-7: delayed sign-in info is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_ActivityDelaySignInGetInfo>().Any());

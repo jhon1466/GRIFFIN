@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
@@ -48,9 +48,10 @@ namespace Griffin.GameServer.Handlers
                 if (daily.Date != today)
                     daily = new DifficultDailyState { Date = today };
 
-                uint limit = TableFields.U(stage, 25);
+                // column 25 is not a daily cap (the client never reads it): a sweep is only limited by its stamina cost. The old
+                // 20-per-day cap made the sweep stop answering after ~20 runs while the battle still worked (A-208).
                 uint completedToday = daily.Counts.GetValueOrDefault(stage.Id);
-                uint accepted = Math.Min(request.Num, completedToday >= limit ? 0 : limit - completedToday);
+                uint accepted = Math.Min(request.Num, 99u);
                 if (accepted == 0)
                 {
                     connection.Send(new SC_DifficultStoryRaid { StageId = stage.Id });
