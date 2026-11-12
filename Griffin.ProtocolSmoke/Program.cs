@@ -1076,6 +1076,20 @@ if (scenario is "all" or "regress")
     Check("regress R-22: TpsShoot theme 901 lists its stages and the first one is open",
         r22 is not null && r22.KNMAKEJFGDK.Count > 0 && r22.KNMAKEJFGDK.Values.Any(s => s.MPNGHAKGLDM), $"stages={r22?.KNMAKEJFGDK.Count}");
 
+    // R-Amo (2026-11-12) the Amo wish board (CS_GetActivityAmo) always came back empty: every wish showed locked. Opening wish event
+    // 63805 lists it with the wishes of day 0 (AmoActivitySubData column 14) unlocked.
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        await httpClient.PostAsync($"{http}/api/gm/events/63805",
+            new StringContent("{\"days\":30}", System.Text.Encoding.UTF8, "application/json"));
+        main.Send(new CS_GetActivityAmo());
+        var rAmo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetActivityAmo>().FirstOrDefault();
+        Check("regress R-Amo: wish event 63805 lists its unlocked wishes",
+            rAmo is not null && rAmo.OOEJEHGFCLL.TryGetValue(63805, out var amoBoard) && amoBoard.KFFMAACHAJN.Count > 0,
+            rAmo is null ? "no reply" : $"events={string.Join(',', rAmo.OOEJEHGFCLL.Keys)}");
+        await httpClient.DeleteAsync($"{http}/api/gm/events/63805");
+    }
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

@@ -81,12 +81,30 @@ namespace Griffin.GameServer.Handlers
             connection.Send(new SC_ActivityGetMedium());
         }
 
-        public override void HandleGetActivityAmo(CS_GetActivityAmo request, Connection connection)
+        /// <summary>The Amo wish boards of the open events, with the wishes unlocked so far (<see cref="ActivityAmo.Info"/>).</summary>
+        public override void HandleGetActivityAmo(CS_GetActivityAmo request, Connection connection) =>
+            connection.Send(ActivityAmo.Info(tableService, eventOverrides));
+
+        /// <summary>Tesco (Mayling procurement) token exchange (<see cref="ActivityAmo.ExchangeToken"/>).</summary>
+        public override void HandleActivityAmoTescoExchangeToken(CS_ActivityAmoTescoExchangeToken request, Connection connection)
         {
-                    connection.Send(new SC_GetActivityAmo
-                    {
-                        OOEJEHGFCLL = { },
-                    });
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            using RewardDrops drops = RewardDrops.Begin();
+            lock (AccountLock.For(uid))
+            {
+                if (!ActivityAmo.ExchangeToken(tableService, itemUse, rewardService, uid, request.Num, messages))
+                {
+                    connection.Refuse(MsgId.MsgCsActivityAmoTescoExchangeToken, HNINDAOJCKP.ItemNotEnough);
+                    return;
+                }
+            }
+
+            drops.Finish(messages);
+            messages.Add(new SC_ActivityAmoTescoExchangeToken { IKDMNOBMIFE = request.IKDMNOBMIFE, Num = request.Num });
+            connection.SendAutoEncrypted(messages.ToArray());
         }
 
         /// <summary>
@@ -725,6 +743,7 @@ namespace Griffin.GameServer.Handlers
                 return;
             uint uid = connection.Account.Uid;
             List<IMessage> messages = [];
+            using RewardDrops drops = RewardDrops.Begin();
             lock (AccountLock.For(uid))
             {
                 Amo3dState state = accountState.Get<Amo3dState>(uid, Amo3dKey(request.IKDMNOBMIFE)) ?? new Amo3dState();
@@ -746,6 +765,7 @@ namespace Griffin.GameServer.Handlers
                 accountState.Set(uid, Amo3dKey(request.IKDMNOBMIFE), state);
             }
 
+            drops.Finish(messages);
             messages.Add(new SC_ActivityThreeDimensionsAmoGetReward { IKDMNOBMIFE = request.IKDMNOBMIFE, KNMAPOCKMCJ = request.KNMAPOCKMCJ });
             connection.SendAutoEncrypted(messages.ToArray());
         }
