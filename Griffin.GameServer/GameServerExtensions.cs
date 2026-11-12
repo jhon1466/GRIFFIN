@@ -42,6 +42,7 @@ namespace Griffin.GameServer
             services.AddScoped<IFallbackResponder, Services.ClosedModeResponder>();
 
             services.AddSingleton<PacketDispatcher>();
+            Services.AutoRewardWindow.Install();
             services.AddSingleton<ConnectionManager>();
 
             services.AddHostedService<GameServerHostedService>();

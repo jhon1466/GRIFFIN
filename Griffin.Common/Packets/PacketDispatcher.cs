@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Google.Protobuf;
@@ -35,6 +35,9 @@ namespace Griffin.Common.Packets
         /// <summary><c>HNINDAOJCKP.UserSystemLocked</c>: the client shows its "function locked" hint.</summary>
         private const int UserSystemLockedError = -10018;
         private const int ClientInputInvalidError = -10008;
+
+        /// <summary>Opened around each handled request (name without "MsgCs"); the game server uses it for the reward window.</summary>
+        public static Func<Connection, string, IDisposable?>? RequestScope;
 
         private static readonly ConcurrentDictionary<string, bool> LoggedFallbacks = new();
 
@@ -107,7 +110,9 @@ namespace Griffin.Common.Packets
             try
             {
                 IMessage? request = packet.Message;
-                object? result = entry.Method.Invoke(handler, new object?[] { request, connection });
+                object? result;
+                using (RequestScope?.Invoke(connection, packet.Header.MsgId.ToString().Replace("MsgCs", "")))
+                    result = entry.Method.Invoke(handler, new object?[] { request, connection });
 
                 // A handler with an empty body leaves the client waiting on that screen. For read-only requests answer
                 // with the empty counterpart message (same rules as for unimplemented handlers).

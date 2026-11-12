@@ -1030,7 +1030,10 @@ if (scenario is "all" or "regress")
     // R-15 (2026-11-08, players) daily quests showed 0/x even when done: the client reads progress from player counters (system 3 for type
     // Daily), not from SC_QuestCount. Claiming must also show the "obtained" window.
     main.Send(new CS_DailyCheckIn());
-    main.ReadFor(TimeSpan.FromSeconds(3));
+    var r18 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    // R-18 (2026-11-12, players) the monthly sign-in and every other claim paid without the "obtained" window: the dispatcher adds it
+    Check("regress R-18: the daily sign-in shows the reward window before its answer",
+        r18.OfType<SC_DropCollect>().Any(d => d.Drops.Count > 0) && r18.FindIndex(m => m is SC_DropCollect) < r18.FindIndex(m => m is SC_DailyCheckIn));
     main.Send(new CS_QuestCount());
     var r15 = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).ToList();
     Check("regress R-15: the daily sign-in quest (1) reaches the client as player counter 3 = 1",

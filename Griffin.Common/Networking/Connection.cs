@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Griffin.Common.Manager;
 using Griffin.Common.Packets;
@@ -78,6 +78,9 @@ namespace Griffin.Common.Networking
         }
 
         private int sentMessageCount;
+
+        /// <summary>Set by the dispatcher while a request is handled on this thread: may add messages to what is sent (the reward window).</summary>
+        [ThreadStatic] public static Func<Connection, IMessage[], IMessage[]>? OutgoingFilter;
 
         /// <summary>Number of main messages written to this connection (lets the dispatcher detect handlers that stay silent).</summary>
         public int SentMessageCount => Volatile.Read(ref sentMessageCount);
@@ -218,7 +221,10 @@ namespace Griffin.Common.Networking
         {
             ArgumentNullException.ThrowIfNull(messages);
 
-            BasePacket[] basePackets = BuildBasePackets(messages.Cast<IMessage>());
+            IEnumerable<IMessage> outgoing = messages.Cast<IMessage>();
+            if (OutgoingFilter is { } filter)
+                outgoing = filter(this, outgoing.ToArray());
+            BasePacket[] basePackets = BuildBasePackets(outgoing);
             if (basePackets.Length == 0)
             {
                 return;
