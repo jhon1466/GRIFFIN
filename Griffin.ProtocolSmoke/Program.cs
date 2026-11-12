@@ -1139,6 +1139,13 @@ if (scenario is "all" or "regress")
     var rRubyBuy = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
     Check("regress R-RubyShop: buying in a shop that does not exist is refused", !rRubyBuy.OfType<SC_RubyShopBuy>().Any(),
         string.Join(",", rRubyBuy.Select(m => m.GetType().Name)));
+    // R-RichMan (2026-11-12) the RichMan board game of theme 901 got an auto-empty RichManData (no stage listed): its stages are found
+    // through ActivityModuleData[21003] -> RichmanConfigData 1001 -> season 1001 -> MissionBySeasonData (MissionData 1..9).
+    main.Send(new CS_RichManData { ThemeId = 901 });
+    var rRich = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_RichManData>().FirstOrDefault();
+    Check("regress R-RichMan: RichMan theme 901 lists its season stages",
+        rRich is not null && rRich.ThemeId == 901 && rRich.Data is not null && rRich.Data.DIPHLGDEIED.ContainsKey(1) && rRich.Data.DIPHLGDEIED.Count >= 9,
+        $"stages={rRich?.Data?.DIPHLGDEIED.Count}");
 
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
