@@ -1076,6 +1076,16 @@ if (scenario is "all" or "regress")
     Check("regress R-22: TpsShoot theme 901 lists its stages and the first one is open",
         r22 is not null && r22.KNMAKEJFGDK.Count > 0 && r22.KNMAKEJFGDK.Values.Any(s => s.MPNGHAKGLDM), $"stages={r22?.KNMAKEJFGDK.Count}");
 
+    // R-lottery (2026-11-12) the lottery activity (61805, LotteryMainData) answered an empty info, so the panel had no activity/score;
+    // the info now lists every LotteryMainData activity with its score and pushes the Lottery counters with its phases (tickets).
+    main.Send(new CS_ActivityLotteryInfo());
+    var rLot = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    var rLotInfo = rLot.OfType<SC_ActivityLotteryInfo>().FirstOrDefault();
+    var rLotCounters = rLot.OfType<SC_CountSection>().SelectMany(c => c.Counters).FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.Lottery);
+    Check("regress R-lottery: lottery info lists activity 61805 and its 5 phases",
+        rLotInfo is not null && rLotInfo.BNKEKDKPCIE.ContainsKey(61805) && rLotCounters is not null && rLotCounters.PhaseRewards.Count == 5,
+        $"info={rLotInfo?.BNKEKDKPCIE.Count} phases={rLotCounters?.PhaseRewards.Count}");
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

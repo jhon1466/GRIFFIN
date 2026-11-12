@@ -8,7 +8,7 @@ using Google.Protobuf;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService, IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState, IItemUseService itemUse, StoreHandler store) : ActivityHandlerBase
+    public sealed class ActivityHandler(IEventSigninService eventSignin, IActivityBackService activityBack, ITableService tableService, IEventOverrideService eventOverrides, IRewardService rewardService, IAccountStateService accountState, IItemUseService itemUse, StoreHandler store, IActivityLotteryService? lottery = null) : ActivityHandlerBase
     {
         public override void HandlePlanActivity(CS_PlanActivity request, Connection connection)
         {
@@ -191,10 +191,15 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleActivityLotteryInfo(CS_ActivityLotteryInfo request, Connection connection)
         {
-                    connection.Send(new SC_ActivityLotteryInfo()
-                    {
-                        BNKEKDKPCIE = { }
-                    });
+            // the Lottery counters go first in an SC_CountSection (the only push the client merges phase_rewards from), so the
+            // tickets already taken show as taken; then the score per activity (see ActivityLotteryService)
+            if (connection.Account is null || lottery is null)
+            {
+                connection.Send(new SC_ActivityLotteryInfo());
+                return;
+            }
+            uint uid = connection.Account.Uid;
+            connection.SendAutoEncrypted<Google.Protobuf.IMessage>(new SC_CountSection { Counters = { lottery.Counters(uid) } }, lottery.Info(uid));
         }
 
         public override void HandleActivityBackOneTimeReward(CS_ActivityBackOneTimeReward request, Connection connection)
