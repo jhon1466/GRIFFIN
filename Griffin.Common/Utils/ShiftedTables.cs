@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -106,28 +106,47 @@ namespace Griffin.Common.Utils
                             byId.TryGetValue(id, out own);
                         }
 
+                        // every date of the row inside an opened period, moved with it
+                        List<(int Field, int Pos, int Len, long Next, long NewOpen, bool Early)> dates = [];
                         Walk(file, start, end, (field, pos, len, value) =>
                         {
                             if (value < (1UL << 28) || value >= (1UL << 35))
                                 return;
                             long v = (long)value;
-                            long next;
                             if (own is not null && field == 4)
-                                next = own.NewOpen;
+                                dates.Add((field, pos, len, own.NewOpen, own.NewOpen, false));
                             else if (own is not null && field == 5)
-                                next = own.NewClose;
+                                dates.Add((field, pos, len, own.NewClose, own.NewOpen, false));
                             else
                             {
                                 (long From, long To, long Delta) hit = windows.FirstOrDefault(w => v >= w.From && v <= w.To);
                                 if (hit.Delta == 0 && hit.From == 0)
                                     return;
-                                next = v + hit.Delta;
+                                long newOpen = hit.From + Margin + hit.Delta;
+                                dates.Add((field, pos, len, v + hit.Delta, newOpen, v < (hit.From + hit.To) / 2));
                             }
-
-                            if (next < (1L << 28) || next >= (1L << 35))
-                                return;
-                            WriteVarint(file, pos, len, (ulong)next);
                         });
+
+                        // The parts of a reopened event (its shop, challenge, daily food, minigames, later chapters...) opened days after
+                        // the event officially: they open now as well, keeping their closing date (A-212). The opening date is the earliest
+                        // one of the row (or ActivityListData column 4), or a lone date of the first half of the period.
+                        List<(int Field, int Pos, int Len, long Next, long NewOpen, bool Early)> moved = dates.Where(d => own is null).ToList();
+                        int opening = -1;
+                        if (activityList)
+                            opening = moved.FindIndex(d => d.Field == 4);
+                        else if (moved.Count >= 2)
+                            opening = moved.IndexOf(moved.MinBy(d => d.Next));
+                        else if (moved.Count == 1 && moved[0].Early)
+                            opening = 0;
+                        foreach (var d in dates)
+                        {
+                            long next = d.Next;
+                            if (own is null && opening >= 0 && moved[opening].Pos == d.Pos && next > d.NewOpen)
+                                next = d.NewOpen;
+                            if (next < (1L << 28) || next >= (1L << 35))
+                                continue;
+                            WriteVarint(file, d.Pos, d.Len, (ulong)next);
+                        }
                     }
 
                     File.WriteAllBytes(Path.Combine(tmp, name), file);

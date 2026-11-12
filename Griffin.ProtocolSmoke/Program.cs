@@ -1055,6 +1055,20 @@ if (scenario is "all" or "regress")
             $"gun={r20Gun} owned={r20Owned.Count} {string.Join(",", r20.Select(m => m.GetType().Name))}");
     }
 
+    // R-21 (2026-11-12, players) a reopened event only let play its story: its shop (61206), challenge (61207) and daily food (61210)
+    // opened days later officially and showed "opens in X days". Opening an event opens all its parts now.
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        await httpClient.PostAsync($"{http}/api/gm/events/61201",
+            new StringContent("{\"days\":30}", System.Text.Encoding.UTF8, "application/json"));
+        main.Send(new CS_PlanActivity { Type = 6 });
+        var r21 = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_PlanActivity>().FirstOrDefault(p => p.Type == 6);
+        Check("regress R-21: opening event 61201 opens its shop, challenge and daily food at once",
+            r21 is not null && new uint[] { 61201, 61206, 61207, 61210 }.All(r21.ActiveIds.Contains),
+            r21 is null ? "no plan" : $"active={string.Join(',', r21.ActiveIds.Where(i => i / 100 == 612))} next={string.Join(',', r21.NextIds.Where(i => i / 100 == 612))}");
+        await httpClient.DeleteAsync($"{http}/api/gm/events/61201");
+    }
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
