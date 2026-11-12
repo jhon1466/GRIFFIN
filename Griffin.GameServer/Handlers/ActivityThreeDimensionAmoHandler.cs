@@ -23,7 +23,9 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account is null)
                 return;
+            using RewardDrops drops = RewardDrops.Begin();
             Activity.ClaimAmo3dFinal(connection.Account.Uid, request.IKDMNOBMIFE, out List<Google.Protobuf.IMessage> messages);
+            drops.Finish(messages);
             messages.Add(new SC_ActivityThreeDimensionsAmoGetSpecialReward { IKDMNOBMIFE = request.IKDMNOBMIFE });
             connection.SendAutoEncrypted(messages.ToArray());
         }
