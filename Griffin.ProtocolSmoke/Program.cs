@@ -1076,6 +1076,19 @@ if (scenario is "all" or "regress")
     Check("regress R-22: TpsShoot theme 901 lists its stages and the first one is open",
         r22 is not null && r22.KNMAKEJFGDK.Count > 0 && r22.KNMAKEJFGDK.Values.Any(s => s.MPNGHAKGLDM), $"stages={r22?.KNMAKEJFGDK.Count}");
 
+    // R-medium (2026-11-12) the social follow rewards (EventMediumGroupData) and the user import reward (ActivitySpData) replied empty:
+    // no rows, nothing claimable. Every medium row is listed with a state and a token, and a claim echoes its id.
+    main.Send(new CS_ActivityGetMedium());
+    var rMedium = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ActivityGetMedium>().FirstOrDefault();
+    main.Send(new CS_ActivityGetMediumReward { Id = 1 });
+    var rMediumGet = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ActivityGetMediumReward>().FirstOrDefault();
+    main.Send(new CS_ActivityConversionGetReward { Id = 60804 });
+    var rConv = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ActivityConversionGetReward>().FirstOrDefault();
+    Check("regress R-medium: medium rows listed and claimed, conversion reward claimed",
+        rMedium is not null && rMedium.FGMEGJPEJLM.Count > 0 && rMedium.FGMEGJPEJLM.Values.All(v => v.Token.Length > 0)
+            && rMediumGet?.Id == 1 && rConv?.Id == 60804,
+        $"medium={rMedium?.FGMEGJPEJLM.Count} get={rMediumGet?.Id} conv={rConv?.Id}");
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

@@ -74,11 +74,66 @@ namespace Griffin.GameServer.Handlers
             plan.Args.AddRange(TableFields.List(row, 15));
             return plan;
         }
+        /// <summary>
+        /// "Guiding" social-media follow rewards (client KMKMIOEFCAL): one entry per EventMediumGroupData row (1 = id, 5 = reward map
+        /// item -> count). The client keeps the map of SC_ActivityGetMedium (state + token to copy); a state other than Getted on every
+        /// row is a red dot, and CS_ActivityGetMediumReward(id) turns the row into Getted when the reply carries the id.
+        /// </summary>
+        private const string MediumKey = "activity.medium";
+
+        private Dictionary<uint, bool> MediumGot(uint uid) => accountState.Get<Dictionary<uint, bool>>(uid, MediumKey) ?? [];
+
+        private IEnumerable<IMessage> MediumRows() =>
+            tableService.GetTable<EventMediumGroupData>().Cast<IMessage>().Where(r => TableFields.U(r, 1) != 0);
+
         public override void HandleActivityGetMedium(CS_ActivityGetMedium request, Connection connection)
         {
-            // Medium/ad tokens are session-issued by the upstream service. Never reuse a
-            // token captured from another account/session.
-            connection.Send(new SC_ActivityGetMedium());
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            Dictionary<uint, bool> got = MediumGot(uid);
+            SC_ActivityGetMedium reply = new();
+            foreach (IMessage row in MediumRows())
+            {
+                uint id = TableFields.U(row, 1);
+                reply.FGMEGJPEJLM[id] = new DCNNGHIOOJM
+                {
+                    // ASSUMPTION: the official upstream service checks the follow itself (error -1000001 when not followed) and only then
+                    // reports Checked; it cannot be verified here, so every row is claimable (Checked) until it is claimed.
+                    State = got.GetValueOrDefault(id) ? EMCBAMKHJNI.ActivityMediumStateGetted : EMCBAMKHJNI.ActivityMediumStateChecked,
+                    // ASSUMPTION: the token is issued upstream per account; a stable per-account code stands in for it (only shown/copied).
+                    Token = $"GF{uid:X}{id:D2}",
+                };
+            }
+            connection.Send(reply);
+        }
+
+        public override void HandleActivityGetMediumReward(CS_ActivityGetMediumReward request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            IMessage? row = MediumRows().FirstOrDefault(r => TableFields.U(r, 1) == request.Id);
+            if (row is not null)
+            {
+                using var drops = RewardDrops.Begin();
+                lock (AccountLock.For(uid))
+                {
+                    Dictionary<uint, bool> got = MediumGot(uid);
+                    if (!got.GetValueOrDefault(request.Id))
+                    {
+                        foreach ((uint item, uint count) in TableFields.Map(row, 5))
+                            if (item != 0 && count > 0)
+                                rewardService.Grant(uid, item, (int)count, messages);
+                        got[request.Id] = true;
+                        accountState.Set(uid, MediumKey, got);
+                    }
+                }
+                drops.Finish(messages);
+            }
+            messages.Add(new SC_ActivityGetMediumReward { Id = request.Id });
+            connection.SendAutoEncrypted(messages.ToArray());
         }
 
         public override void HandleGetActivityAmo(CS_GetActivityAmo request, Connection connection)
@@ -169,16 +224,52 @@ namespace Griffin.GameServer.Handlers
             connection.SendAutoEncrypted(messages.ToArray());
         }
 
+        /// <summary>
+        /// "User import" reward (client MMADFBJMCPC, panel BLPPMOPENIO): the id is an ActivitySpData row (9 = reward map item -> count);
+        /// the client claims it after its story with CS_ActivityConversionGetReward(id) and shows a red dot while curr_id != 0 and the
+        /// flag is false. SC_GetActivityConversion carries curr_id and that claimed flag.
+        /// </summary>
+        private const string ConversionKey = "activity.conversion";
+
         public override void HandleGetActivityConversion(CS_GetActivityConversion request, Connection connection)
         {
-                    connection.Send(new SC_GetActivityConversion
+            if (connection.Account is null)
+                return;
+            // ASSUMPTION: curr_id is assigned upstream (import of an outside account); without it nothing is pending (0) until the
+            // player claims, then the claimed id is reported with the flag set.
+            uint claimed = accountState.Get<uint>(connection.Account.Uid, ConversionKey);
+            connection.Send(new SC_GetActivityConversion
+            {
+                GIOIKFICGAE = new PKPJMDCFFKD { CurrId = claimed, FPAEHEGGAIH = claimed != 0 },
+            });
+        }
+
+        public override void HandleActivityConversionGetReward(CS_ActivityConversionGetReward request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+            uint uid = connection.Account.Uid;
+            List<IMessage> messages = [];
+            IMessage? row = tableService.GetTable<ActivitySpData>().Cast<IMessage>().FirstOrDefault(r => request.Id != 0 && TableFields.U(r, 1) == request.Id);
+            if (row is not null)
+            {
+                using var drops = RewardDrops.Begin();
+                lock (AccountLock.For(uid))
+                {
+                    // the client keeps a single curr_id: one claim per account
+                    if (accountState.Get<uint>(uid, ConversionKey) == 0)
                     {
-                        GIOIKFICGAE = new PKPJMDCFFKD
-                        {
-                            CurrId = 0,
-                            FPAEHEGGAIH = false,
-                        },
-                    });
+                        // ASSUMPTION: column 8 names a mail officially; the rewards of column 9 are granted directly instead.
+                        foreach ((uint item, uint count) in TableFields.Map(row, 9))
+                            if (item != 0 && count > 0)
+                                rewardService.Grant(uid, item, (int)count, messages);
+                        accountState.Set(uid, ConversionKey, request.Id);
+                    }
+                }
+                drops.Finish(messages);
+            }
+            messages.Add(new SC_ActivityConversionGetReward { Id = row is null ? 0 : request.Id });
+            connection.SendAutoEncrypted(messages.ToArray());
         }
 
         public override void HandleActivitySkinBargainInfo(CS_ActivitySkinBargainInfo request, Connection connection)
