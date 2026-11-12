@@ -1510,7 +1510,8 @@ if (scenario == "stage")
     var chapterClaim = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
     Check("stage: the chapter star reward is granted with its items and confirmed (not just acknowledged)",
         chapterClaim.OfType<SC_ChapterTakeReward>().Any(c => c.RewardId.Contains(ChapterRewardClass.RewardFirst))
-        && chapterClaim.Any(m => m is SC_Items or SC_ResourceUpdate or SC_Resource),
+        && chapterClaim.Any(m => m is SC_Items or SC_ResourceUpdate or SC_Resource)
+        && chapterClaim.FindIndex(m => m is SC_DropCollect) is >= 0 and var drop && drop < chapterClaim.FindIndex(m => m is SC_ChapterTakeReward),
         string.Join(",", chapterClaim.Select(m => m.GetType().Name)));
 }
 
