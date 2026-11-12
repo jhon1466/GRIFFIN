@@ -183,11 +183,49 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleActivitySkinBargainInfo(CS_ActivitySkinBargainInfo request, Connection connection)
         {
-                    connection.Send(new SC_ActivitySkinBargainInfo
+            // The client (PLIEFALNPJA) keeps one entry per ActivityListData row of type 25 (GIGOLKKBPDJ.EventBargain), keyed by
+            // the activity id; param2 (column 16) is the StoreGoodData id of the skin and param3 (column 17) the floor price.
+            // Entry fields: 1 goods id, 2 assist count, 3 bargained price, 4 last update time. With 0 assists the client
+            // shows the catalog price (OEBEFGBDCDF -> GALCPPNEJIA).
+            // ASSUMPTION: assists come from friends through the official web page (skin_bargain_web_url), which a local
+            // server does not have, so every entry reports 0 assists and the catalog price.
+            ulong now = checked((ulong)connection.GameClockSeconds());
+            SC_ActivitySkinBargainInfo reply = new();
+            foreach ((uint activityId, uint goodsId) in OpenSkinBargains(now))
+            {
+                StoreGoodData? good = tableService.GetTable<StoreGoodData>().FirstOrDefault(g => g.Id == goodsId);
+                reply.Info[activityId] = new AOMLELFHHEJ
+                {
+                    Goods = new AOMLELFHHEJ.Types.PLENILNFICA
                     {
-                        Info = { },
-                    });
+                        BFOLFKPANIA = goodsId,
+                        KJMLPOINAMB = 0,
+                        GHIAAHHLOON = good is null ? 0u : (uint)Math.Ceiling(good.Price),
+                        AMIELFOMLMI = 0,
+                    },
+                };
+            }
+            connection.Send(reply);
         }
+
+        /// <summary>Open skin bargain activities (ActivityListData type 25) and the store goods each one sells (param2).</summary>
+        private IEnumerable<(uint ActivityId, uint GoodsId)> OpenSkinBargains(ulong now)
+        {
+            foreach (ActivityListData row in tableService.GetTable<ActivityListData>())
+            {
+                if (TableFields.U(row, 2) != SkinBargainActivityType)
+                    continue;
+                (ulong open, ulong close) = eventOverrides.Effective(row);
+                if ((open != 0 && now < open) || (close != 0 && now > close))
+                    continue;
+                if (!uint.TryParse(TableFields.S(row, 16), out uint goodsId) || goodsId == 0)
+                    continue;
+                yield return (TableFields.U(row, 1), goodsId);
+            }
+        }
+
+        /// <summary>GIGOLKKBPDJ.EventBargain in the client.</summary>
+        private const uint SkinBargainActivityType = 25;
 
         public override void HandleActivityLotteryInfo(CS_ActivityLotteryInfo request, Connection connection)
         {
@@ -807,6 +845,14 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account is null)
                 return;
+            // request: 1 activity id, 2 goods id, 3 price the client shows (IFMFFMGHCAD). Only the goods of an open
+            // bargain activity can be bought here; the store refuses goods paid with real money.
+            ulong now = checked((ulong)connection.GameClockSeconds());
+            if (!OpenSkinBargains(now).Any(b => b.ActivityId == request.IKDMNOBMIFE && b.GoodsId == request.BFOLFKPANIA))
+            {
+                connection.Send(new SC_ActivitySkinBargainBuy { Code = MANKAOBLPBJ.Types.Code.Locked, GoodsId = request.BFOLFKPANIA, DHJFICAKHKG = request.JKDGOMJCCDC });
+                return;
+            }
             List<IMessage> messages = [];
             SC_StoreBuy bought = store.BuyFor(connection.Account.Uid, request.BFOLFKPANIA, messages);
             messages.Add(new SC_ActivitySkinBargainBuy { Code = bought.Code, GoodsId = bought.GoodsId, PriceType = bought.PriceType, DHJFICAKHKG = request.JKDGOMJCCDC });
