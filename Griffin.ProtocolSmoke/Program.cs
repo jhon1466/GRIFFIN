@@ -1129,6 +1129,16 @@ if (scenario is "all" or "regress")
         rMedium is not null && rMedium.FGMEGJPEJLM.Count > 0 && rMedium.FGMEGJPEJLM.Values.All(v => v.Token.Length > 0)
             && rMediumGet?.Id == 1 && rConv?.Id == 60804,
         $"medium={rMedium?.FGMEGJPEJLM.Count} get={rMediumGet?.Id} conv={rConv?.Id}");
+    // R-RubyShop (2026-11-12) the ruby shop (ActivityListData type 18) answered an empty map: no goods, no favor level. Info now lists every
+    // open ruby shop with its state (favor level 1 at start); buying with no currency is refused, not accepted.
+    main.Send(new CS_GetRubyShopInfo());
+    var rRuby = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetRubyShopInfo>().FirstOrDefault();
+    Check("regress R-RubyShop: ruby shop info answers and every listed shop starts at favor level 1 or more",
+        rRuby is not null && rRuby.CIMEBELLALJ.Values.All(b => b.CDBMDEDGLII >= 1), $"shops={string.Join(',', rRuby?.CIMEBELLALJ.Keys ?? [])}");
+    main.Send(new CS_RubyShopBuy { IKDMNOBMIFE = 1, BFOLFKPANIA = 1, LONKKIMNDCG = 1 });
+    var rRubyBuy = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    Check("regress R-RubyShop: buying in a shop that does not exist is refused", !rRubyBuy.OfType<SC_RubyShopBuy>().Any(),
+        string.Join(",", rRubyBuy.Select(m => m.GetType().Name)));
 
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
