@@ -11,6 +11,7 @@ namespace Griffin.GameServer.Services
     public static class ThemeModules
     {
         public const uint TpsShoot = 21001;
+        public const uint RichMan = 21003;
 
         /// <summary>The configuration id of <paramref name="module"/> in theme <paramref name="themeId"/>, or 0.</summary>
         public static uint Config(ITableService tables, uint themeId, uint module)
