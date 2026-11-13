@@ -1322,6 +1322,14 @@ if (scenario is "all" or "regress")
     Check("regress R-23: motorcycle info of theme 2201 lists its unlocked riders",
         r23?.MotorcycleData is not null && r23.MotorcycleData.JHONJAGOIHM.Count > 0, $"riders={string.Join(',', r23?.MotorcycleData?.JHONJAGOIHM ?? [])}");
 
+    // R-24 (2026-11-13, players) the event main tasks (战术目标, ActivityMainTaskData) stayed 0/1: the server never reported them. Those whose
+    // description names a stage code are now listed under type ActivityMainTask (finished once the stage is cleared).
+    main.Send(new CS_QuestCount());
+    var r24 = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_QuestCount>().SelectMany(q => q.Quest.Counters)
+        .FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.ActivityMainTask);
+    Check("regress R-24: the event main tasks are reported (ActivityMainTask, hundreds of stage tasks)",
+        r24 is not null && r24.JGOJBNHMJJH.Count > 300, $"tasks={r24?.JGOJBNHMJJH.Count}");
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
@@ -35,6 +35,9 @@ namespace Griffin.GameServer.Services
 
         /// <summary>Counts a game event (same condition classes and links as the daily quests).</summary>
         void OnCondition(uint uid, uint conditionClass, string? link, uint amount);
+
+        /// <summary>After stage <paramref name="stageId"/> is cleared: the updates of the event main tasks that ask for it.</summary>
+        List<IMessage> OnStageCleared(uint uid, uint stageId);
     }
 
     public sealed class EventTaskState
@@ -43,6 +46,7 @@ namespace Griffin.GameServer.Services
         public HashSet<uint> FreeSkinClaimed { get; set; } = [];
         public Dictionary<uint, uint> Ruby { get; set; } = [];
         public HashSet<uint> RubyClaimed { get; set; } = [];
+        public HashSet<uint> MainClaimed { get; set; } = [];
         public string Day { get; set; } = string.Empty;
     }
 
@@ -72,7 +76,7 @@ namespace Griffin.GameServer.Services
             Fed.Any(f => f.Class == conditionClass && (link.Length == 0 || f.Link.Length == 0 || f.Link == link));
 
         public bool IsTaskType(CommonQuestCounters.Types.Type type) =>
-            type is CommonQuestCounters.Types.Type.ActivityFreeSkin or CommonQuestCounters.Types.Type.RubyShop;
+            type is CommonQuestCounters.Types.Type.ActivityFreeSkin or CommonQuestCounters.Types.Type.RubyShop or CommonQuestCounters.Types.Type.ActivityMainTask;
 
         // ---- table access ----
 
@@ -140,6 +144,7 @@ namespace Griffin.GameServer.Services
                 [
                     Build(CommonQuestCounters.Types.Type.ActivityFreeSkin, FreeSkinTasks(), state.FreeSkin, state.FreeSkinClaimed),
                     Build(CommonQuestCounters.Types.Type.RubyShop, RubyTasks(), state.Ruby, state.RubyClaimed),
+                    MainCounters(uid, state),
                 ];
             }
         }
@@ -159,11 +164,116 @@ namespace Griffin.GameServer.Services
             lock (Locks.GetOrAdd(uid, static _ => new object()))
                 state = Load(uid);
             return Syncs(FreeSkinCounterSystem, FreeSkinTasks().Select(t => (t.Id, Progress(state.FreeSkin, t))))
-                .Concat(Syncs(RubyCounterSystem, RubyTasks().Select(t => (t.Id, Progress(state.Ruby, t))))).ToList();
+                .Concat(Syncs(RubyCounterSystem, RubyTasks().Select(t => (t.Id, Progress(state.Ruby, t)))))
+                .Concat(Syncs(MainTaskCounterSystem, MainTasks().Select(t => (t.Id, MainProgress(uid, t))))).ToList();
+        }
+
+        // ---- event main tasks (ActivityMainTaskData, counter system 43) ----
+
+        public const uint MainTaskCounterSystem = 43;
+
+        public sealed record MainTask(uint Id, uint Stage, uint Need, IReadOnlyList<(uint Key, uint Value)> Reward);
+
+        private static IReadOnlyList<MainTask>? mainTasks;
+        private static readonly System.Text.RegularExpressions.Regex StageCode = new(@"[A-Z]{1,4}-\d+-\d+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
+        /// Event main tasks (ActivityMainTaskData: 1 id, 6 description, 7 target, 10 reward map). The client has no condition column: about 600
+        /// of the 792 descriptions name the code of the stage to clear (StageData column 3, e.g. AA-1-1). Such a task is finished when that
+        /// stage has been cleared, so the rule follows every past and future event by itself. Other kinds (mini game counts) are not listed yet (A-223).
+        /// </summary>
+        private IReadOnlyList<MainTask> MainTasks()
+        {
+            if (mainTasks is not null)
+                return mainTasks;
+            List<ActivityMainTaskData> rows = tableService.GetTable<ActivityMainTaskData>().Where(r => TableFields.U(r, 1) != 0).ToList();
+            HashSet<long> wanted = rows.Select(r => r.Des?.Id ?? 0L).Where(i => i != 0).ToHashSet();
+            Dictionary<long, string> texts = tableService.GetTable<LangPackageTableCnData>().Where(r => wanted.Contains(r.Id))
+                .GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First().Content);
+            Dictionary<string, uint> stageByCode = tableService.GetTable<StageData>()
+                .Select(r => (Code: TableFields.S(r, 3), Id: TableFields.U(r, 1))).Where(x => x.Code.Length > 0)
+                .GroupBy(x => x.Code).ToDictionary(g => g.Key, g => g.First().Id);
+            List<MainTask> tasks = [];
+            foreach (ActivityMainTaskData row in rows)
+            {
+                if (!texts.TryGetValue(row.Des?.Id ?? 0L, out string? description))
+                    continue;
+                var match = StageCode.Match(description);
+                if (!match.Success || !stageByCode.TryGetValue(match.Value, out uint stage))
+                    continue;
+                var reward = row.RewardList is null ? [] : row.RewardList.BAALJFJDGBB.Zip(row.RewardList.Value, (item, count) => (item, count)).ToList();
+                tasks.Add(new MainTask(TableFields.U(row, 1), stage, Math.Max(1u, TableFields.U(row, 7)), reward));
+            }
+            Log.Information("Event main tasks with a stage condition: {Count} of {Total}.", tasks.Count, rows.Count);
+            return mainTasks = tasks;
+        }
+
+        private HashSet<uint> ClearedStages(uint uid) =>
+            (accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? [])
+                .Where(p => p.Value.FirstPassTime != 0).Select(p => uint.TryParse(p.Key, out uint id) ? id : 0).Where(id => id != 0).ToHashSet();
+
+        private uint MainProgress(uint uid, MainTask task) => ClearedStages(uid).Contains(task.Stage) ? task.Need : 0;
+
+        private CommonQuestCounters MainCounters(uint uid, EventTaskState state)
+        {
+            HashSet<uint> cleared = ClearedStages(uid);
+            CommonQuestCounters counters = new() { Type = CommonQuestCounters.Types.Type.ActivityMainTask };
+            foreach (MainTask task in MainTasks())
+            {
+                uint value = cleared.Contains(task.Stage) ? task.Need : 0;
+                counters.JGOJBNHMJJH[task.Id] = value;
+                if (state.MainClaimed.Contains(task.Id))
+                    counters.Rewards[task.Id] = true;
+                else if (value >= task.Need)
+                    counters.Rewards[task.Id] = false;
+            }
+            return counters;
+        }
+
+        public List<IMessage> OnStageCleared(uint uid, uint stageId)
+        {
+            List<MainTask> hit = MainTasks().Where(t => t.Stage == stageId).ToList();
+            if (hit.Count == 0)
+                return [];
+            EventTaskState state;
+            lock (Locks.GetOrAdd(uid, static _ => new object()))
+                state = Load(uid);
+            List<IMessage> messages = [.. Syncs(MainTaskCounterSystem, hit.Select(t => (t.Id, t.Need)))];
+            messages.Add(new SC_CommonQuestCountUpdate { Counters = MainCounters(uid, state) });
+            return messages;
+        }
+
+        private List<uint> ClaimMain(uint uid, IEnumerable<uint> ids, List<IMessage> messages)
+        {
+            List<uint> claimed = [];
+            lock (Locks.GetOrAdd(uid, static _ => new object()))
+            {
+                EventTaskState state = Load(uid);
+                HashSet<uint> cleared = ClearedStages(uid);
+                Dictionary<uint, MainTask> tasks = MainTasks().GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
+                foreach (uint id in ids.Distinct())
+                {
+                    if (!tasks.TryGetValue(id, out MainTask? task) || state.MainClaimed.Contains(id) || !cleared.Contains(task.Stage))
+                        continue;
+                    foreach ((uint item, uint count) in task.Reward)
+                        if (count > 0)
+                            rewardService.Grant(uid, item, (int)count, messages);
+                    state.MainClaimed.Add(id);
+                    claimed.Add(id);
+                }
+                if (claimed.Count > 0)
+                {
+                    Save(uid, state);
+                    Log.Information("Event main tasks {Ids} of account {Uid} claimed.", claimed, uid);
+                }
+            }
+            return claimed;
         }
 
         public List<uint> Claim(uint uid, CommonQuestCounters.Types.Type type, IEnumerable<uint> ids, List<IMessage> messages)
         {
+            if (type == CommonQuestCounters.Types.Type.ActivityMainTask)
+                return ClaimMain(uid, ids, messages);
             bool freeSkin = type == CommonQuestCounters.Types.Type.ActivityFreeSkin;
             List<uint> claimed = [];
             lock (Locks.GetOrAdd(uid, static _ => new object()))

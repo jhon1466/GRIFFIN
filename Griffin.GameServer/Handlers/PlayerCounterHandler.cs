@@ -8,7 +8,7 @@ using Griffin.Common.Table;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class PlayerCounterHandler(IGunService gunService, ITableService tableService, IAchievementService achievements, ILobbyMiniGameService miniGames, ILoadingPictureService loadingPictures) : PlayerCounterHandlerBase
+    public sealed class PlayerCounterHandler(IGunService gunService, ITableService tableService, IAchievementService achievements, ILobbyMiniGameService miniGames, ILoadingPictureService loadingPictures, IEventTaskService eventTasks) : PlayerCounterHandlerBase
     {
         public override void HandlePlayerCounterSync(CS_PlayerCounterSync request, Connection connection)
         {
@@ -2711,6 +2711,14 @@ namespace Griffin.GameServer.Handlers
                       },
                   }
             };
+            // the event task types handled by EventTaskService get their real counters, not the captured empty entries (A-223)
+            foreach (CommonQuestCounters real in eventTasks.Counters(connection.Account.Uid))
+            {
+                for (int i = countSection3.Counters.Count - 1; i >= 0; i--)
+                    if (countSection3.Counters[i].Type == real.Type)
+                        countSection3.Counters.RemoveAt(i);
+                countSection3.Counters.Add(real);
+            }
             connection.SendUnsequenced(countSection3);
 
             SC_CountSection countSection4 = new SC_CountSection

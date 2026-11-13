@@ -23,7 +23,8 @@ namespace Griffin.GameServer.Handlers
         IRougeService rouge,
         ISimCombatWeekService week,
         IEndlessTowerService endlessTower,
-        IRouge2Service rouge2) : StageResultHandlerBase
+        IRouge2Service rouge2,
+        IEventTaskService eventTasks) : StageResultHandlerBase
     {
         /// <summary>
         /// Winning the together-battle of an affection event (<c>LoveEventData</c> type 2, levels 5 to 7) completes it: the level rises and the
@@ -298,6 +299,9 @@ namespace Griffin.GameServer.Handlers
                     push.Add(new SC_CommonQuestCountUpdate { Counters = unlocked });
                 if (loadingPictures.NewlyUnlocked(uid, picturesBefore) is { } pictures)
                     push.Add(new SC_CommonQuestCountUpdate { Counters = pictures });
+                // event main tasks that ask for this stage (ActivityMainTaskData, counter system 43) are finished now (A-223)
+                if (firstClear)
+                    push.AddRange(eventTasks.OnStageCleared(uid, stage.Id));
             }
 
             // the mods that dropped must be known to the client before the result screen asks for them
