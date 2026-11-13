@@ -1248,6 +1248,7 @@ if (scenario is "all" or "regress")
         Check("regress R-Bingo: a row with closed cards is refused", !rBingoLine.OfType<SC_TakeBingoExtraReward>().Any(),
             string.Join(",", rBingoLine.Select(m => m.GetType().Name)));
         await httpClient.DeleteAsync($"{http}/api/gm/events/63506");
+    }
     // R-Pazzle (2026-11-12) the puzzle challenge (module 20005, theme 601 -> PazzleMissionData 1001) had no handler: the panel never got
     // its info. Info now answers the claimed star thresholds and a star reward above the stars earned is refused (StarNotEnough).
     {
