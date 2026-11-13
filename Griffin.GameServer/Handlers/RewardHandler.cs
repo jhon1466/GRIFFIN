@@ -2,6 +2,7 @@
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
+using Griffin.Common.Table;
 using Griffin.GameServer.Extensions;
 using Griffin.GameServer.Services;
 
@@ -11,8 +12,13 @@ namespace Griffin.GameServer.Handlers
     /// Reward claims that the protocol groups in one handler base. Battle pass levels are claimed here (the rules are in
     /// <see cref="IBattlepassService"/>); each claim is granted once and answered with the item updates and then the reply.
     /// </summary>
-    public sealed class RewardHandler(IBattlepassService battlepass, IExThemeService exThemes) : RewardHandlerBase
+    public sealed class RewardHandler(IBattlepassService battlepass, IExThemeService exThemes, ITableService tableService, IEventOverrideService eventOverrides,
+        IAccountStateService accountState, IRewardService rewardService) : RewardHandlerBase
     {
+        // row / column / full-card rewards of the treasure bingo card (rules in Bingo, BingoHandler.cs)
+        public override void HandleTakeBingoExtraReward(CS_TakeBingoExtraReward request, Connection connection) =>
+            Bingo.TakeExtraReward(request, connection, tableService, eventOverrides, accountState, rewardService);
+
         // The optional reward of a banner needs a counter this server does not keep (GetGachaCounter is announced empty),
         // so it can never be claimed.
         public override void HandleGetGachaOptionalReward(CS_GetGachaOptionalReward request, Connection connection) =>

@@ -1148,6 +1148,24 @@ if (scenario is "all" or "regress")
         rRich is not null && rRich.ThemeId == 901 && rRich.Data is not null && rRich.Data.DIPHLGDEIED.ContainsKey(1) && rRich.Data.DIPHLGDEIED.Count >= 9,
         $"stages={rRich?.Data?.DIPHLGDEIED.Count}");
 
+    // R-Bingo (2026-11-12) the bingo card of the treasure activities (TreasureMainData column 3 -> BingoConfigData) had no handler: the board
+    // never reached SC_TreasureData and every card/line request failed. Opening treasure 63506 (bingo 10021) lists its board; a line whose
+    // cards are not all open is refused.
+    if (!string.IsNullOrEmpty(gmToken))
+    {
+        await httpClient.PostAsync($"{http}/api/gm/events/63506",
+            new StringContent("{\"days\":30}", System.Text.Encoding.UTF8, "application/json"));
+        main.Send(new CS_TreasureData());
+        var rBingo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_TreasureData>().FirstOrDefault();
+        Check("regress R-Bingo: an open bingo treasure carries its board in SC_TreasureData",
+            rBingo is not null && rBingo.LLLDFCFANII.TryGetValue(63506, out var bingoEntry) && bingoEntry.DPOCKPGIDJN is not null,
+            rBingo is null ? "no reply" : $"treasures={string.Join(',', rBingo.LLLDFCFANII.Keys)}");
+        main.Send(new CS_TakeBingoExtraReward { ONMNEMDCEIJ = 63506, PAGNJJKGIDA = 1, RewardType = CFKNEMOKCJB.Types.FKMLNKOFMJL.Row });
+        var rBingoLine = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+        Check("regress R-Bingo: a row with closed cards is refused", !rBingoLine.OfType<SC_TakeBingoExtraReward>().Any(),
+            string.Join(",", rBingoLine.Select(m => m.GetType().Name)));
+        await httpClient.DeleteAsync($"{http}/api/gm/events/63506");
+    }
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

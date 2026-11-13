@@ -14,7 +14,8 @@ namespace Griffin.GameServer.Handlers
     public sealed class TreasureHandler(
         ITableService tableService,
         IAccountStateService accountState,
-        IRewardService rewardService) : TreasureHandlerBase
+        IRewardService rewardService,
+        IEventOverrideService eventOverrides) : TreasureHandlerBase
     {
         private const uint ActiveTreasureId = 60015;
         private const string StateKey = "treasure.pass.60015";
@@ -33,13 +34,31 @@ namespace Griffin.GameServer.Handlers
             TreasurePassState state = connection.Account is null
                 ? new TreasurePassState()
                 : GetState(connection.Account.Uid, pass);
-            connection.Send(new SC_TreasureData
+            SC_TreasureData data = new()
             {
                 LLLDFCFANII =
                 {
                     [pass.Main.Id] = BuildProtoState(pass, state),
                 },
-            });
+            };
+            AddBingoBoards(data, connection);
+            connection.Send(data);
+        }
+
+        /// <summary>
+        /// Open treasure activities with a bingo card (TreasureMainData column 3) carry the board in field 5; the client builds its bingo
+        /// list only from the treasures of this message (PCDMOKFDIEK.IOPLFMMJFJG). ASSUMPTION: a bingo-only treasure has no pass, so its
+        /// level, exp and rewards stay empty.
+        /// </summary>
+        private void AddBingoBoards(SC_TreasureData data, Connection connection)
+        {
+            foreach (Bingo.Config bingo in Bingo.Open(tableService, eventOverrides, (ulong)connection.GameClockSeconds()))
+            {
+                Bingo.Board board = connection.Account is null ? new Bingo.Board() : Bingo.Load(accountState, connection.Account.Uid, bingo.TreasureId);
+                if (!data.LLLDFCFANII.TryGetValue(bingo.TreasureId, out IAHOOMEFPND? entry))
+                    data.LLLDFCFANII[bingo.TreasureId] = entry = new IAHOOMEFPND();
+                entry.DPOCKPGIDJN = Bingo.ToProto(board);
+            }
         }
 
         public override void HandleTreasureTakeReward(CS_TreasureTakeReward request, Connection connection)
