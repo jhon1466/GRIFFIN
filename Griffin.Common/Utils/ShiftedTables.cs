@@ -22,7 +22,7 @@ namespace Griffin.Common.Utils
         private const long Margin = 3 * 86400;
         private const uint RowTag = 10;
         /// <summary>Bump when the fixes applied to the served copy change (A-214: TpsShoot seasons and stage delays).</summary>
-        private const string PatchRevision = "3";
+        private const string PatchRevision = "4";
 
         private static readonly object Gate = new();
 
@@ -112,6 +112,7 @@ namespace Griffin.Common.Utils
 
                         // every date of the row inside an opened period, moved with it
                         List<(int Field, int Pos, int Len, long Next, long NewOpen, bool Early)> dates = [];
+                        List<(int Field, int Pos, int Len, long Value)> later = [];
                         Walk(file, start, end, (field, pos, len, value) =>
                         {
                             if (value < (1UL << 28) || value >= (1UL << 35))
@@ -125,7 +126,10 @@ namespace Griffin.Common.Utils
                             {
                                 (long From, long To, long Delta) hit = windows.FirstOrDefault(w => v >= w.From && v <= w.To);
                                 if (hit.Delta == 0 && hit.From == 0)
+                                {
+                                    later.Add((field, pos, len, v));
                                     return;
+                                }
                                 long newOpen = hit.From + Margin + hit.Delta;
                                 dates.Add((field, pos, len, v + hit.Delta, newOpen, v < (hit.From + hit.To) / 2));
                             }
@@ -142,6 +146,19 @@ namespace Griffin.Common.Utils
                             opening = moved.IndexOf(moved.MinBy(d => d.Next));
                         else if (moved.Count == 1 && moved[0].Early)
                             opening = 0;
+                        // A date of the same row past the opened period (a part that officially closed weeks after the event, e.g. a
+                        // PlanData close in a later month) stayed in the past and the part showed closed: it moves with the row (A-216).
+                        if (own is null && moved.Count > 0)
+                        {
+                            long delta = moved[0].NewOpen - (windows.First(w => moved[0].Next - w.Delta >= w.From && moved[0].Next - w.Delta <= w.To).From + Margin);
+                            long rowStart = moved.Min(d => d.Next) - delta;
+                            foreach (var l in later.Where(l => l.Value > rowStart))
+                            {
+                                long next = l.Value + delta;
+                                if (next >= (1L << 28) && next < (1L << 35))
+                                    WriteVarint(file, l.Pos, l.Len, (ulong)next);
+                            }
+                        }
                         foreach (var d in dates)
                         {
                             long next = d.Next;
