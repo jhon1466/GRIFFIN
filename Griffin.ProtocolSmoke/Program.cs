@@ -1315,6 +1315,13 @@ if (scenario is "all" or "regress")
     Check("regress R-ThemeMiniGame: Shootspace of theme 4201 lists the levels of its StspConfigData row only",
         rStsp is not null && rStsp.FDPOAJJJKGC.Count > 0 && rStsp.FDPOAJJJKGC.Values.Any(v => v.MPNGHAKGLDM),
         $"levels={string.Join(',', rStsp?.FDPOAJJJKGC.Keys ?? [])}");
+    // R-23 (2026-11-13, players) the motorcycle rider select showed every rider locked: the client unlocks the riders listed in the info's
+    // field 3; riders that need no unlock (MotorcycleGunData column 5 = 0) must be listed.
+    main.Send(new CS_ThemeMiniGameInfo { ThemeId = 2201, FNEFKKLJMDN = 24001 });
+    var r23 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ThemeMiniGameInfo>().FirstOrDefault();
+    Check("regress R-23: motorcycle info of theme 2201 lists its unlocked riders",
+        r23?.MotorcycleData is not null && r23.MotorcycleData.JHONJAGOIHM.Count > 0, $"riders={string.Join(',', r23?.MotorcycleData?.JHONJAGOIHM ?? [])}");
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

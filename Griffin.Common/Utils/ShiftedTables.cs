@@ -22,7 +22,7 @@ namespace Griffin.Common.Utils
         private const long Margin = 3 * 86400;
         private const uint RowTag = 10;
         /// <summary>Bump when the fixes applied to the served copy change (A-214: TpsShoot seasons and stage delays).</summary>
-        private const string PatchRevision = "5";
+        private const string PatchRevision = "6";
 
         private static readonly object Gate = new();
 
@@ -161,9 +161,14 @@ namespace Griffin.Common.Utils
                                     WriteVarint(file, l.Pos, l.Len, (ulong)next);
                             }
                         }
+                        bool planData = name.Equals("PlanData.bytes", StringComparison.OrdinalIgnoreCase);
                         foreach (var d in dates)
                         {
                             long next = d.Next;
+                            // PlanData: column 4 is the opening and column 8 a second opening the client prefers when set (MKFJPFBKIPE:
+                            // GOIMMDLBKEP > 0 ? it : column 4); both open now, otherwise 下篇/KittyCafe2 stayed "未开启" until weeks later (A-219)
+                            if (own is null && planData && d.Field is 4 or 8 && next > d.NewOpen)
+                                next = d.NewOpen;
                             if (own is null && opening >= 0 && moved[opening].Pos == d.Pos && next > d.NewOpen)
                                 next = d.NewOpen;
                             if (next < (1L << 28) || next >= (1L << 35))

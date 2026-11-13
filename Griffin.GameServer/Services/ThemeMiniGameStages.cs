@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Table;
 
 namespace Griffin.GameServer.Services
@@ -105,6 +105,23 @@ namespace Griffin.GameServer.Services
             uint group = TableFields.U(main, 6);
             return tables.GetTable<MotorcycleSkillData>().Where(r => TableFields.U(r, 2) == group && TableFields.U(r, 1) != 0)
                 .Select(r => (TableFields.U(r, 1), TableFields.U(r, 9), TableFields.U(r, 10), TableFields.U(r, 11))).ToList();
+        }
+
+        /// <summary>
+        /// Riders (MotorcycleGunData) the player can pick: the client shows a rider unlocked only when its id is in the info's field 3
+        /// (client MLBFMHPHJIG.FBMFLJFNMMP over HKDHBDCBDIP); an empty list showed every rider locked. A rider of the configuration (column 2
+        /// = MotorcycleBaseData column 4 group, ASSUMPTION: columns 4-6 hold the same group in this build) is unlocked when it needs no
+        /// unlock (column 5 = 0) or its MotorcycleUnlockData row (column 4) is met (A-220).
+        /// </summary>
+        public static IReadOnlyList<uint> MotorcycleRiders(ITableService tables, State state, uint theme)
+        {
+            IMessage? main = MotorcycleBase(tables, theme);
+            if (main is null) return [];
+            uint group = TableFields.U(main, 4);
+            return tables.GetTable<MotorcycleGunData>()
+                .Where(r => TableFields.U(r, 1) != 0 && TableFields.U(r, 2) == group
+                    && (TableFields.U(r, 5) == 0 || UnlockMet(tables, state, TableFields.U(r, 4))))
+                .Select(r => TableFields.U(r, 1)).ToList();
         }
 
         /// <summary>

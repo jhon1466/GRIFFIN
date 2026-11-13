@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Packets;
 using Griffin.Common.Proto;
@@ -404,6 +404,7 @@ namespace Griffin.GameServer.Handlers
                         {
                             MPNGHAKGLDM = ThemeMiniGameStages.UnlockMet(tables, state, skill.Unlock), JMALALNMMHC = state.Skills.Contains(skill.Id),
                         };
+                    reply.MotorcycleData.JHONJAGOIHM.AddRange(ThemeMiniGameStages.MotorcycleRiders(tables, state, theme));
                     break;
             }
             return reply;
