@@ -22,7 +22,7 @@ namespace Griffin.Common.Utils
         private const long Margin = 3 * 86400;
         private const uint RowTag = 10;
         /// <summary>Bump when the fixes applied to the served copy change (A-214: TpsShoot seasons and stage delays).</summary>
-        private const string PatchRevision = "2";
+        private const string PatchRevision = "3";
 
         private static readonly object Gate = new();
 
@@ -154,7 +154,13 @@ namespace Griffin.Common.Utils
                     }
 
                     if (name.Equals("ActivityModuleData.bytes", StringComparison.OrdinalIgnoreCase))
+                    {
                         PatchTpsShootSeasons(officialDir, file);
+                        PatchRichManConfigs(officialDir, file);
+                    }
+                    // RichMan stages open N minutes after the event (MissionData column 5): a reopened event opens them all at once (A-215)
+                    if (name.Equals("MissionData.bytes", StringComparison.OrdinalIgnoreCase))
+                        ZeroField(file, 5, RichManMissions(officialDir));
                     // TpsShoot stages open N minutes after the event (TpsshootMissionData column 8, client AGGHEDJPEFL): a reopened event opens them
                     // all at once, like its other parts (A-214). Zero is written as a padded varint of the same length (valid protobuf).
                     if (name.Equals("TpsshootMissionData.bytes", StringComparison.OrdinalIgnoreCase))
@@ -234,6 +240,121 @@ namespace Griffin.Common.Utils
                         {
                             WriteVarint(file, valuePos, valueLen, newest);
                         }
+                    }
+                    i = entryEnd;
+                }
+            }
+        }
+
+        /// <summary>
+        /// RichMan (开拓之路, module 21003) of theme 901 points to RichmanConfigData 1001, the only one of its series without column 7 (board data):
+        /// the client opens the stage list but the stage panel stays "TEXTTITLE" and its manager throws. In the served copy such entries point to
+        /// the newest 1xxx config that has column 7 (1004), so the board can be played (A-215).
+        /// </summary>
+        private static void PatchRichManConfigs(string officialDir, byte[] file)
+        {
+            string path = Path.Combine(officialDir, "RichmanConfigData.bytes");
+            if (!File.Exists(path))
+                return;
+            byte[] configs = File.ReadAllBytes(path);
+            HashSet<ulong> all = [], complete = [];
+            foreach ((int start, int end) in Rows(configs))
+            {
+                ulong id = 0;
+                bool board = false;
+                Walk(configs, start, end, (field, pos, len, value) => { if (field == 1) id = value; if (field == 7) board = true; });
+                all.Add(id);
+                if (board)
+                    complete.Add(id);
+            }
+            List<ulong> series = complete.Where(id => id is >= 1000 and < 2000).ToList();
+            if (series.Count == 0)
+                return;
+            ulong target = series.Max();
+            PatchModuleValues(file, 21003, value => all.Contains(value) && !complete.Contains(value) && value is >= 1000 and < 2000, target);
+        }
+
+        /// <summary>MissionData ids listed by MissionBySeasonData (the RichMan stages).</summary>
+        private static HashSet<ulong> RichManMissions(string officialDir)
+        {
+            HashSet<ulong> ids = [];
+            string path = Path.Combine(officialDir, "MissionBySeasonData.bytes");
+            if (!File.Exists(path))
+                return ids;
+            byte[] seasons = File.ReadAllBytes(path);
+            foreach ((int start, int end) in Rows(seasons))
+            {
+                int i = start;
+                while (i < end)
+                {
+                    if (!TryVarint(seasons, ref i, out ulong tag))
+                        break;
+                    int wire = (int)(tag & 7);
+                    if (wire == 0) { if (!TryVarint(seasons, ref i, out _)) break; continue; }
+                    if (wire == 1) { i += 8; continue; }
+                    if (wire == 5) { i += 4; continue; }
+                    if (wire != 2 || !TryVarint(seasons, ref i, out ulong length))
+                        break;
+                    int stop = i + (int)length;
+                    if ((tag >> 3) == 2)
+                        while (i < stop && TryVarint(seasons, ref i, out ulong id))
+                            ids.Add(id);
+                    i = stop;
+                }
+            }
+            return ids;
+        }
+
+        /// <summary>Writes 0 (padded varint, same length) into top-level <paramref name="field"/> of the rows whose id is in <paramref name="rows"/>.</summary>
+        private static void ZeroField(byte[] file, int field, HashSet<ulong> rows)
+        {
+            if (rows.Count == 0)
+                return;
+            foreach ((int start, int end) in Rows(file))
+            {
+                ulong id = 0;
+                Walk(file, start, end, (f, pos, len, value) => { if (f == 1) id = value; });
+                if (!rows.Contains(id))
+                    continue;
+                Walk(file, start, end, (f, pos, len, value) =>
+                {
+                    if (f != field || value == 0)
+                        return;
+                    for (int k = 0; k < len - 1; k++)
+                        file[pos + k] = 0x80;
+                    file[pos + len - 1] = 0;
+                });
+            }
+        }
+
+        /// <summary>In every ActivityModuleData row, column 4 entries for <paramref name="module"/> whose value matches get <paramref name="target"/>.</summary>
+        private static void PatchModuleValues(byte[] file, ulong module, Func<ulong, bool> replace, ulong target)
+        {
+            foreach ((int start, int end) in Rows(file))
+            {
+                int i = start;
+                while (i < end)
+                {
+                    if (!TryVarint(file, ref i, out ulong tag))
+                        break;
+                    int wire = (int)(tag & 7);
+                    if (wire == 0) { if (!TryVarint(file, ref i, out _)) break; continue; }
+                    if (wire == 1) { i += 8; continue; }
+                    if (wire == 5) { i += 4; continue; }
+                    if (wire != 2 || !TryVarint(file, ref i, out ulong length))
+                        break;
+                    int entryEnd = i + (int)length;
+                    if ((tag >> 3) == 4)
+                    {
+                        ulong key = 0, value = 0;
+                        int valuePos = -1, valueLen = 0;
+                        Walk(file, i, entryEnd, (field, pos, len, v) =>
+                        {
+                            if (field == 1) key = v;
+                            else if (field == 2) { value = v; valuePos = pos; valueLen = len; }
+                        });
+                        if (key == module && valuePos >= 0 && replace(value))
+                            WriteVarint(file, valuePos, valueLen, target);
                     }
                     i = entryEnd;
                 }
