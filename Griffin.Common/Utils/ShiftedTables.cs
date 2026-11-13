@@ -149,6 +149,21 @@ namespace Griffin.Common.Utils
                         }
                     }
 
+                    if (name.Equals("ActivityModuleData.bytes", StringComparison.OrdinalIgnoreCase))
+                        PatchTpsShootSeasons(officialDir, file);
+                    // TpsShoot stages open N minutes after the event (TpsshootMissionData column 8, client AGGHEDJPEFL): a reopened event opens them
+                    // all at once, like its other parts (A-214). Zero is written as a padded varint of the same length (valid protobuf).
+                    if (name.Equals("TpsshootMissionData.bytes", StringComparison.OrdinalIgnoreCase))
+                        foreach ((int start, int end) in Rows(file))
+                            Walk(file, start, end, (field, pos, len, value) =>
+                            {
+                                if (field == 8 && value != 0)
+                                {
+                                    for (int k = 0; k < len - 1; k++)
+                                        file[pos + k] = 0x80;
+                                    file[pos + len - 1] = 0;
+                                }
+                            });
                     File.WriteAllBytes(Path.Combine(tmp, name), file);
                 }
 
@@ -163,6 +178,61 @@ namespace Griffin.Common.Utils
                 ZipFile.CreateFromDirectory(Dir, zipTmp, CompressionLevel.Optimal, includeBaseDirectory: false);
                 File.Move(zipTmp, ZipPath, overwrite: true);
                 Version = version;
+            }
+        }
+
+        /// <summary>
+        /// Old TpsShoot events (theme 901/1401/1801/3001 -> TpsshootBaseData 101..104) cannot open in client 4.0.5142: when its info arrives the
+        /// client loads the skills of the season (TpsMissionSkillSeasonGroupBySeasonIdData, keyed by the same config id), and that table only
+        /// has season 105, so it throws and the stage panel stays empty (TEXTTEXT). In the copy of the tables of a reopened event, every
+        /// ActivityModuleData entry module 21001 -> config without a skill season points to the newest config that has one, so the mode opens
+        /// with the stages and skills the client knows. Same varint length only, so the layout is unchanged (A-214).
+        /// </summary>
+        private static void PatchTpsShootSeasons(string officialDir, byte[] file)
+        {
+            const ulong TpsShootModule = 21001;
+            string seasonsPath = Path.Combine(officialDir, "TpsMissionSkillSeasonGroupBySeasonIdData.bytes");
+            if (!File.Exists(seasonsPath))
+                return;
+            byte[] seasonsFile = File.ReadAllBytes(seasonsPath);
+            HashSet<ulong> seasons = [];
+            foreach ((int start, int end) in Rows(seasonsFile))
+                Walk(seasonsFile, start, end, (field, pos, len, value) => { if (field == 1) seasons.Add(value); });
+            if (seasons.Count == 0)
+                return;
+            ulong newest = seasons.Max();
+
+            foreach ((int start, int end) in Rows(file))
+            {
+                int i = start;
+                while (i < end)
+                {
+                    if (!TryVarint(file, ref i, out ulong tag))
+                        break;
+                    int wire = (int)(tag & 7);
+                    if (wire == 0) { if (!TryVarint(file, ref i, out _)) break; continue; }
+                    if (wire == 1) { i += 8; continue; }
+                    if (wire == 5) { i += 4; continue; }
+                    if (wire != 2 || !TryVarint(file, ref i, out ulong length))
+                        break;
+                    int entryEnd = i + (int)length;
+                    if ((tag >> 3) == 4)
+                    {
+                        ulong key = 0;
+                        int valuePos = -1, valueLen = 0;
+                        ulong value = 0;
+                        Walk(file, i, entryEnd, (field, pos, len, v) =>
+                        {
+                            if (field == 1) key = v;
+                            else if (field == 2) { value = v; valuePos = pos; valueLen = len; }
+                        });
+                        if (key == TpsShootModule && valuePos >= 0 && !seasons.Contains(value))
+                        {
+                            WriteVarint(file, valuePos, valueLen, newest);
+                        }
+                    }
+                    i = entryEnd;
+                }
             }
         }
 

@@ -1066,6 +1066,11 @@ if (scenario is "all" or "regress")
         Check("regress R-21: opening event 61201 opens its shop, challenge and daily food at once",
             r21 is not null && new uint[] { 61201, 61206, 61207, 61210 }.All(r21.ActiveIds.Contains),
             r21 is null ? "no plan" : $"active={string.Join(',', r21.ActiveIds.Where(i => i / 100 == 612))} next={string.Join(',', r21.NextIds.Where(i => i / 100 == 612))}");
+        // R-22b: with reopened events the client gets the served tables, where theme 901's shooter points to the config with skills (105)
+        main.Send(new CS_TpsShootInfo { ThemeId = 901 });
+        var r22b = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_TpsShootInfo>().FirstOrDefault();
+        Check("regress R-22b: with an event open, TpsShoot theme 901 uses the stages of config 105 (the one with a skill season)",
+            r22b is not null && r22b.KNMAKEJFGDK.ContainsKey(10501u) && r22b.KNMAKEJFGDK.ContainsKey(10508u), $"stages={string.Join(',', r22b?.KNMAKEJFGDK.Keys ?? [])}");
         await httpClient.DeleteAsync($"{http}/api/gm/events/61201");
     }
 
