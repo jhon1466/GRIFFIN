@@ -1148,6 +1148,17 @@ if (scenario is "all" or "regress")
         rRich is not null && rRich.ThemeId == 901 && rRich.Data is not null && rRich.Data.DIPHLGDEIED.ContainsKey(1) && rRich.Data.DIPHLGDEIED.Count >= 9,
         $"stages={rRich?.Data?.DIPHLGDEIED.Count}");
 
+    // R-MultiWave (2026-11-12) the MultiWave defense mode (theme 601, module 20002 -> MultiWaveByActivityIdData 1001) had no handler: the
+    // info must list every wave of config 1001 (MultiWaveData 10101..10107), or the client logs a front/back mismatch and shows no scores.
+    main.Send(new CS_MultiWaveInfo { ThemeId = 601 });
+    var rMw = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_MultiWaveInfo>().FirstOrDefault();
+    Check("regress R-MultiWave: MultiWave theme 601 lists its 7 waves",
+        rMw is not null && rMw.ThemeId == 601 && Enumerable.Range(10101, 7).All(i => rMw.BPJANAFAHDO.ContainsKey((uint)i)),
+        $"waves={string.Join(',', rMw?.BPJANAFAHDO.Keys ?? [])}");
+    main.Send(new CS_DungeonActivityInfo { ThemeId = 601 });
+    Check("regress R-MultiWave: the deprecated dungeon info answers",
+        main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_DungeonActivityInfo>().Any());
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
