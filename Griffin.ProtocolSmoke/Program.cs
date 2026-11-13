@@ -1248,6 +1248,19 @@ if (scenario is "all" or "regress")
         Check("regress R-Bingo: a row with closed cards is refused", !rBingoLine.OfType<SC_TakeBingoExtraReward>().Any(),
             string.Join(",", rBingoLine.Select(m => m.GetType().Name)));
         await httpClient.DeleteAsync($"{http}/api/gm/events/63506");
+    // R-Pazzle (2026-11-12) the puzzle challenge (module 20005, theme 601 -> PazzleMissionData 1001) had no handler: the panel never got
+    // its info. Info now answers the claimed star thresholds and a star reward above the stars earned is refused (StarNotEnough).
+    {
+        main.Send(new CS_PazzleStageInfo { ThemeId = 601 });
+        var rpz = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_PazzleStageInfo>().FirstOrDefault();
+        Check("regress R-Pazzle: puzzle info of theme 601 answers", rpz is not null && rpz.ThemeId == 601, rpz is null ? "no reply" : $"claimed={rpz.FPDKCBNKCAB.Count}");
+        main.Send(new CS_PazzleStageGetReward { ThemeId = 601, KNAHJGMNKIL = 28 });
+        var rpzGet = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        var rpzErr = rpzGet.OfType<SC_ReportError>().FirstOrDefault(e => e.ProtocolId == (uint)MsgId.MsgCsPazzleStageGetReward);
+        bool rpzGot = rpzGet.OfType<SC_PazzleStageGetReward>().Any();
+        Check("regress R-Pazzle: a star reward needs the stars (28 stars refused or granted once)",
+            rpzGot || rpzErr?.ErrorNo == (int)HNINDAOJCKP.PazzleStageStarNotEnough || rpzErr?.ErrorNo == (int)HNINDAOJCKP.PazzleStageStarRewardClaimed,
+            rpzErr is null ? (rpzGot ? "granted" : "no reply") : $"error={rpzErr.ErrorNo}");
     }
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try

@@ -15,6 +15,7 @@ namespace Griffin.GameServer.Services
         public const uint Jigsaw = 20006;
         public const uint KittyCafe2 = 22003;
         public const uint YunTuChess = 24002;
+        public const uint PazzleStage = 20005;
 
         /// <summary>The configuration id of <paramref name="module"/> in theme <paramref name="themeId"/>, or 0.</summary>
         public static uint Config(ITableService tables, uint themeId, uint module)
