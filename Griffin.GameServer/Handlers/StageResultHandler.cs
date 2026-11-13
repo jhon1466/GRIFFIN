@@ -196,6 +196,8 @@ namespace Griffin.GameServer.Handlers
                 endlessTower.OnStageWon(uid, stage.Id, push);
             // a fight of a Rouge2 run (Rouge2Service)
             rouge2.OnStageResult(uid, stage.Id, won, push);
+            // a stage of the MultiWave defense mode: best score per wave and the grade rewards it reaches (MultiWaveHandler)
+            MultiWaveHandler.OnStageResult(tableService, accountState, rewardService, uid, stage.Id, stageProgress?.Points ?? 0, response, push);
 
             var records = accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? [];
             records.TryGetValue(stage.Id.ToString(), out StageRecord? prior);
