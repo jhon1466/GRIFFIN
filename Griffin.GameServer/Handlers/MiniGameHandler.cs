@@ -86,7 +86,7 @@ namespace Griffin.GameServer.Handlers
         }
 
         // the themed mini games share this message group; whichever class the registry picks, ThemeMiniGameHandler answers them
-        private ThemeMiniGameHandler Theme => new(accountState);
+        private ThemeMiniGameHandler Theme => new(accountState, tableService, rewardService);
 
         public override void HandleThemeMiniGameFinish(CS_ThemeMiniGameFinish request, Connection connection) => Theme.HandleThemeMiniGameFinish(request, connection);
 

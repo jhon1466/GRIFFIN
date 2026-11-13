@@ -20,6 +20,11 @@ namespace Griffin.GameServer.Services
         public const uint MultiWave = 20002;
         /// <summary>SimCafe warm-up (preheat) tasks: maps to a SimTaskConfigData row (client NIPDKHAAPIC reads NCLHMKGDIJF[3001]).</summary>
         public const uint SimCafeWarmUp = 3001;
+        public const uint ShootSpace = 21004;
+        public const uint Audition = 23001;
+        public const uint CandyCatch = 23002;
+        public const uint CardFlip = 23003;
+        public const uint Motorcycle = 24001;
 
         /// <summary>The configuration id of <paramref name="module"/> in theme <paramref name="themeId"/>, or 0.</summary>
         public static uint Config(ITableService tables, uint themeId, uint module)

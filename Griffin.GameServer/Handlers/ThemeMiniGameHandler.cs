@@ -9,7 +9,7 @@ using Serilog;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ThemeMiniGameHandler(IAccountStateService accountState) : ThemeMiniGameHandlerBase
+    public sealed class ThemeMiniGameHandler(IAccountStateService accountState, Griffin.Common.Table.ITableService tables, IRewardService rewards) : ThemeMiniGameHandlerBase
     {
         private const string StateKey = "theme-minigame.v1";
         private const string RedPointStateKey = "theme-minigame.red-points.v1";
@@ -24,14 +24,55 @@ namespace Griffin.GameServer.Handlers
         [PacketHandler(MsgId.MsgCsThemeMiniGameGetSkill, MsgId.MsgScThemeMiniGameGetSkill)]
         public override void HandleThemeMiniGameGetSkill(CS_ThemeMiniGameGetSkill request, Connection connection)
         {
-            // Skill levels are represented only for the motorcycle variant in this protocol.
-            // For other variants, return the requested identifiers with the default empty skill state.
-            connection.Send(new SC_ThemeMiniGameGetSkill
+            if (connection.Account is null)
+                return;
+            if (request.FNEFKKLJMDN != ThemeModules.Motorcycle)
             {
-                ThemeId = request.ThemeId,
-                FNEFKKLJMDN = request.FNEFKKLJMDN,
-                JJOKKNFDAGE = request.JJOKKNFDAGE,
-            });
+                // only the motorcycle game has skills in this protocol (oneof field 4)
+                connection.Refuse(MsgId.MsgCsThemeMiniGameGetSkill, HNINDAOJCKP.ClientInputInvalid);
+                return;
+            }
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                // Client MLBFMHPHJIG.GIGGKFHJMDK: a skill can be learned when its record is unlocked, the skill of column 9 is learned,
+                // it is not learned yet and the points (IJKGNEEBFKJ) reach column 10. The reply carries the points left.
+                string key = ThemeMiniGameStages.Key(request.ThemeId, request.FNEFKKLJMDN);
+                ThemeMiniGameStages.State state = accountState.Get<ThemeMiniGameStages.State>(uid, key) ?? new();
+                var skill = ThemeMiniGameStages.MotorcycleSkills(tables, request.ThemeId).FirstOrDefault(s => s.Id == request.JJOKKNFDAGE);
+                if (skill.Id == 0 || state.Skills.Contains(skill.Id) || !ThemeMiniGameStages.UnlockMet(tables, state, skill.Unlock)
+                    || (skill.Previous != 0 && !state.Skills.Contains(skill.Previous)))
+                {
+                    connection.Refuse(MsgId.MsgCsThemeMiniGameGetSkill, HNINDAOJCKP.ClientInputInvalid);
+                    return;
+                }
+                if (state.Points < skill.Cost)
+                {
+                    connection.Refuse(MsgId.MsgCsThemeMiniGameGetSkill, HNINDAOJCKP.MiniGameSkillItemIsNotEnough);
+                    return;
+                }
+
+                state.Points -= skill.Cost;
+                state.Skills.Add(skill.Id);
+                accountState.Set(uid, key, state);
+                connection.Send(new SC_ThemeMiniGameGetSkill
+                {
+                    ThemeId = request.ThemeId,
+                    FNEFKKLJMDN = request.FNEFKKLJMDN,
+                    JJOKKNFDAGE = request.JJOKKNFDAGE,
+                    Motorcycle = new SC_ThemeMiniGameGetSkill.Types.DDDLLMEJOOI { IJKGNEEBFKJ = state.Points },
+                });
+            }
+        }
+
+        /// <summary>
+        /// Client 4.0.5142 never sends this request (no caller of MSG_CS_ThemeMiniGameClaimUltimateRewards) and no table names an
+        /// "ultimate" reward of a theme mini game, so it is only acknowledged; nothing is granted.
+        /// </summary>
+        public override void HandleThemeMiniGameClaimUltimateRewards(CS_ThemeMiniGameClaimUltimateRewards request, Connection connection)
+        {
+            connection.Send(new SC_ThemeMiniGameClaimUltimateRewards { ThemeId = request.ThemeId, FNEFKKLJMDN = request.FNEFKKLJMDN });
         }
 
         [PacketHandler(MsgId.MsgCsThemeMiniGameRecordRedPoint, MsgId.MsgScThemeMiniGameRecordRedPoint)]
@@ -71,6 +112,12 @@ namespace Griffin.GameServer.Handlers
                 ThemeId = request.ThemeId,
                 FNEFKKLJMDN = request.FNEFKKLJMDN,
             };
+            if (ThemeMiniGameStages.IsStageGame(request.FNEFKKLJMDN))
+            {
+                connection.Send(StageInfo(connection.Account.Uid, request.ThemeId, request.FNEFKKLJMDN));
+                return;
+            }
+
             if (request.FNEFKKLJMDN == DoodleJumpGameId)
             {
                 response.DoodleJumpData = new FOMAJCHMPFL
@@ -149,6 +196,12 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account is null)
                 return;
 
+            if (ThemeMiniGameStages.IsStageGame(request.FNEFKKLJMDN))
+            {
+                StageStart(request, connection);
+                return;
+            }
+
             if (request.FNEFKKLJMDN == IwannaGameId)
             {
                 // the unlock by time of each stage is decided by the client (activity opening + IwannaStageData column 3); the server only opens the run
@@ -158,7 +211,7 @@ namespace Griffin.GameServer.Handlers
 
             if (request.FNEFKKLJMDN != DoodleJumpGameId)
             {
-                // any other mini game of an event (candy catch, card flip, audition, motorcycle...): the run opens and the client plays it locally; its records are not kept (A-101)
+                // any other mini game of an event without stage tables here (butt game...): the run opens and the client plays it locally; its records are not kept (A-101)
                 Log.Information("Theme minigame {GameId} start: generic answer for account {Uid}, theme {ThemeId}, stage {StageId}.",
                     request.FNEFKKLJMDN, connection.Account.Uid, request.ThemeId, request.StageId);
                 connection.Send(new SC_ThemeMiniGameStart { ThemeId = request.ThemeId, FNEFKKLJMDN = request.FNEFKKLJMDN, StageId = request.StageId });
@@ -189,6 +242,12 @@ namespace Griffin.GameServer.Handlers
         {
             if (connection.Account is null)
                 return;
+
+            if (ThemeMiniGameStages.IsStageGame(request.FNEFKKLJMDN))
+            {
+                StageFinish(request, connection);
+                return;
+            }
 
             if (request.FNEFKKLJMDN == IwannaGameId)
             {
@@ -283,6 +342,223 @@ namespace Griffin.GameServer.Handlers
                 Score = request.Score,
                 CGFMBCCDFPG = state.BestScore,
             });
+        }
+
+        private SC_ThemeMiniGameInfo StageInfo(uint uid, uint theme, uint module)
+        {
+            ThemeMiniGameStages.State state = accountState.Get<ThemeMiniGameStages.State>(uid, ThemeMiniGameStages.Key(theme, module)) ?? new();
+            SC_ThemeMiniGameInfo reply = new() { ThemeId = theme, FNEFKKLJMDN = module };
+            IReadOnlyList<ThemeMiniGameStages.Stage> stages = ThemeMiniGameStages.Stages(tables, theme, module);
+            // Record field 1 = cleared (ASSUMPTION: the client only reads it as a flag), field 2 = unlocked (the client opens the stage from it).
+            switch (module)
+            {
+                case ThemeModules.CandyCatch:
+                    reply.CandyCatchData = new IHNLKCLJMDC();
+                    foreach (var stage in stages)
+                    {
+                        var rec = state.Stages.GetValueOrDefault(stage.Id) ?? new();
+                        reply.CandyCatchData.KNMAKEJFGDK[stage.Id] = new IHNLKCLJMDC.Types.NLEKECNKFOP
+                        {
+                            KNFOFFBOCML = rec.Cleared, MPNGHAKGLDM = ThemeMiniGameStages.Unlocked(tables, state, stage), CGFMBCCDFPG = rec.Best, KNAHJGMNKIL = rec.Stars,
+                        };
+                    }
+                    break;
+                case ThemeModules.CardFlip:
+                    reply.CardFlipData = new HGNOJKGKMNH();
+                    foreach (var stage in stages)
+                    {
+                        var rec = state.Stages.GetValueOrDefault(stage.Id) ?? new();
+                        reply.CardFlipData.KNMAKEJFGDK[stage.Id] = new HGNOJKGKMNH.Types.OCKOAIFFBNG
+                        {
+                            KNFOFFBOCML = rec.Cleared, MPNGHAKGLDM = ThemeMiniGameStages.Unlocked(tables, state, stage), CGFMBCCDFPG = rec.Best,
+                            LELAOAJLKKI = rec.Extra, KNAHJGMNKIL = rec.Stars,
+                        };
+                    }
+                    break;
+                case ThemeModules.Audition:
+                    reply.AuditionData = new MDJKKAHBGFL();
+                    foreach (var stage in stages)
+                    {
+                        var rec = state.Stages.GetValueOrDefault(stage.Id) ?? new();
+                        reply.AuditionData.KNMAKEJFGDK[stage.Id] = new MDJKKAHBGFL.Types.HLADEFFHAMK
+                        {
+                            KNFOFFBOCML = rec.Cleared, MPNGHAKGLDM = ThemeMiniGameStages.Unlocked(tables, state, stage), CGFMBCCDFPG = rec.Best,
+                            Duration = rec.Duration, KNAHJGMNKIL = rec.Stars, NHALLNKPCKG = rec.Extra, IKCHBONJGGL = (MDJKKAHBGFL.Types.OAPMPMKONID)(int)rec.Rank,
+                        };
+                    }
+                    break;
+                case ThemeModules.Motorcycle:
+                    reply.MotorcycleData = new DNEBAGLMFDO { IJKGNEEBFKJ = state.Points };
+                    foreach (var stage in stages)
+                    {
+                        var rec = state.Stages.GetValueOrDefault(stage.Id) ?? new();
+                        reply.MotorcycleData.KNMAKEJFGDK[stage.Id] = new DNEBAGLMFDO.Types.NMCAEALPPKM
+                        {
+                            KNFOFFBOCML = rec.Cleared, MPNGHAKGLDM = ThemeMiniGameStages.Unlocked(tables, state, stage), CGFMBCCDFPG = rec.Best,
+                            Duration = rec.Duration, FOLGGCEMODL = rec.Extra,
+                        };
+                    }
+                    // skill record (client MCPNLANNGMF): field 1 unlocked (its MotorcycleUnlockData row is met), field 2 learned
+                    foreach (var skill in ThemeMiniGameStages.MotorcycleSkills(tables, theme))
+                        reply.MotorcycleData.EIKDKGLJPKA[skill.Id] = new DNEBAGLMFDO.Types.KOCJGGMOGOK
+                        {
+                            MPNGHAKGLDM = ThemeMiniGameStages.UnlockMet(tables, state, skill.Unlock), JMALALNMMHC = state.Skills.Contains(skill.Id),
+                        };
+                    break;
+            }
+            return reply;
+        }
+
+        private void StageStart(CS_ThemeMiniGameStart request, Connection connection)
+        {
+            uint uid = connection.Account!.Uid;
+            lock (AccountLock.For(uid))
+            {
+                string key = ThemeMiniGameStages.Key(request.ThemeId, request.FNEFKKLJMDN);
+                ThemeMiniGameStages.State state = accountState.Get<ThemeMiniGameStages.State>(uid, key) ?? new();
+                var stage = ThemeMiniGameStages.Stages(tables, request.ThemeId, request.FNEFKKLJMDN).FirstOrDefault(s => s.Id == request.StageId);
+                if (stage is null)
+                {
+                    connection.Refuse(MsgId.MsgCsThemeMiniGameStart, HNINDAOJCKP.MiniGameStageNotOpen);
+                    return;
+                }
+                if (!ThemeMiniGameStages.Unlocked(tables, state, stage))
+                {
+                    connection.Refuse(MsgId.MsgCsThemeMiniGameStart, HNINDAOJCKP.MiniGameStageIsLocked);
+                    return;
+                }
+
+                state.Playing = stage.Id;
+                accountState.Set(uid, key, state);
+                connection.Send(new SC_ThemeMiniGameStart { ThemeId = request.ThemeId, FNEFKKLJMDN = request.FNEFKKLJMDN, StageId = request.StageId });
+            }
+        }
+
+        private void StageFinish(CS_ThemeMiniGameFinish request, Connection connection)
+        {
+            uint uid = connection.Account!.Uid;
+            uint module = request.FNEFKKLJMDN;
+            lock (AccountLock.For(uid))
+            {
+                string key = ThemeMiniGameStages.Key(request.ThemeId, module);
+                ThemeMiniGameStages.State state = accountState.Get<ThemeMiniGameStages.State>(uid, key) ?? new();
+                IReadOnlyList<ThemeMiniGameStages.Stage> stages = ThemeMiniGameStages.Stages(tables, request.ThemeId, module);
+                var stage = stages.FirstOrDefault(s => s.Id == request.StageId);
+                if (stage is null || state.Playing != stage.Id)
+                {
+                    connection.Refuse(MsgId.MsgCsThemeMiniGameFinish, HNINDAOJCKP.MiniGameStageIsNotPlaying);
+                    return;
+                }
+
+                HashSet<uint> openBefore = stages.Where(s => ThemeMiniGameStages.Unlocked(tables, state, s)).Select(s => s.Id).ToHashSet();
+                var skills = module == ThemeModules.Motorcycle ? ThemeMiniGameStages.MotorcycleSkills(tables, request.ThemeId) : [];
+                HashSet<uint> skillsBefore = skills.Where(s => ThemeMiniGameStages.UnlockMet(tables, state, s.Unlock)).Select(s => s.Id).ToHashSet();
+
+                // Win of the run: card flip and motorcycle report it (LLKGHFKHHHN 1 = win). ASSUMPTION: candy catch and audition report no
+                // result, so every finished run counts as cleared.
+                bool win = module switch
+                {
+                    ThemeModules.CardFlip => request.CardFlip?.Result == 1,
+                    ThemeModules.Motorcycle => request.Motorcycle?.Result == 1,
+                    _ => true,
+                };
+
+                var rec = state.Stages.GetValueOrDefault(stage.Id) ?? new ThemeMiniGameStages.StageRecord();
+                rec.Best = Math.Max(rec.Best, request.Score);
+                if (request.Duration > 0)
+                    rec.Duration = rec.Duration == 0 ? request.Duration : Math.Min(rec.Duration, request.Duration);
+
+                // Stars: a star row without condition is the clear itself. ASSUMPTION: candy catch column 4 is the score to reach (it grows
+                // 1000/2400 inside a stage); card flip column 4 is the most flips allowed (GJEIFFHNBOB, it shrinks 21/15 inside a stage).
+                List<uint> earned = [];
+                foreach (var star in ThemeMiniGameStages.StarRows(tables, module, stage))
+                {
+                    bool got = win && (star.Condition == 0 || module switch
+                    {
+                        ThemeModules.CandyCatch => request.Score >= star.Condition,
+                        ThemeModules.CardFlip => request.CardFlip is not null && request.CardFlip.GJEIFFHNBOB <= star.Condition,
+                        _ => false,
+                    });
+                    if (got) earned.Add(star.Id);
+                }
+
+                List<Google.Protobuf.IMessage> messages = [];
+                using var drops = RewardDrops.Begin();
+                Dictionary<uint, uint> granted = [];
+                foreach (var star in ThemeMiniGameStages.StarRows(tables, module, stage).Where(s => earned.Contains(s.Id) && !state.ClaimedStars.Contains(s.Id)))
+                {
+                    state.ClaimedStars.Add(star.Id);
+                    foreach ((uint item, uint count) in star.Reward.Where(r => r.Key != 0 && r.Value > 0))
+                    {
+                        rewards.Grant(uid, item, (int)Math.Min(count, int.MaxValue), messages);
+                        granted[item] = granted.GetValueOrDefault(item) + count;
+                    }
+                }
+
+                if (win)
+                    rec.Cleared = true;
+                rec.Stars = Math.Max(rec.Stars, (uint)earned.Count);
+                if (module == ThemeModules.CardFlip && win && request.CardFlip is not null)
+                    rec.Extra = rec.Extra == 0 ? request.CardFlip.GJEIFFHNBOB : Math.Min(rec.Extra, request.CardFlip.GJEIFFHNBOB);
+                if (module == ThemeModules.Audition && request.Audition is not null)
+                {
+                    rec.Extra = Math.Max(rec.Extra, request.Audition.NHALLNKPCKG);
+                    rec.Rank = Math.Max(rec.Rank, (uint)request.Audition.IKCHBONJGGL);
+                }
+                if (module == ThemeModules.Motorcycle && request.Motorcycle is not null)
+                {
+                    rec.Extra = Math.Max(rec.Extra, request.Motorcycle.FOLGGCEMODL);
+                    // ASSUMPTION: the skill points (IJKGNEEBFKJ, spent by GetSkill against MotorcycleSkillData column 10) are the coins
+                    // (FOLGGCEMODL) the run reports; no table names their source.
+                    state.Points = (uint)Math.Min((ulong)state.Points + request.Motorcycle.FOLGGCEMODL, uint.MaxValue);
+                }
+                state.Stages[stage.Id] = rec;
+                state.Playing = 0;
+                accountState.Set(uid, key, state);
+
+                SC_ThemeMiniGameFinish reply = new()
+                {
+                    ThemeId = request.ThemeId,
+                    FNEFKKLJMDN = module,
+                    StageId = request.StageId,
+                    Score = request.Score,
+                    CGFMBCCDFPG = rec.Best,
+                };
+                reply.UnlockStage.AddRange(stages.Where(s => !openBefore.Contains(s.Id) && ThemeMiniGameStages.Unlocked(tables, state, s)).Select(s => s.Id));
+                switch (module)
+                {
+                    case ThemeModules.CandyCatch:
+                        reply.CandyCatch = new SC_ThemeMiniGameFinish.Types.NCFKOINMGGF { KNAHJGMNKIL = (uint)earned.Count };
+                        reply.CandyCatch.Rewards.Add(granted);
+                        break;
+                    case ThemeModules.CardFlip:
+                        reply.CardFlip = new SC_ThemeMiniGameFinish.Types.GOGEBCIACMG
+                        {
+                            GJEIFFHNBOB = request.CardFlip?.GJEIFFHNBOB ?? 0, LELAOAJLKKI = rec.Extra, KNAHJGMNKIL = (uint)earned.Count,
+                        };
+                        reply.CardFlip.Rewards.Add(granted);
+                        break;
+                    case ThemeModules.Audition:
+                        reply.Audition = new SC_ThemeMiniGameFinish.Types.AEBFCHHCKAI
+                        {
+                            HCIKKINNGLD = request.Audition?.HCIKKINNGLD ?? 0, KNAHJGMNKIL = (uint)earned.Count, NHALLNKPCKG = request.Audition?.NHALLNKPCKG ?? 0,
+                            EFDLGMODAPK = request.Audition?.IKCHBONJGGL ?? MDJKKAHBGFL.Types.OAPMPMKONID.None,
+                            IKCHBONJGGL = (MDJKKAHBGFL.Types.OAPMPMKONID)(int)rec.Rank,
+                        };
+                        break;
+                    case ThemeModules.Motorcycle:
+                        reply.Motorcycle = new SC_ThemeMiniGameFinish.Types.DarkZoneRoom
+                        {
+                            Duration = request.Duration, FOLGGCEMODL = request.Motorcycle?.FOLGGCEMODL ?? 0, IJKGNEEBFKJ = state.Points,
+                        };
+                        // skills whose unlock row became true with this clear (client sets their field 1)
+                        reply.Motorcycle.NLELHHNMBMA.AddRange(skills.Where(s => !skillsBefore.Contains(s.Id) && ThemeMiniGameStages.UnlockMet(tables, state, s.Unlock)).Select(s => s.Id));
+                        break;
+                }
+                drops.Finish(messages);
+                messages.Add(reply);
+                connection.SendAutoEncrypted(messages.ToArray());
+            }
         }
 
         private Dictionary<string, ThemeMiniGameState> GetStates(uint uid) =>

@@ -1287,6 +1287,28 @@ if (scenario is "all" or "regress")
     Check("regress R-SimCafe: rewards of another group or above the score are refused",
         !rCafeWrong.OfType<SC_SimCafeTakeWarmUpReward>().Any() && (rCafe?.ECOOFMAFCBG?.Score >= 120 || !rCafeScore.OfType<SC_SimCafeTakeWarmUpReward>().Any()),
         string.Join(",", rCafeWrong.Concat(rCafeScore).Select(m => m.GetType().Name)));
+    // R-ThemeMiniGame (2026-11-12) the theme mini games (candy catch, card flip, audition, motorcycle) and Shootspace never read their tables:
+    // no stage listed, everything playable. Theme 1501 -> ActivityModuleData[23002] -> CandycatchMainData 10001 -> stage group 101.
+    main.Send(new CS_ThemeMiniGameInfo { ThemeId = 1501, FNEFKKLJMDN = 23002 });
+    var rCandy = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ThemeMiniGameInfo>().FirstOrDefault()?.CandyCatchData;
+    Check("regress R-ThemeMiniGame: candy catch of theme 1501 lists its stages, the first one open",
+        rCandy is not null && rCandy.KNMAKEJFGDK.TryGetValue(1001, out var cc1) && cc1.MPNGHAKGLDM && rCandy.KNMAKEJFGDK.ContainsKey(1002),
+        $"stages={rCandy?.KNMAKEJFGDK.Count}");
+    main.Send(new CS_ThemeMiniGameStart { ThemeId = 1501, FNEFKKLJMDN = 23002, StageId = 1001 });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_ThemeMiniGameFinish { ThemeId = 1501, FNEFKKLJMDN = 23002, StageId = 1001, Duration = 60, Score = 2500 });
+    main.ReadFor(TimeSpan.FromSeconds(3));
+    main.Send(new CS_ThemeMiniGameInfo { ThemeId = 1501, FNEFKKLJMDN = 23002 });
+    var rCandy2 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ThemeMiniGameInfo>().FirstOrDefault()?.CandyCatchData;
+    Check("regress R-ThemeMiniGame: a 2500 run of stage 1001 earns its 3 stars (CandycatchStarData) and opens stage 1002",
+        rCandy2 is not null && rCandy2.KNMAKEJFGDK.TryGetValue(1001, out var cc2) && cc2.KNAHJGMNKIL == 3
+            && rCandy2.KNMAKEJFGDK.TryGetValue(1002, out var cc3) && cc3.MPNGHAKGLDM,
+        $"stars={(rCandy2 is not null && rCandy2.KNMAKEJFGDK.TryGetValue(1001, out var cc4) ? cc4.KNAHJGMNKIL : 0)}");
+    main.Send(new CS_ShootspaceInfo { ThemeId = 4201 });
+    var rStsp = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ShootspaceInfo>().FirstOrDefault();
+    Check("regress R-ThemeMiniGame: Shootspace of theme 4201 lists the levels of its StspConfigData row only",
+        rStsp is not null && rStsp.FDPOAJJJKGC.Count > 0 && rStsp.FDPOAJJJKGC.Values.Any(v => v.MPNGHAKGLDM),
+        $"levels={string.Join(',', rStsp?.FDPOAJJJKGC.Keys ?? [])}");
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
