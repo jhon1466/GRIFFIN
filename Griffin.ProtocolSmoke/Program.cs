@@ -1218,6 +1218,19 @@ if (scenario is "all" or "regress")
         rKitty is not null && rKitty.Info.CMADKJPJPHF >= 1 && rKittyStaff is not null
             && rKittyCat.Any(m => m is SC_KittyCafe2UnlockCat || m is SC_ReportError),
         $"grade={rKitty?.Info.CMADKJPJPHF} staff={rKittyStaff is not null} cat={string.Join(",", rKittyCat.Select(m => m.GetType().Name))}");
+    // R-YunTu (2026-11-12) the YunTu auto chess (CS_ThemeYunTu*) had no handler: its chapter list stayed empty. Theme 2501 resolves
+    // ActivityModuleData[24002] -> ChessMainData 101; a chapter run starts a room and a finished run records the best score.
+    main.Send(new CS_ThemeYunTuInfo { ThemeId = 2501 });
+    var rYtInfo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ThemeYunTuInfo>().FirstOrDefault();
+    main.Send(new CS_ThemeYunTuStageStart { ThemeId = 2501, StageId = 101111 });
+    var rYtStart = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ThemeYunTuStageStart>().FirstOrDefault();
+    main.Send(new CS_ThemeYunTuStageFinish { ThemeId = 2501, StageId = 101111, RoomInfo = new DBDNHIGGEBB { ThemeId = 2501, StageId = 101111, Score = 700 } });
+    var rYtFinish = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_ThemeYunTuStageFinish>().FirstOrDefault();
+    Check("regress R-YunTu: auto chess theme 2501 answers its config, starts a chapter room and records the finished score",
+        rYtInfo?.Data?.LOEHFANKMDM == 101 && rYtStart?.RoomInfo?.StageId == 101111
+            && rYtFinish?.Data is not null && rYtFinish.Data.DIPHLGDEIED.TryGetValue(101111, out var ytChapter) && ytChapter.JDMNPHFLLLL >= 700
+            && rYtFinish.Data.RoomInfo is null,
+        $"config={rYtInfo?.Data?.LOEHFANKMDM} room={rYtStart?.RoomInfo?.StageId} chapters={rYtFinish?.Data?.DIPHLGDEIED.Count}");
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
