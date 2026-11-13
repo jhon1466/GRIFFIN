@@ -22,7 +22,7 @@ namespace Griffin.Common.Utils
         private const long Margin = 3 * 86400;
         private const uint RowTag = 10;
         /// <summary>Bump when the fixes applied to the served copy change (A-214: TpsShoot seasons and stage delays).</summary>
-        private const string PatchRevision = "6";
+        private const string PatchRevision = "7";
 
         private static readonly object Gate = new();
 
@@ -183,6 +183,10 @@ namespace Griffin.Common.Utils
                         PatchRichManConfigs(officialDir, file);
                         HideSubmodules(file);
                     }
+                    // Event tickets (ItemData column 18 "daily:daily:cap") expire on their official date (column 19), long past for an old event:
+                    // the client would show the refilled tickets as expired. They expire with the latest reopened event instead (A-222).
+                    if (name.Equals("ItemData.bytes", StringComparison.OrdinalIgnoreCase))
+                        ExtendTickets(file, shifts.Max(sh => sh.NewClose));
                     // RichMan stages open N minutes after the event (MissionData column 5): a reopened event opens them all at once (A-215)
                     if (name.Equals("MissionData.bytes", StringComparison.OrdinalIgnoreCase))
                         ZeroField(file, 5, RichManMissions(officialDir));
@@ -344,6 +348,38 @@ namespace Griffin.Common.Utils
                         });
                     i = entryEnd;
                 }
+            }
+        }
+
+        private static void ExtendTickets(byte[] file, long close)
+        {
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            foreach ((int start, int end) in Rows(file))
+            {
+                bool ticket = false;
+                int i = start;
+                while (i < end)
+                {
+                    if (!TryVarint(file, ref i, out ulong tag)) break;
+                    int wire = (int)(tag & 7);
+                    if (wire == 0) { if (!TryVarint(file, ref i, out _)) break; continue; }
+                    if (wire == 1) { i += 8; continue; }
+                    if (wire == 5) { i += 4; continue; }
+                    if (wire != 2 || !TryVarint(file, ref i, out ulong length)) break;
+                    if ((tag >> 3) == 18)
+                    {
+                        string rule = Encoding.ASCII.GetString(file, i, (int)length);
+                        ticket = System.Text.RegularExpressions.Regex.IsMatch(rule, @"^\d+:\d+:\d+$");
+                    }
+                    i += (int)length;
+                }
+                if (!ticket)
+                    continue;
+                Walk(file, start, end, (field, pos, len, value) =>
+                {
+                    if (field == 19 && value != 0 && (long)value < now && close > (long)value)
+                        WriteVarint(file, pos, len, (ulong)close);
+                });
             }
         }
 

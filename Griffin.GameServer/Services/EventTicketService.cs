@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
 using Griffin.Database.Services;
@@ -31,6 +31,25 @@ namespace Griffin.GameServer.Services
         /// <summary>Game day (resets at 05:00 China time).</summary>
         private static DateOnly Today() => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(8 - 5));
 
+        private const uint SupplySubmodule = 11003;
+
+        /// <summary>Ticket items of the supply modes whose PlanData window contains <paramref name="now"/>.</summary>
+        private HashSet<uint> OpenSupplyTickets(long now)
+        {
+            Dictionary<uint, (ulong Open, ulong Close)> plans = tableService.GetTable<PlanData>()
+                .GroupBy(r => TableFields.U(r, 1)).ToDictionary(g => g.Key, g => (TableFields.U64(g.First(), 4), TableFields.U64(g.First(), 5)));
+            HashSet<uint> open = [];
+            foreach (ActivityModuleData module in tableService.GetTable<ActivityModuleData>())
+            {
+                uint ticket = 0, plan = 0;
+                foreach ((uint key, uint value) in TableFields.Map(module, 4)) if (key == SupplySubmodule) ticket = value;
+                foreach ((uint key, uint value) in TableFields.Map(module, 10)) if (key == SupplySubmodule) plan = value;
+                if (ticket != 0 && plans.TryGetValue(plan, out var w) && (ulong)now >= w.Open && (ulong)now < w.Close)
+                    open.Add(ticket);
+            }
+            return open;
+        }
+
         public void Refill(uint accountUid)
         {
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -44,8 +63,11 @@ namespace Griffin.GameServer.Services
                     Match m = Rule().Match(TableFields.S(row, 18));
                     if (!m.Success)
                         continue;
+                    // A ticket belongs to the supply mode of a theme (ActivityModuleData column 4: submodule 11003 -> ticket item, column 10:
+                    // 11003 -> PlanData). While that mode is open (an event reopened from the GM tools moves its plan to now) the ticket refills
+                    // even though its own expiry (column 19) is the official one, long past for old events (A-222).
                     ulong expiry = TableFields.U64(row, 19);
-                    if (expiry != 0 && (ulong)now > expiry)
+                    if (expiry != 0 && (ulong)now > expiry && !OpenSupplyTickets(now).Contains(row.Id))
                         continue;
 
                     int daily = int.Parse(m.Groups[2].Value);

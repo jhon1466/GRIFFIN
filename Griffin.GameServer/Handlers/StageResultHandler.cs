@@ -146,9 +146,16 @@ namespace Griffin.GameServer.Handlers
                 // raises it when it receives SC_ChapterHeroMode, whose list may be empty. The ticks and unlocks of the nodes are drawn when the screen
                 // rebuilds, not on a record update (A-69).
                 SC_ChapterHeroMode refresh = new();
-                connection.KeepSending(
-                    [new SC_StageRecordUpdate { Type = (int)TableFields.U(stage, 20), Record = record }, new SC_StageRecordUpdateBatch { Record = { record } }, refresh],
-                    TimeSpan.FromMinutes(3));
+                // The chapter screens of the events (type 14 stages) redraw only on client event 1104, which the client raises for a record
+                // update of type 11 of a plot stage (CKFOKNLIGDF: type 11, passed, StageData plot): the type-14 update alone left the next
+                // stage locked until the screen was entered again. A type-11 copy is added for any other stage type (A-221).
+                List<Google.Protobuf.IMessage> again = [new SC_StageRecordUpdate { Type = (int)TableFields.U(stage, 20), Record = record }];
+                if (TableFields.U(stage, 20) != 11)
+                    again.Add(new SC_StageRecordUpdate { Type = 11, Record = record });
+                again.Add(new SC_StageRecordUpdateBatch { Record = { record } });
+                again.Add(refresh);
+                connection.SendAutoEncrypted(again.ToArray());
+                connection.KeepSending(again, TimeSpan.FromMinutes(3));
             }
         }
 
