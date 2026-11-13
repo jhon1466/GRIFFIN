@@ -1148,6 +1148,18 @@ if (scenario is "all" or "regress")
         rRich is not null && rRich.ThemeId == 901 && rRich.Data is not null && rRich.Data.DIPHLGDEIED.ContainsKey(1) && rRich.Data.DIPHLGDEIED.Count >= 9,
         $"stages={rRich?.Data?.DIPHLGDEIED.Count}");
 
+    // R-KittyCafe (2026-11-12) the kitty cafe (theme 3401 -> ActivityModuleData[22003] -> Kittycafe2ConfigData 102) had no handler: the
+    // info came back empty-handed and every action was refused. Info starts at grade 1; buying a cat is answered (bought, or refused without its tokens).
+    main.Send(new CS_KittyCafe2Info { ThemeId = 3401 });
+    var rKitty = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_KittyCafe2Info>().FirstOrDefault();
+    main.Send(new CS_KittyCafe2SetStaff { ThemeId = 3401 });
+    var rKittyStaff = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_KittyCafe2SetStaff>().FirstOrDefault();
+    main.Send(new CS_KittyCafe2UnlockCat { ThemeId = 3401, NPBMHHBMDOB = 102203 });
+    var rKittyCat = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    Check("regress R-KittyCafe: kitty cafe info at grade 1, staff accepted, a cat purchase answered",
+        rKitty is not null && rKitty.Info.CMADKJPJPHF >= 1 && rKittyStaff is not null
+            && rKittyCat.Any(m => m is SC_KittyCafe2UnlockCat || m is SC_ReportError),
+        $"grade={rKitty?.Info.CMADKJPJPHF} staff={rKittyStaff is not null} cat={string.Join(",", rKittyCat.Select(m => m.GetType().Name))}");
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
