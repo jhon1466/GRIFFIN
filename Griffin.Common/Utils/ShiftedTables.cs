@@ -81,7 +81,7 @@ namespace Griffin.Common.Utils
 
                 string signature = string.Join(';', shifts.OrderBy(s => s.ActivityId).Select(s => $"{s.ActivityId}:{s.NewOpen}:{s.NewClose}"));
                 // PatchRevision changes whenever the served tables get a new fix, so a client that cached the previous copy downloads it again
-                uint hash = BitConverter.ToUInt32(SHA256.HashData(Encoding.UTF8.GetBytes(officialVersion + "|" + signature + "|" + PatchRevision)), 0);
+                uint hash = BitConverter.ToUInt32(SHA256.HashData(Encoding.UTF8.GetBytes(officialVersion + "|" + signature + "|" + PatchRevision + "|" + (File.Exists(HiddenPath) ? File.ReadAllText(HiddenPath) : ""))), 0);
                 string version = $"{officialVersion}{hash % 900 + 100}";
 
                 string tmp = Dir + ".tmp";
@@ -174,6 +174,7 @@ namespace Griffin.Common.Utils
                     {
                         PatchTpsShootSeasons(officialDir, file);
                         PatchRichManConfigs(officialDir, file);
+                        HideSubmodules(file);
                     }
                     // RichMan stages open N minutes after the event (MissionData column 5): a reopened event opens them all at once (A-215)
                     if (name.Equals("MissionData.bytes", StringComparison.OrdinalIgnoreCase))
@@ -289,6 +290,54 @@ namespace Griffin.Common.Utils
                 return;
             ulong target = series.Max();
             PatchModuleValues(file, 21003, value => all.Contains(value) && !complete.Contains(value) && value is >= 1000 and < 2000, target);
+        }
+
+        private static string HiddenPath => Path.Combine(StaticConfig.ResourceDir, "hidden-submodules.json");
+
+        /// <summary>
+        /// Submodules hidden from a theme in the served copy (Resources/hidden-submodules.json: {"2201101": [24001, ...]}): their key in
+        /// ActivityModuleData column 4 becomes an unused id of the same varint length, so the theme main panel skips binding them. Used to
+        /// get past theme panels of old events whose prefab in client 4.0.5142 lacks a button and freezes on open (A-217).
+        /// </summary>
+        private static void HideSubmodules(byte[] file)
+        {
+            Dictionary<ulong, HashSet<ulong>> hidden;
+            try
+            {
+                hidden = File.Exists(HiddenPath)
+                    ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<ulong, HashSet<ulong>>>(File.ReadAllText(HiddenPath)) ?? []
+                    : [];
+            }
+            catch (Exception) { return; }
+            if (hidden.Count == 0)
+                return;
+            foreach ((int start, int end) in Rows(file))
+            {
+                ulong id = 0;
+                Walk(file, start, end, (f, pos, len, value) => { if (f == 1) id = value; });
+                if (!hidden.TryGetValue(id, out HashSet<ulong>? keys))
+                    continue;
+                int i = start;
+                while (i < end)
+                {
+                    if (!TryVarint(file, ref i, out ulong tag))
+                        break;
+                    int wire = (int)(tag & 7);
+                    if (wire == 0) { if (!TryVarint(file, ref i, out _)) break; continue; }
+                    if (wire == 1) { i += 8; continue; }
+                    if (wire == 5) { i += 4; continue; }
+                    if (wire != 2 || !TryVarint(file, ref i, out ulong length))
+                        break;
+                    int entryEnd = i + (int)length;
+                    if ((tag >> 3) is 4 or 10)
+                        Walk(file, i, entryEnd, (field, pos, len, v) =>
+                        {
+                            if (field == 1 && keys.Contains(v))
+                                WriteVarint(file, pos, len, len == 3 ? 2_000_000UL : len == 2 ? 16_000UL : 120UL);
+                        });
+                    i = entryEnd;
+                }
+            }
         }
 
         /// <summary>MissionData ids listed by MissionBySeasonData (the RichMan stages).</summary>
