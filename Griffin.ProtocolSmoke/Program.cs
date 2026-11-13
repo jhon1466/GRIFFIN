@@ -1148,6 +1148,34 @@ if (scenario is "all" or "regress")
         rRich is not null && rRich.ThemeId == 901 && rRich.Data is not null && rRich.Data.DIPHLGDEIED.ContainsKey(1) && rRich.Data.DIPHLGDEIED.Count >= 9,
         $"stages={rRich?.Data?.DIPHLGDEIED.Count}");
 
+    // R-RichManGame (2026-11-12) RichMan StartGame was always refused: the board is now simulated. Stage 100401 of theme 2701 (map 100401,
+    // one opponent, 6 dice) starts a room, a normal roll is accepted and played back as Roll + Move events, and settling records the stage.
+    {
+        main.Send(new CS_RichManStartGame { ThemeId = 2701, StageId = 100401 });
+        var rmStart = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_RichManStartGame>().FirstOrDefault();
+        main.Send(new CS_RichManCmd
+        {
+            ThemeId = 2701,
+            Op = new KMOMJFOFEDD.Types.IMEGLPCEECE { Roll = new KMOMJFOFEDD.Types.INPBKMAMEOM { PHAGJFFEGBJ = KMOMJFOFEDD.Types.OGOBAEEANPC.DiceTypeNormal } },
+        });
+        var rmCmd = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        var rmEvents = rmCmd.OfType<SC_RichManEventNotify>().Select(e => e.GKIEAGNHFOF.NotifyCase).ToList();
+        Check("regress R-RichManGame: StartGame builds a room with the account, an opponent, dice and the board map",
+            rmStart?.Room is { } rmRoom && rmRoom.MapId == 100401 && rmRoom.LEMHFEGFMEB.Count == 2 && rmRoom.LEMHFEGFMEB[0].GODEMAKPOBA.Count == 3
+                && rmRoom.LEMHFEGFMEB[0].GODEMAKPOBA[0] > 0 && rmRoom.LLHDDKCMEEM?.PawnAction is not null,
+            rmStart is null ? "no reply" : $"map={rmStart.Room?.MapId} players={rmStart.Room?.LEMHFEGFMEB.Count}");
+        Check("regress R-RichManGame: a normal roll is accepted and played as Roll and Move events",
+            rmCmd.OfType<SC_RichManCmd>().FirstOrDefault()?.Code == KMOMJFOFEDD.Types.LIBHFHIMBHF.ErrNone
+                && rmEvents.Contains(KMOMJFOFEDD.Types.ABOCDDAJBHB.NotifyOneofCase.Roll) && rmEvents.Contains(KMOMJFOFEDD.Types.ABOCDDAJBHB.NotifyOneofCase.Move),
+            $"code={rmCmd.OfType<SC_RichManCmd>().FirstOrDefault()?.Code} events={string.Join(',', rmEvents)}");
+        main.Send(new CS_RichManSettleGame { ThemeId = 2701 });
+        var rmSettle = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+        Check("regress R-RichManGame: settling closes the game and reports the stage",
+            rmSettle.OfType<SC_RichManSettleGame>().FirstOrDefault()?.StageId == 100401
+                && rmSettle.OfType<SC_RichManData>().FirstOrDefault()?.Data.DIPHLGDEIED.Values.All(s => !s.KNFOFFBOCML) == true,
+            string.Join(",", rmSettle.Select(m => m.GetType().Name)));
+    }
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

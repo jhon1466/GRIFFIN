@@ -26306,7 +26306,18 @@ message KMOMJFOFEDD {
     KMOMJFOFEDD.JGIFGHCFKGG CJIMFIJEJKL = 26;
   }
 
+  // RichMan player command (oneof restored from the client protocol, field number = command type)
   message IMEGLPCEECE {
+    oneof op {
+      KMOMJFOFEDD.INPBKMAMEOM roll = 1;
+      KMOMJFOFEDD.FJLCNOBNLCL use_card = 3;
+      KMOMJFOFEDD.JAENIEOIHPO confirm = 4;
+      KMOMJFOFEDD.FOGNJDIJJIP purchase = 5;
+      KMOMJFOFEDD.HBNAIHBKKAH refresh_shop = 6;
+      KMOMJFOFEDD.KAIDPCOLJIL direction = 8;
+      KMOMJFOFEDD.BENKENMOFOF building = 9;
+      KMOMJFOFEDD.AFFHPAHPMPF loot = 10;
+    }
   }
 
   message INPBKMAMEOM {
@@ -26344,7 +26355,37 @@ message KMOMJFOFEDD {
     uint32 BIDPJDHBFGB = 1;
   }
 
+  // RichMan event notified to the client (oneof restored from the client protocol, field number = event type)
   message ABOCDDAJBHB {
+    oneof notify {
+      KMOMJFOFEDD.EBJCHBHFCCO event_result = 1;
+      KMOMJFOFEDD.BCHEPCOPJIE buff_trigger = 2;
+      KMOMJFOFEDD.EKBNCEHJJCJ shop = 4;
+      KMOMJFOFEDD.IBJIIHJCCFH round = 7;
+      KMOMJFOFEDD.PLDJBIIPCAP roll = 9;
+      KMOMJFOFEDD.JJKDLBBCELF path = 11;
+      KMOMJFOFEDD.KBCHPPANOJB move = 12;
+      KMOMJFOFEDD.PropertyKv dice = 13;
+      KMOMJFOFEDD.DCAKOCEBPPL building_build = 15;
+      KMOMJFOFEDD.IDAONNGGPCD build = 16;
+      KMOMJFOFEDD.HFFDLCBEPDP penalty = 17;
+      KMOMJFOFEDD.JFDOCLCLDIH out = 18;
+      KMOMJFOFEDD.POEIBHLNGBD grid_score = 19;
+      KMOMJFOFEDD.GOIONOHNINL building_score = 20;
+      KMOMJFOFEDD.JCKACAKOEIP event_score = 21;
+      KMOMJFOFEDD.GNKINIMDJDG lucky_score = 22;
+      KMOMJFOFEDD.JGBAEDKFFOL loot_score = 23;
+      KMOMJFOFEDD.EKEHCOKCPLC extra_score = 24;
+      KMOMJFOFEDD.GOEJNLBGJBH round_tax = 25;
+      KMOMJFOFEDD.MMMOCNICEKL pay_good = 26;
+      KMOMJFOFEDD.CCIJMDKMCBK pay_build = 27;
+      KMOMJFOFEDD.BMNOCIOIEDG pawn_action = 28;
+      KMOMJFOFEDD.KOPGEKPJLHE auto_card = 31;
+      KMOMJFOFEDD.KGENAGMCJDN player_action_end = 32;
+      KMOMJFOFEDD.CAFHAFNKFPL trans_move = 33;
+      KMOMJFOFEDD.EJGMFIJFAHD hide_move = 34;
+      KMOMJFOFEDD.FAHDEMKLDIK pass_start = 35;
+    }
   }
 
   message EKBNCEHJJCJ {
@@ -26395,7 +26436,27 @@ message KMOMJFOFEDD {
     uint32 LNDJKGEJIIF = 3;
   }
 
+  // RichMan buff effect (oneof restored from the client protocol)
   message FKCHBKCLKDK {
+    oneof effect {
+      KMOMJFOFEDD.AGNDPNECENI dice_add = 2;
+      KMOMJFOFEDD.AGNDPNECENI dice_change = 3;
+      KMOMJFOFEDD.POEALMLLMBB roll_modify = 4;
+      KMOMJFOFEDD.ODAGFKBOFLF buff_round = 6;
+      KMOMJFOFEDD.KDABAJJGAKO good_discount = 17;
+      KMOMJFOFEDD.KDABAJJGAKO buy_discount = 18;
+      KMOMJFOFEDD.MNPHGAMLAJE position = 20;
+      KMOMJFOFEDD.HPGOAJFNOCP buff_with_tag_round = 21;
+      KMOMJFOFEDD.OAPDIIHNBNE building_type_change = 23;
+      KMOMJFOFEDD.OAPDIIHNBNE building_owner_change = 24;
+      KMOMJFOFEDD.ODJMKHOCPAC build_price = 25;
+      KMOMJFOFEDD.ODJMKHOCPAC buy_price = 26;
+      KMOMJFOFEDD.ODJMKHOCPAC other_buy_price = 27;
+      KMOMJFOFEDD.ODJMKHOCPAC penalty = 28;
+      KMOMJFOFEDD.ODJMKHOCPAC building_value = 29;
+      int32 score = 22;
+      uint32 lucky_max_multiply = 30;
+    }
   }
 
   enum EFFDKJNNBJO {
@@ -26544,7 +26605,14 @@ message KMOMJFOFEDD {
     uint32 buff_id = 2;
   }
 
+  // RichMan state update (oneof restored from the client protocol)
   message LBNADOHKJIN {
+    oneof update {
+      KMOMJFOFEDD.EHPFLEFPIHK card = 1;
+      KMOMJFOFEDD.KOIMJIGHONL score = 3;
+      KMOMJFOFEDD.DDPFEMGDIPI buff = 5;
+      KMOMJFOFEDD.IIKLJDNMNJG dice = 7;
+    }
   }
 
   message EHPFLEFPIHK {
