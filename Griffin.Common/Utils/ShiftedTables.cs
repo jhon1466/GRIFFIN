@@ -21,6 +21,9 @@ namespace Griffin.Common.Utils
 
         private const long Margin = 3 * 86400;
         private const uint RowTag = 10;
+        /// <summary>Bump when the fixes applied to the served copy change (A-214: TpsShoot seasons and stage delays).</summary>
+        private const string PatchRevision = "2";
+
         private static readonly object Gate = new();
 
         /// <summary>Version announced to the client while some event is shifted (null = the official tables).</summary>
@@ -77,7 +80,8 @@ namespace Griffin.Common.Utils
                 }
 
                 string signature = string.Join(';', shifts.OrderBy(s => s.ActivityId).Select(s => $"{s.ActivityId}:{s.NewOpen}:{s.NewClose}"));
-                uint hash = BitConverter.ToUInt32(SHA256.HashData(Encoding.UTF8.GetBytes(officialVersion + "|" + signature)), 0);
+                // PatchRevision changes whenever the served tables get a new fix, so a client that cached the previous copy downloads it again
+                uint hash = BitConverter.ToUInt32(SHA256.HashData(Encoding.UTF8.GetBytes(officialVersion + "|" + signature + "|" + PatchRevision)), 0);
                 string version = $"{officialVersion}{hash % 900 + 100}";
 
                 string tmp = Dir + ".tmp";
