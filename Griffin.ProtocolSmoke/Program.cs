@@ -1148,6 +1148,20 @@ if (scenario is "all" or "regress")
         rRich is not null && rRich.ThemeId == 901 && rRich.Data is not null && rRich.Data.DIPHLGDEIED.ContainsKey(1) && rRich.Data.DIPHLGDEIED.Count >= 9,
         $"stages={rRich?.Data?.DIPHLGDEIED.Count}");
 
+    // R-SimCafe (2026-11-12) the SimCafe warm-up board only echoed a fixed day-1 state and never accepted a reward claim. Its state now
+    // persists per account (day, score, ranks taken); a claim of a reward outside the theme's group or above the score is refused.
+    main.Send(new CS_GetSimCafeWarmUpInfo { ThemeId = 4201 });
+    var rCafe = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_GetSimCafeWarmUpInfo>().FirstOrDefault();
+    Check("regress R-SimCafe: warm-up info of theme 4201 answers a state with a day",
+        rCafe is not null && rCafe.ThemeId == 4201 && rCafe.ECOOFMAFCBG is not null && rCafe.ECOOFMAFCBG.NCINIEDEDFG >= 1,
+        $"day={rCafe?.ECOOFMAFCBG?.NCINIEDEDFG}");
+    main.Send(new CS_SimCafeTakeWarmUpReward { ThemeId = 4201, RewardId = 1 });
+    var rCafeWrong = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    main.Send(new CS_SimCafeTakeWarmUpReward { ThemeId = 4201, RewardId = 108 });
+    var rCafeScore = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+    Check("regress R-SimCafe: rewards of another group or above the score are refused",
+        !rCafeWrong.OfType<SC_SimCafeTakeWarmUpReward>().Any() && (rCafe?.ECOOFMAFCBG?.Score >= 120 || !rCafeScore.OfType<SC_SimCafeTakeWarmUpReward>().Any()),
+        string.Join(",", rCafeWrong.Concat(rCafeScore).Select(m => m.GetType().Name)));
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

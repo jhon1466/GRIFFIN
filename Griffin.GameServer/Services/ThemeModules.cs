@@ -12,6 +12,8 @@ namespace Griffin.GameServer.Services
     {
         public const uint TpsShoot = 21001;
         public const uint RichMan = 21003;
+        /// <summary>SimCafe warm-up (preheat) tasks: maps to a SimTaskConfigData row (client NIPDKHAAPIC reads NCLHMKGDIJF[3001]).</summary>
+        public const uint SimCafeWarmUp = 3001;
 
         /// <summary>The configuration id of <paramref name="module"/> in theme <paramref name="themeId"/>, or 0.</summary>
         public static uint Config(ITableService tables, uint themeId, uint module)
