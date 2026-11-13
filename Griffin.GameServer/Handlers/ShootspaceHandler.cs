@@ -41,16 +41,11 @@ namespace Griffin.GameServer.Handlers
             foreach ((uint mode, Record record) in state.Modes)
                 reply.FDPOAJJJKGC[mode] = new CFGNAOGCNNF { Times = record.Times, CGFMBCCDFPG = record.Best };
 
-            // Levels (StspDifficultyData): the client opens a level only when its record says unlocked (field 3, read as
+            // Levels (StspDifficultyData of the theme's StspConfigData): the client opens a level only when its record says unlocked (field 3, read as
             // JIIBANDCNOM by CNLJNMBPGCC). Column 4 is the best score needed on the previous level (level 1 has none, 2 needs 200 on
             // level 1, 3 needs 500 on level 2). Without the flag every level showed the padlock, the first one included.
-            foreach (Google.Protobuf.IMessage row in tableService.GetTable<Griffin.Common.Table.StspDifficultyData>())
+            foreach ((uint id, bool unlocked) in Levels(request.ThemeId, state))
             {
-                uint id = TableFields.U(row, 1);
-                if (id == 0)
-                    continue;
-                uint needed = TableFields.U(row, 4);
-                bool unlocked = needed == 0 || (state.Modes.TryGetValue(id - 1, out Record? previous) && previous.Best >= needed);
                 if (!reply.FDPOAJJJKGC.TryGetValue(id, out CFGNAOGCNNF? entry))
                     reply.FDPOAJJJKGC[id] = entry = new CFGNAOGCNNF();
                 entry.MPNGHAKGLDM = unlocked;
@@ -64,7 +59,48 @@ namespace Griffin.GameServer.Handlers
             if (connection.Account is null)
                 return;
 
+            State state = Load(connection.Account.Uid, request.ThemeId);
+            var levels = Levels(request.ThemeId, state);
+            if (levels.Count == 0)
+            {
+                connection.Refuse(Griffin.Common.Protocol.MsgId.MsgCsShootspaceStart, HNINDAOJCKP.ShootspaceNotOpen);
+                return;
+            }
+            if (!levels.Any(l => l.Id == request.PKIHMDBPBBD && l.Unlocked))
+            {
+                connection.Refuse(Griffin.Common.Protocol.MsgId.MsgCsShootspaceStart, HNINDAOJCKP.ShootspaceDifficultyIsLocked);
+                return;
+            }
+
             connection.Send(new SC_ShootspaceStart { ThemeId = request.ThemeId, PKIHMDBPBBD = request.PKIHMDBPBBD });
+        }
+
+        /// <summary>
+        /// Levels of the theme's own configuration: ActivityModuleData[21004] gives the StspConfigData row (theme 901 -> 1, 4201 -> 9),
+        /// whose column 5 lists its StspDifficultyData ids (1, 2, 3 or 901, 902, 903 ...). A level opens when column 4 is 0 or the
+        /// previous level of that list has a best score of at least column 4 (2 needs 200 on level 1, 3 needs 500 on level 2).
+        /// </summary>
+        private List<(uint Id, bool Unlocked)> Levels(uint theme, State state)
+        {
+            uint config = ThemeModules.Config(tableService, theme, ThemeModules.ShootSpace);
+            Google.Protobuf.IMessage? configRow = config == 0 ? null
+                : tableService.GetTable<Griffin.Common.Table.StspConfigData>().FirstOrDefault(r => TableFields.U(r, 1) == config);
+            if (configRow is null)
+                return [];
+            Dictionary<uint, Google.Protobuf.IMessage> difficulties = tableService.GetTable<Griffin.Common.Table.StspDifficultyData>()
+                .GroupBy(r => TableFields.U(r, 1)).ToDictionary(g => g.Key, g => (Google.Protobuf.IMessage)g.First());
+            List<(uint, bool)> levels = [];
+            uint previous = 0;
+            foreach (uint id in TableFields.List(configRow, 5))
+            {
+                if (id == 0 || !difficulties.TryGetValue(id, out Google.Protobuf.IMessage? row))
+                    continue;
+                uint needed = TableFields.U(row, 4);
+                bool unlocked = needed == 0 || (previous != 0 && state.Modes.TryGetValue(previous, out Record? prev) && prev.Best >= needed);
+                levels.Add((id, unlocked));
+                previous = id;
+            }
+            return levels;
         }
 
         public override void HandleShootspaceFinish(CS_ShootspaceFinish request, Connection connection)
@@ -76,6 +112,11 @@ namespace Griffin.GameServer.Handlers
             lock (AccountLock.For(uid))
             {
                 State state = Load(uid, request.ThemeId);
+                if (!Levels(request.ThemeId, state).Any(l => l.Id == request.PKIHMDBPBBD && l.Unlocked))
+                {
+                    connection.Refuse(Griffin.Common.Protocol.MsgId.MsgCsShootspaceFinish, HNINDAOJCKP.ShootspaceDifficultyIsLocked);
+                    return;
+                }
                 Record record = state.Modes.GetValueOrDefault(request.PKIHMDBPBBD) ?? new Record();
                 record.Times++;
                 record.Best = Math.Max(record.Best, request.Score);
