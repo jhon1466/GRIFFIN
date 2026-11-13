@@ -22,7 +22,7 @@ namespace Griffin.Common.Utils
         private const long Margin = 3 * 86400;
         private const uint RowTag = 10;
         /// <summary>Bump when the fixes applied to the served copy change (A-214: TpsShoot seasons and stage delays).</summary>
-        private const string PatchRevision = "4";
+        private const string PatchRevision = "5";
 
         private static readonly object Gate = new();
 
@@ -131,7 +131,9 @@ namespace Griffin.Common.Utils
                                     return;
                                 }
                                 long newOpen = hit.From + Margin + hit.Delta;
-                                dates.Add((field, pos, len, v + hit.Delta, newOpen, v < (hit.From + hit.To) / 2));
+                                // a lone date is an opening unless it sits at the end of the period (the close): parts that opened in the second half
+                                // (下篇, later chapters) showed "opens in X hours" (A-218)
+                                dates.Add((field, pos, len, v + hit.Delta, newOpen, v < hit.To - Margin - 2 * 86400));
                             }
                         });
 
