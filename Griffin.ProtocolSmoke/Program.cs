@@ -1176,6 +1176,23 @@ if (scenario is "all" or "regress")
             string.Join(",", rmSettle.Select(m => m.GetType().Name)));
     }
 
+    // R-EventTasks (2026-11-12) the free skin tasks (type ActivityFreeSkin) and the ruby shop tasks (type RubyShop) had no counters: every
+    // task showed 0 and could not be claimed. SC_QuestCount now lists both with progress; a finished free skin task (4005, an action the
+    // server does not observe) is claimable once and pays the progress item 190032.
+    main.Send(new CS_QuestCount());
+    var rEvq = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_QuestCount>().FirstOrDefault()?.Quest.Counters;
+    var rEvSkin = rEvq?.FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.ActivityFreeSkin);
+    var rEvRuby = rEvq?.FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.RubyShop);
+    Check("regress R-EventTasks: SC_QuestCount lists the free skin and ruby shop tasks with progress",
+        rEvSkin is not null && rEvSkin.JGOJBNHMJJH.ContainsKey(4005) && rEvRuby is not null && rEvRuby.JGOJBNHMJJH.ContainsKey(140),
+        $"skin={rEvSkin?.JGOJBNHMJJH.Count} ruby={rEvRuby?.JGOJBNHMJJH.Count}");
+    main.Send(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.ActivityFreeSkin, QuestId = { 4005 } });
+    var rEvTake = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    main.Send(new CS_CommonQuestTakeReward { Type = CommonQuestCounters.Types.Type.ActivityFreeSkin, QuestId = { 4005 } });
+    var rEvAgain = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).ToList();
+    Check("regress R-EventTasks: a finished free skin task is claimed once",
+        rEvTake.OfType<SC_CommonQuestTakeReward>().Any(t => t.QuestId.Contains(4005u)) && !rEvAgain.OfType<SC_CommonQuestTakeReward>().Any(),
+        $"first={string.Join(',', rEvTake.Select(m => m.GetType().Name))} again={string.Join(',', rEvAgain.Select(m => m.GetType().Name))}");
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

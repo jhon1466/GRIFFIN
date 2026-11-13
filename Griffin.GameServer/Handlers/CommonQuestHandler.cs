@@ -24,7 +24,8 @@ namespace Griffin.GameServer.Handlers
         ILobbyMiniGameService miniGames,
         IResourceService resourceService,
         IBattlepassService battlepass,
-        IActivityLotteryService lottery) : CommonQuestHandlerBase
+        IActivityLotteryService lottery,
+        IEventTaskService eventTasks) : CommonQuestHandlerBase
     {
         /// <summary>The daily activity points (DailyQuestData rewards 8000:20/8000:10): the client fills the chest bar from this balance.</summary>
         internal const uint DailyPointsItem = 8000;
@@ -89,6 +90,23 @@ namespace Griffin.GameServer.Handlers
                 drops.Finish(weekMessages);
                 weekMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenWeek } });
                 connection.SendAutoEncrypted(weekMessages.ToArray());
+                return;
+            }
+
+            if (eventTasks.IsTaskType(request.Type))
+            {
+                // the free skin / ruby shop event tasks: finished ones pay their table reward once
+                List<IMessage> eventMessages = [];
+                List<uint> takenEvent = eventTasks.Claim(connection.Account.Uid, request.Type, request.QuestId, eventMessages);
+                if (takenEvent.Count == 0)
+                {
+                    connection.Refuse(MsgId.MsgCsCommonQuestTakeReward, HNINDAOJCKP.QuestCondNotMatch);
+                    return;
+                }
+
+                drops.Finish(eventMessages);
+                eventMessages.Add(new SC_CommonQuestTakeReward { Type = request.Type, QuestId = { takenEvent } });
+                connection.SendAutoEncrypted(eventMessages.ToArray());
                 return;
             }
 
