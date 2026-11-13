@@ -1193,6 +1193,19 @@ if (scenario is "all" or "regress")
     Check("regress R-EventTasks: a finished free skin task is claimed once",
         rEvTake.OfType<SC_CommonQuestTakeReward>().Any(t => t.QuestId.Contains(4005u)) && !rEvAgain.OfType<SC_CommonQuestTakeReward>().Any(),
         $"first={string.Join(',', rEvTake.Select(m => m.GetType().Name))} again={string.Join(',', rEvAgain.Select(m => m.GetType().Name))}");
+    // R-Jigsaw (2026-11-12) the jigsaw mini game (module 20006, theme 601 -> pic group 101) had no handler: info, completing a picture and
+    // claiming its reward (JigsawPicData column 5) failed. Picture 1 opens at the plan start; once completed it pays once.
+    main.Send(new CS_JigsawCompleteOnePic { ThemeId = 601, HFGNEPFLJMD = 1 });
+    var rJigDone = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_JigsawCompleteOnePic>().FirstOrDefault();
+    main.Send(new CS_JigsawClaimReward { ThemeId = 601, HFGNEPFLJMD = 1 });
+    var rJigClaim = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_JigsawClaimReward>().FirstOrDefault();
+    main.Send(new CS_JigsawClaimReward { ThemeId = 601, HFGNEPFLJMD = 1 });
+    var rJigTwice = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_JigsawClaimReward>().FirstOrDefault();
+    main.Send(new CS_JigsawInfo { ThemeId = 601 });
+    var rJigInfo = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_JigsawInfo>().FirstOrDefault();
+    Check("regress R-Jigsaw: picture 1 is completed, its reward claimed only once and info lists it as claimed",
+        rJigInfo is not null && rJigInfo.FPDKCBNKCAB.TryGetValue(1, out bool jigClaimed) && jigClaimed && rJigTwice is null,
+        $"info={rJigInfo?.FPDKCBNKCAB.Count} done={rJigDone is not null} claim={rJigClaim is not null} twice={rJigTwice is not null}");
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {
