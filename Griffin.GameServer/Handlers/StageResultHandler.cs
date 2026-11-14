@@ -147,15 +147,9 @@ namespace Griffin.GameServer.Handlers
                 // raises it when it receives SC_ChapterHeroMode, whose list may be empty. The ticks and unlocks of the nodes are drawn when the screen
                 // rebuilds, not on a record update (A-69).
                 SC_ChapterHeroMode refresh = new();
-                // The chapter screens of the events (type 14 stages) redraw only on client event 1104, which the client raises for a record
-                // update of type 11 of a plot stage (CKFOKNLIGDF: type 11, passed, StageData plot): the type-14 update alone left the next
-                // stage locked until the screen was entered again. A type-11 copy is added for any other stage type (A-221).
-                List<Google.Protobuf.IMessage> again = [new SC_StageRecordUpdate { Type = (int)TableFields.U(stage, 20), Record = record }];
+                List<Google.Protobuf.IMessage> again = [new SC_StageRecordUpdate { Type = (int)TableFields.U(stage, 20), Record = record }, new SC_StageRecordUpdateBatch { Record = { record } }, refresh];
                 if (TableFields.U(stage, 20) != 11)
-                    again.Add(new SC_StageRecordUpdate { Type = 11, Record = record });
-                again.Add(new SC_StageRecordUpdateBatch { Record = { record } });
-                again.Add(refresh);
-                connection.SendAutoEncrypted(again.ToArray());
+                    again.Insert(1, new SC_StageRecordUpdate { Type = 11, Record = record }); // event screens redraw on the type-11 copy (A-221)
                 connection.KeepSending(again, TimeSpan.FromMinutes(3));
             }
         }
@@ -276,16 +270,15 @@ namespace Griffin.GameServer.Handlers
                     // screen rebuilds its map if it was told that the chapter changed, event 1105 = SC_ChapterHeroMode) as soon as the first SEQUENCED
                     // message of the request arrives: the record, the batch and that notice go first WITHOUT a sequence, so the data is in place when the
                     // reply triggers the rebuild; the ticks and unlocks are drawn then, not later (A-69/A-70).
-                    connection.SendUnsequenced(new Google.Protobuf.IMessage[] { recordUpdate, new SC_StageRecordUpdateBatch { Record = { record } }, new SC_ChapterHeroMode() });
-                    connection.Send(recordUpdate);
-                    // the event chapter screens (type 14) redraw on client event 1104, raised only by a type-11 record update of a plot stage (A-221)
+                    // Event chapter screens (stage type 14) redraw on client event 1104, which the client raises for a type-11 record update of a
+                    // plot stage (CKFOKNLIGDF): that copy goes in this same unsequenced group, so it arrives before the reply exactly like the
+                    // campaign's data; type-11 stages (campaign) send nothing more (A-221).
+                    List<Google.Protobuf.IMessage> early = [recordUpdate, new SC_StageRecordUpdateBatch { Record = { record } }, new SC_ChapterHeroMode()];
                     if (recordUpdate.Type != 11)
-                        connection.Send(new SC_StageRecordUpdate { Type = 11, Record = record });
-                    // while the cinematic plays the event screen is hidden and does not listen: send it again after the next requests of the
-                    // client (A-64 mechanism), so the screen gets event 1104 once it is back (A-221)
-                    connection.KeepSending(
-                        [recordUpdate, new SC_StageRecordUpdate { Type = 11, Record = record }, new SC_StageRecordUpdateBatch { Record = { record } }, new SC_ChapterHeroMode()],
-                        TimeSpan.FromMinutes(3));
+                        early.Insert(1, new SC_StageRecordUpdate { Type = 11, Record = record });
+                    connection.SendUnsequenced(early.ToArray());
+                    connection.Send(recordUpdate);
+
                 }
 
                 GrantRepeatableDrops(uid, stage, response, push);
@@ -299,6 +292,9 @@ namespace Griffin.GameServer.Handlers
                         response.FirstDrop.Add(new UserDropCache { ItemId = itemId, ItemNum = count });
                         rewardService.Grant(uid, itemId, checked((int)count), push);
                     }
+                    // a plot stage has no result screen to show its first-clear reward: show the "obtained" window instead (A-224)
+                    if (!announce)
+                        PurchaseFeedback.Add(push, stage.FirstReward.Select(r => (r.Key, (int)r.Value)));
                 }
 
                 // Clearing the stage a chapter / activity story asks for completes its achievement: tell the client now, so the
