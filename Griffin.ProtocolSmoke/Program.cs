@@ -1330,6 +1330,13 @@ if (scenario is "all" or "regress")
     Check("regress R-24: the event main tasks are reported (ActivityMainTask, hundreds of stage tasks)",
         r24 is not null && r24.JGOJBNHMJJH.Count > 300, $"tasks={r24?.JGOJBNHMJJH.Count}");
 
+    // R-25 (2026-11-13, players) after an event cinematic (plot stage, type 14) the next stage stayed locked until the screen was entered again:
+    // the event chapter screen redraws on a type-11 record update of a plot stage, which must be sent too.
+    main.Send(new CS_StageStart { StcStageId = 32881 });
+    var r25 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageRecordUpdate>().ToList();
+    Check("regress R-25: an event plot stage sends its record also as type 11", r25.Any(u => u.Type == 11 && u.Record?.StageId == 32881),
+        string.Join(",", r25.Select(u => $"{u.Type}:{u.Record?.StageId}")));
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

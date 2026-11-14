@@ -278,6 +278,9 @@ namespace Griffin.GameServer.Handlers
                     // reply triggers the rebuild; the ticks and unlocks are drawn then, not later (A-69/A-70).
                     connection.SendUnsequenced(new Google.Protobuf.IMessage[] { recordUpdate, new SC_StageRecordUpdateBatch { Record = { record } }, new SC_ChapterHeroMode() });
                     connection.Send(recordUpdate);
+                    // the event chapter screens (type 14) redraw on client event 1104, raised only by a type-11 record update of a plot stage (A-221)
+                    if (recordUpdate.Type != 11)
+                        connection.Send(new SC_StageRecordUpdate { Type = 11, Record = record });
                 }
 
                 GrantRepeatableDrops(uid, stage, response, push);

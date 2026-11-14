@@ -190,16 +190,38 @@ namespace Griffin.GameServer.Services
             HashSet<long> wanted = rows.Select(r => r.Des?.Id ?? 0L).Where(i => i != 0).ToHashSet();
             Dictionary<long, string> texts = tableService.GetTable<LangPackageTableCnData>().Where(r => wanted.Contains(r.Id))
                 .GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First().Content);
-            Dictionary<string, uint> stageByCode = tableService.GetTable<StageData>()
+            // Stage codes repeat between events (AA-1-1 is a stage of chapters 317, 328, 345 and 348): a task looks its code up only among the
+            // stages of its own theme (column 2 = ActivityEntranceData id -> ActivityModuleData column 4 values -> StoryByChapterData stage lists).
+            Dictionary<string, List<uint>> stagesByCode = tableService.GetTable<StageData>()
                 .Select(r => (Code: TableFields.S(r, 3), Id: TableFields.U(r, 1))).Where(x => x.Code.Length > 0)
-                .GroupBy(x => x.Code).ToDictionary(g => g.Key, g => g.First().Id);
+                .GroupBy(x => x.Code).ToDictionary(g => g.Key, g => g.Select(x => x.Id).ToList());
+            Dictionary<uint, IMessage> chapters = tableService.GetTable<StoryByChapterData>().Cast<IMessage>()
+                .GroupBy(r => TableFields.U(r, 1)).ToDictionary(g => g.Key, g => g.First());
+            Dictionary<uint, IMessage> modules = tableService.GetTable<ActivityModuleData>().Cast<IMessage>()
+                .GroupBy(r => TableFields.U(r, 1)).ToDictionary(g => g.Key, g => g.First());
+            Dictionary<uint, HashSet<uint>> themeStages = [];
+            foreach (IMessage entrance in tableService.GetTable<ActivityEntranceData>().Cast<IMessage>())
+            {
+                if (!modules.TryGetValue(TableFields.U(entrance, 2), out IMessage? module))
+                    continue;
+                HashSet<uint> set = [];
+                foreach ((uint _, uint value) in TableFields.Map(module, 4))
+                    if (chapters.TryGetValue(value, out IMessage? chapter))
+                        set.UnionWith(TableFields.List(chapter, 2));
+                themeStages[TableFields.U(entrance, 1)] = set;
+            }
             List<MainTask> tasks = [];
             foreach (ActivityMainTaskData row in rows)
             {
                 if (!texts.TryGetValue(row.Des?.Id ?? 0L, out string? description))
                     continue;
                 var match = StageCode.Match(description);
-                if (!match.Success || !stageByCode.TryGetValue(match.Value, out uint stage))
+                if (!match.Success || !stagesByCode.TryGetValue(match.Value, out List<uint>? candidates))
+                    continue;
+                uint stage = themeStages.TryGetValue(TableFields.U(row, 2), out HashSet<uint>? own) && candidates.FirstOrDefault(own.Contains) is uint inTheme and not 0
+                    ? inTheme
+                    : candidates.Count == 1 ? candidates[0] : 0;
+                if (stage == 0)
                     continue;
                 var reward = row.RewardList is null ? [] : row.RewardList.BAALJFJDGBB.Zip(row.RewardList.Value, (item, count) => (item, count)).ToList();
                 tasks.Add(new MainTask(TableFields.U(row, 1), stage, Math.Max(1u, TableFields.U(row, 7)), reward));
