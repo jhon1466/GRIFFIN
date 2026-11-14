@@ -1339,6 +1339,12 @@ if (scenario is "all" or "regress")
     Check("regress R-25: an event plot stage sends its record also as type 11", r25.Any(u => u.Type == 11 && u.Record?.StageId == 32881),
         string.Join(",", r25.Select(u => $"{u.Type}:{u.Record?.StageId}")));
 
+    // R-26 (2026-11-13, players) the motorcycle score tasks (突破奖励) never counted: type Motorcycle (counter 62) was never reported.
+    main.Send(new CS_QuestCount());
+    var r26 = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_QuestCount>().SelectMany(q => q.Quest.Counters)
+        .FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.Motorcycle);
+    Check("regress R-26: the motorcycle score tasks are reported", r26 is not null && r26.JGOJBNHMJJH.Count >= 50, $"tasks={r26?.JGOJBNHMJJH.Count}");
+
     // R-19 (2026-11-12, players) the lobby showed old banners: /banner follows the official list (ids grow with each event)
     try
     {

@@ -22,7 +22,7 @@ namespace Griffin.Common.Utils
         private const long Margin = 3 * 86400;
         private const uint RowTag = 10;
         /// <summary>Bump when the fixes applied to the served copy change (A-214: TpsShoot seasons and stage delays).</summary>
-        private const string PatchRevision = "7";
+        private const string PatchRevision = "8";
 
         private static readonly object Gate = new();
 
@@ -187,6 +187,11 @@ namespace Griffin.Common.Utils
                     // the client would show the refilled tickets as expired. They expire with the latest reopened event instead (A-222).
                     if (name.Equals("ItemData.bytes", StringComparison.OrdinalIgnoreCase))
                         ExtendTickets(file, shifts.Max(sh => sh.NewClose));
+                    // Every event mode opens its stages N minutes after the event start: the client reads one obfuscated field for that
+                    // (AGGHEDJPEFL / story delay NMJHKIMCNGN, "* 60" on the plan opening). The tables and columns below were extracted from the
+                    // client parsers; a reopened event opens all of them at once (A-225).
+                    if (DelayFields.TryGetValue(Path.GetFileNameWithoutExtension(name), out int delayField))
+                        ZeroAll(file, delayField);
                     // RichMan stages open N minutes after the event (MissionData column 5): a reopened event opens them all at once (A-215)
                     if (name.Equals("MissionData.bytes", StringComparison.OrdinalIgnoreCase))
                         ZeroField(file, 5, RichManMissions(officialDir));
@@ -381,6 +386,29 @@ namespace Griffin.Common.Utils
                         WriteVarint(file, pos, len, (ulong)close);
                 });
             }
+        }
+
+        private static readonly Dictionary<string, int> DelayFields = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AmoActivitySubData"] = 14, ["AmoActivitySubclass3dData"] = 3, ["AuditionStageData"] = 3, ["ButtgameWitnessData"] = 3,
+            ["CandycatchStageData"] = 3, ["CardflipStageData"] = 6, ["ChessChapterData"] = 7, ["EventEndlessTowerMissionGroupData"] = 4,
+            ["EventSevendayGroupData"] = 4, ["EventStageData"] = 3, ["EventWorldbossMissionData"] = 6, ["IwannaStageData"] = 3,
+            ["MotorcycleMissionData"] = 6, ["PazzleStageData"] = 2, ["StoryData"] = 20, ["StoryBystageidData"] = 20,
+            ["TpsshootMissionData"] = 8, ["MissionData"] = 5,
+        };
+
+        /// <summary>Writes 0 (padded varint) into top-level <paramref name="field"/> of every row.</summary>
+        private static void ZeroAll(byte[] file, int field)
+        {
+            foreach ((int start, int end) in Rows(file))
+                Walk(file, start, end, (f, pos, len, value) =>
+                {
+                    if (f != field || value == 0)
+                        return;
+                    for (int k = 0; k < len - 1; k++)
+                        file[pos + k] = 0x80;
+                    file[pos + len - 1] = 0;
+                });
         }
 
         /// <summary>MissionData ids listed by MissionBySeasonData (the RichMan stages).</summary>

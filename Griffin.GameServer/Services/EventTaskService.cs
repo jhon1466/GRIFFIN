@@ -38,6 +38,9 @@ namespace Griffin.GameServer.Services
 
         /// <summary>After stage <paramref name="stageId"/> is cleared: the updates of the event main tasks that ask for it.</summary>
         List<IMessage> OnStageCleared(uint uid, uint stageId);
+
+        /// <summary>After a motorcycle run: the updates of the motorcycle score tasks.</summary>
+        List<IMessage> OnMotorcycleRun(uint uid);
     }
 
     public sealed class EventTaskState
@@ -47,6 +50,7 @@ namespace Griffin.GameServer.Services
         public Dictionary<uint, uint> Ruby { get; set; } = [];
         public HashSet<uint> RubyClaimed { get; set; } = [];
         public HashSet<uint> MainClaimed { get; set; } = [];
+        public HashSet<uint> MotoClaimed { get; set; } = [];
         public string Day { get; set; } = string.Empty;
     }
 
@@ -76,7 +80,7 @@ namespace Griffin.GameServer.Services
             Fed.Any(f => f.Class == conditionClass && (link.Length == 0 || f.Link.Length == 0 || f.Link == link));
 
         public bool IsTaskType(CommonQuestCounters.Types.Type type) =>
-            type is CommonQuestCounters.Types.Type.ActivityFreeSkin or CommonQuestCounters.Types.Type.RubyShop or CommonQuestCounters.Types.Type.ActivityMainTask;
+            type is CommonQuestCounters.Types.Type.ActivityFreeSkin or CommonQuestCounters.Types.Type.RubyShop or CommonQuestCounters.Types.Type.ActivityMainTask or CommonQuestCounters.Types.Type.Motorcycle;
 
         // ---- table access ----
 
@@ -145,6 +149,7 @@ namespace Griffin.GameServer.Services
                     Build(CommonQuestCounters.Types.Type.ActivityFreeSkin, FreeSkinTasks(), state.FreeSkin, state.FreeSkinClaimed),
                     Build(CommonQuestCounters.Types.Type.RubyShop, RubyTasks(), state.Ruby, state.RubyClaimed),
                     MainCounters(uid, state),
+                    MotoCounters(uid, state),
                 ];
             }
         }
@@ -165,7 +170,8 @@ namespace Griffin.GameServer.Services
                 state = Load(uid);
             return Syncs(FreeSkinCounterSystem, FreeSkinTasks().Select(t => (t.Id, Progress(state.FreeSkin, t))))
                 .Concat(Syncs(RubyCounterSystem, RubyTasks().Select(t => (t.Id, Progress(state.Ruby, t)))))
-                .Concat(Syncs(MainTaskCounterSystem, MainTasks().Select(t => (t.Id, MainProgress(uid, t))))).ToList();
+                .Concat(Syncs(MainTaskCounterSystem, MainTasks().Select(t => (t.Id, MainProgress(uid, t)))))
+                .Concat(Syncs(MotoCounterSystem, MotoTasks().Select(t => (t.Id, MotoProgress(uid, t))))).ToList();
         }
 
         // ---- event main tasks (ActivityMainTaskData, counter system 43) ----
@@ -303,8 +309,120 @@ namespace Griffin.GameServer.Services
             return claimed;
         }
 
+        // ---- motorcycle score tasks (MotorcycleTaskData, quest type Motorcycle, counter system 62) ----
+
+        public const uint MotoCounterSystem = 62;
+        private const uint MotorcycleModule = 24001;
+
+        public sealed record MotoTask(uint Id, uint Condition, uint Stage, uint Need, IReadOnlyList<(uint Key, uint Value)> Reward);
+
+        private static IReadOnlyList<MotoTask>? motoTasks;
+
+        /// <summary>
+        /// MotorcycleTaskData: 4 condition (1 = best score of the stage in column 5 reaches column 6), 11 reward "item:count,...". The 突破奖励
+        /// list of every motorcycle event; a task is finished when the saved best score of its stage reaches the target (A-226).
+        /// </summary>
+        private IReadOnlyList<MotoTask> MotoTasks()
+        {
+            if (motoTasks is not null)
+                return motoTasks;
+            List<MotoTask> tasks = [];
+            foreach (IMessage row in tableService.GetTable<MotorcycleTaskData>().Cast<IMessage>())
+            {
+                uint id = TableFields.U(row, 1);
+                if (id == 0 || TableFields.U(row, 4) != 1)
+                    continue;
+                List<(uint, uint)> reward = [];
+                foreach (string part in TableFields.S(row, 11).Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string[] kv = part.Split(':');
+                    if (kv.Length == 2 && uint.TryParse(kv[0], out uint item) && uint.TryParse(kv[1], out uint count))
+                        reward.Add((item, count));
+                }
+                tasks.Add(new MotoTask(id, 1, TableFields.U(row, 5), Math.Max(1u, TableFields.U(row, 6)), reward));
+            }
+            return motoTasks = tasks;
+        }
+
+        private IEnumerable<uint> MotorcycleThemes()
+        {
+            HashSet<uint> modules = tableService.GetTable<ActivityModuleData>().Cast<IMessage>()
+                .Where(m => TableFields.Map(m, 4).Any(p => p.Key == MotorcycleModule)).Select(m => TableFields.U(m, 1)).ToHashSet();
+            return tableService.GetTable<ActivityEntranceData>().Cast<IMessage>()
+                .Where(e => modules.Contains(TableFields.U(e, 2))).Select(e => TableFields.U(e, 1)).ToList();
+        }
+
+        private Dictionary<uint, uint> BestScores(uint uid)
+        {
+            Dictionary<uint, uint> best = [];
+            foreach (uint theme in MotorcycleThemes())
+            {
+                ThemeMiniGameStages.State? state = accountState.Get<ThemeMiniGameStages.State>(uid, ThemeMiniGameStages.Key(theme, MotorcycleModule));
+                if (state is null)
+                    continue;
+                foreach ((uint stage, ThemeMiniGameStages.StageRecord rec) in state.Stages)
+                    best[stage] = Math.Max(best.GetValueOrDefault(stage), rec.Best);
+            }
+            return best;
+        }
+
+        private uint MotoProgress(uint uid, MotoTask task) => Math.Min(task.Need, BestScores(uid).GetValueOrDefault(task.Stage));
+
+        private CommonQuestCounters MotoCounters(uint uid, EventTaskState state)
+        {
+            Dictionary<uint, uint> best = BestScores(uid);
+            CommonQuestCounters counters = new() { Type = CommonQuestCounters.Types.Type.Motorcycle };
+            foreach (MotoTask task in MotoTasks())
+            {
+                uint value = Math.Min(task.Need, best.GetValueOrDefault(task.Stage));
+                counters.JGOJBNHMJJH[task.Id] = value;
+                if (state.MotoClaimed.Contains(task.Id))
+                    counters.Rewards[task.Id] = true;
+                else if (value >= task.Need)
+                    counters.Rewards[task.Id] = false;
+            }
+            return counters;
+        }
+
+        public List<IMessage> OnMotorcycleRun(uint uid)
+        {
+            EventTaskState state;
+            lock (Locks.GetOrAdd(uid, static _ => new object()))
+                state = Load(uid);
+            Dictionary<uint, uint> best = BestScores(uid);
+            List<IMessage> messages = [.. Syncs(MotoCounterSystem, MotoTasks().Select(t => (t.Id, Math.Min(t.Need, best.GetValueOrDefault(t.Stage)))))];
+            messages.Add(new SC_CommonQuestCountUpdate { Counters = MotoCounters(uid, state) });
+            return messages;
+        }
+
+        private List<uint> ClaimMoto(uint uid, IEnumerable<uint> ids, List<IMessage> messages)
+        {
+            List<uint> claimed = [];
+            lock (Locks.GetOrAdd(uid, static _ => new object()))
+            {
+                EventTaskState state = Load(uid);
+                Dictionary<uint, uint> best = BestScores(uid);
+                Dictionary<uint, MotoTask> tasks = MotoTasks().GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
+                foreach (uint id in ids.Distinct())
+                {
+                    if (!tasks.TryGetValue(id, out MotoTask? task) || state.MotoClaimed.Contains(id) || best.GetValueOrDefault(task.Stage) < task.Need)
+                        continue;
+                    foreach ((uint item, uint count) in task.Reward)
+                        if (count > 0)
+                            rewardService.Grant(uid, item, (int)count, messages);
+                    state.MotoClaimed.Add(id);
+                    claimed.Add(id);
+                }
+                if (claimed.Count > 0)
+                    Save(uid, state);
+            }
+            return claimed;
+        }
+
         public List<uint> Claim(uint uid, CommonQuestCounters.Types.Type type, IEnumerable<uint> ids, List<IMessage> messages)
         {
+            if (type == CommonQuestCounters.Types.Type.Motorcycle)
+                return ClaimMoto(uid, ids, messages);
             if (type == CommonQuestCounters.Types.Type.ActivityMainTask)
                 return ClaimMain(uid, ids, messages);
             bool freeSkin = type == CommonQuestCounters.Types.Type.ActivityFreeSkin;

@@ -9,7 +9,7 @@ using Serilog;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class ThemeMiniGameHandler(IAccountStateService accountState, Griffin.Common.Table.ITableService tables, IRewardService rewards) : ThemeMiniGameHandlerBase
+    public sealed class ThemeMiniGameHandler(IAccountStateService accountState, Griffin.Common.Table.ITableService tables, IRewardService rewards, IEventTaskService eventTasks) : ThemeMiniGameHandlerBase
     {
         private const string StateKey = "theme-minigame.v1";
         private const string RedPointStateKey = "theme-minigame.red-points.v1";
@@ -559,6 +559,9 @@ namespace Griffin.GameServer.Handlers
                 drops.Finish(messages);
                 messages.Add(reply);
                 connection.SendAutoEncrypted(messages.ToArray());
+                // the motorcycle score tasks (突破奖励) follow the new best score at once (A-226)
+                if (module == ThemeModules.Motorcycle && eventTasks.OnMotorcycleRun(connection.Account!.Uid) is { Count: > 0 } taskUpdates)
+                    connection.SendAutoEncrypted(taskUpdates.ToArray());
             }
         }
 

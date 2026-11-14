@@ -10,7 +10,7 @@ namespace Griffin.GameServer.Handlers
     /// the time of the best clear. The finish of the operation mini games (candy catch, card flip) belongs to this group and is answered by
     /// <see cref="OperationMiniGameHandler"/>.
     /// </summary>
-    public sealed class MiniGameHandler(IAccountStateService accountState, ITableService tableService, IRewardService rewardService) : MiniGameHandlerBase
+    public sealed class MiniGameHandler(IAccountStateService accountState, ITableService tableService, IRewardService rewardService, IEventTaskService eventTasks) : MiniGameHandlerBase
     {
         public sealed class State
         {
@@ -86,7 +86,7 @@ namespace Griffin.GameServer.Handlers
         }
 
         // the themed mini games share this message group; whichever class the registry picks, ThemeMiniGameHandler answers them
-        private ThemeMiniGameHandler Theme => new(accountState, tableService, rewardService);
+        private ThemeMiniGameHandler Theme => new(accountState, tableService, rewardService, eventTasks);
 
         public override void HandleThemeMiniGameFinish(CS_ThemeMiniGameFinish request, Connection connection) => Theme.HandleThemeMiniGameFinish(request, connection);
 
