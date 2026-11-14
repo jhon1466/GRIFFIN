@@ -1,5 +1,7 @@
 # Griffin
 
+**Español** · [English](README.en.md) · [中文](README.zh.md) · [日本語](README.ja.md)
+
 Servidor privado de **Girls' Frontline 2: Exilium** (cliente CN de PC **4.0.5136** y de Android **4.0.5137**, tablas `1195672`), escrito en C# (.NET 8) con PostgreSQL.
 Inspirado en [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (ver [Créditos](#créditos)).
 
@@ -12,7 +14,19 @@ Inspirado en [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (ver [Cré
 
 > Proyecto sin ánimo de lucro, hecho con fines educativos y de preservación. No está afiliado a SunBorn ni a ningún editor del juego y **no incluye archivos del juego**: necesitas tu propio cliente instalado.
 
-## Requisitos
+## Forma recomendada: Griffin GM Tools
+
+**Ya no hace falta compilar el servidor.** [Griffin GM Tools](https://github.com/jhon1466/GRIFFIN-TOOLS/releases) descarga la última release de este repositorio (servidor ya compilado + parche), instala PostgreSQL, arranca el servidor, lo mantiene actualizado y copia el parche a la carpeta del juego. Solo hay que:
+
+1. Descargar y abrir `Griffin-GM-Tools.exe`.
+2. En **Servidor local**, pulsar **Instalar todo** y luego **Iniciar servidor**.
+3. Elegir la carpeta del juego, pulsar **Instalar parche** y después **Jugar**.
+
+El launcher aplica además, solo mientras el juego está abierto, un parche del código del cliente que arregla los menús de los eventos antiguos, y al cerrar el juego deja el archivo oficial como estaba.
+
+Las secciones siguientes solo hacen falta si quieres compilar el servidor tú mismo.
+
+## Requisitos (compilar a mano)
 
 | Requisito | Detalle |
 |---|---|
@@ -31,11 +45,7 @@ Las tablas del cliente (`Resources/Tables`) se preparan solas la primera vez que
    git clone https://github.com/jhon1466/GRIFFIN.git
    cd GRIFFIN
    ```
-2. **Instala el parche** (una sola vez). Descarga `griffin_patcher.dll` y `griffin_launcher.exe` de [Releases](../../releases), colócalos en la carpeta `GriffinPatcher\` y, en PowerShell **como administrador**, ejecuta:
-   ```powershell
-   .\scripts\install-griffin-patcher.ps1
-   ```
-   Comprueba el SHA-256 de ambos archivos y los copia a la carpeta del juego. (También puedes copiarlos a mano a `GF2Exilium\GF2 Game\`.)
+2. **Instala el parche** (una sola vez): descarga `griffin-patcher-win-x64.zip` de [Releases](../../releases) y copia `griffin_patcher.dll` y `griffin_launcher.exe` a la carpeta del juego (`GF2Exilium\GF2 Game\`).
 3. **Inicia el servidor**:
    ```powershell
    .\scripts\start-server.ps1
@@ -89,10 +99,12 @@ El servidor responde a unos 430 de los ~1020 mensajes de petición del cliente c
 - [x] Sala de control y expediciones
 - [x] Amigos y chat con un contacto integrado
 - [x] Parche propio (Griffin Patcher) que redirige el SDK sin proxy
+- [x] Combate validado por el servidor (el cliente simula la batalla y el servidor acepta el resultado)
+- [x] Panel de administración propio: [Griffin GM Tools](https://github.com/jhon1466/GRIFFIN-TOOLS) (además de los comandos del chat)
+- [x] Afecto: juramento (nivel 8) y batalla conjunta de los niveles 5–7
+- [x] Núcleo de remodelación: sus plugins (inventario de chips) y su coste real
 
 ### Parcial / sin verificar en el cliente real
-- [ ] Afecto: juramento (nivel 8) y batalla conjunta de los niveles 5–7
-- [ ] Núcleo de remodelación: sus plugins (inventario de chips) y su coste real
 - [ ] Modos de práctica y simulación (muchas peticiones solo devuelven una respuesta vacía)
 - [ ] Eventos de temporada y actividades (la mayoría solo responde con datos de ejemplo)
 
@@ -101,8 +113,6 @@ El servidor responde a unos 430 de los ~1020 mensajes de petición del cliente c
 - [ ] Banda / Gremio
 - [ ] Zona oscura y otros modos de exploración en línea
 - [ ] Soporte para el servidor global y otras versiones del cliente (ya funcionan PC 4.0.5136 y Android 4.0.5137)
-- [ ] Combate validado por el servidor (el cliente simula la batalla y el servidor acepta el resultado)
-- [ ] Panel de administración propio (por ahora solo el chat)
 
 ## Estructura
 
@@ -118,7 +128,7 @@ El servidor responde a unos 430 de los ~1020 mensajes de petición del cliente c
 | `Griffin.Command/` | motor de comandos |
 | `Griffin.ProtocolSmoke/` | cliente de pruebas del protocolo |
 | `GriffinPatcher/` | código (Rust) del parche; los binarios van en Releases |
-| `scripts/` | `start-server.ps1` e `install-griffin-patcher.ps1` |
+| `scripts/` | `start-server.ps1` |
 | `tools/` | generadores de código (ver más abajo) |
 
 ## Generadores de código
