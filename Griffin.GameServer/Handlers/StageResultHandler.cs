@@ -281,6 +281,11 @@ namespace Griffin.GameServer.Handlers
                     // the event chapter screens (type 14) redraw on client event 1104, raised only by a type-11 record update of a plot stage (A-221)
                     if (recordUpdate.Type != 11)
                         connection.Send(new SC_StageRecordUpdate { Type = 11, Record = record });
+                    // while the cinematic plays the event screen is hidden and does not listen: send it again after the next requests of the
+                    // client (A-64 mechanism), so the screen gets event 1104 once it is back (A-221)
+                    connection.KeepSending(
+                        [recordUpdate, new SC_StageRecordUpdate { Type = 11, Record = record }, new SC_StageRecordUpdateBatch { Record = { record } }, new SC_ChapterHeroMode()],
+                        TimeSpan.FromMinutes(3));
                 }
 
                 GrantRepeatableDrops(uid, stage, response, push);
