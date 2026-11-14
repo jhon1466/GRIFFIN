@@ -1,3 +1,5 @@
+mod client_code;
+
 use std::ffi::CString;
 use std::ptr::null_mut;
 
@@ -76,6 +78,9 @@ fn main() {
         std::process::exit(1);
     }
 
+    // A leftover patched file from a launcher that did not see the game close goes back first.
+    let patched = client_code::apply(&current_dir);
+
     let mut proc_info = PROCESS_INFORMATION::default();
     let mut startup_info = STARTUPINFOA::default();
 
@@ -96,6 +101,7 @@ fn main() {
         {
             eprintln!("Failed to launch {GAME_EXECUTABLE:?}. Run from the GF2 game directory.");
             eprintln!("Last error: {:?}", GetLastError());
+            client_code::restore(&patched);
             std::process::exit(1);
         }
 
@@ -107,6 +113,12 @@ fn main() {
         }
 
         CloseHandle(proc_info.hThread).unwrap();
+        if !patched.is_empty() {
+            // the official file comes back when the game closes, so the official game is never changed
+            println!("Keep this window open while playing; it restores the official client code when the game closes.");
+            WaitForSingleObject(proc_info.hProcess, u32::MAX);
+            client_code::restore(&patched);
+        }
         CloseHandle(proc_info.hProcess).unwrap();
     }
 }

@@ -47,3 +47,12 @@ GriffinPatcher/
 ├── griffin_launcher/   # inyector CreateProcess + LoadLibrary
 └── Cargo.toml          # workspace
 ```
+
+## Parche del código del cliente (eventos antiguos)
+
+`griffin_launcher.exe` lleva dentro `griffin_launcher/client/Assembly-CSharp.bsdiff`, un delta del código hot-update (HybridCLR) del cliente **4.0.5136**: los paneles de eventos antiguos leen su `LuaBindingNew` del padre y los botones de minijuegos tienen clic de respaldo.
+
+- Al arrancar, si `LocalCache/Data/ClientRes_Windows/<versión>/Codes/Assembly-CSharp.dll.bytes` es el oficial de esa versión, guarda una copia `.griffin-official` y pone el parcheado.
+- Al cerrarse el juego vuelve a poner el oficial: el juego oficial no queda modificado (deja la ventana del launcher abierta mientras juegas).
+- Otra versión del cliente se deja como está; hay que regenerar el delta para ella.
+- El launcher pide administrador para poder escribir en la carpeta del juego.

@@ -12,3 +12,5 @@ windows = { workspace = true, features = [
     "Win32_System_Threading",
     "Win32_Security",
 ] }
+qbsdiff = "1.4.4"
+sha2 = "0.10"
