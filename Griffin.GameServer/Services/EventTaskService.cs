@@ -199,16 +199,27 @@ namespace Griffin.GameServer.Services
                 .GroupBy(r => TableFields.U(r, 1)).ToDictionary(g => g.Key, g => g.First());
             Dictionary<uint, IMessage> modules = tableService.GetTable<ActivityModuleData>().Cast<IMessage>()
                 .GroupBy(r => TableFields.U(r, 1)).ToDictionary(g => g.Key, g => g.First());
+            // The task panel of a theme lists the group of its module's submodule 11002 (client KFLKHGBEPJK.GABPFGIBOJE: PDHNKJMJGDK(.., MainTask)),
+            // e.g. theme 2201 -> group 2301: a task group is NOT the theme id. Its stages are the chapters of that same module (A-223).
+            const uint MainTaskSubmodule = 11002;
             Dictionary<uint, HashSet<uint>> themeStages = [];
-            foreach (IMessage entrance in tableService.GetTable<ActivityEntranceData>().Cast<IMessage>())
+            foreach (IMessage module in modules.Values)
             {
-                if (!modules.TryGetValue(TableFields.U(entrance, 2), out IMessage? module))
-                    continue;
                 HashSet<uint> set = [];
-                foreach ((uint _, uint value) in TableFields.Map(module, 4))
+                uint group = 0;
+                foreach ((uint key, uint value) in TableFields.Map(module, 4))
+                {
+                    if (key == MainTaskSubmodule)
+                        group = value;
                     if (chapters.TryGetValue(value, out IMessage? chapter))
                         set.UnionWith(TableFields.List(chapter, 2));
-                themeStages[TableFields.U(entrance, 1)] = set;
+                }
+                if (group != 0)
+                {
+                    if (!themeStages.TryGetValue(group, out HashSet<uint>? existing))
+                        themeStages[group] = existing = [];
+                    existing.UnionWith(set);
+                }
             }
             List<MainTask> tasks = [];
             foreach (ActivityMainTaskData row in rows)

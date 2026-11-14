@@ -1328,7 +1328,7 @@ if (scenario is "all" or "regress")
     var r24 = main.ReadFor(TimeSpan.FromSeconds(4)).Select(p => p.Message).OfType<SC_QuestCount>().SelectMany(q => q.Quest.Counters)
         .FirstOrDefault(c => c.Type == CommonQuestCounters.Types.Type.ActivityMainTask);
     Check("regress R-24: the event main tasks are reported (ActivityMainTask, hundreds of stage tasks)",
-        r24 is not null && r24.JGOJBNHMJJH.Count > 300, $"tasks={r24?.JGOJBNHMJJH.Count}");
+        r24 is not null && r24.JGOJBNHMJJH.Count > 300 && r24.JGOJBNHMJJH.ContainsKey(23010301u), $"tasks={r24?.JGOJBNHMJJH.Count} has23010301={r24?.JGOJBNHMJJH.ContainsKey(23010301u)}");
 
     // R-25 (2026-11-13, players) after an event cinematic (plot stage, type 14) the next stage stayed locked until the screen was entered again:
     // the event chapter screen redraws on a type-11 record update of a plot stage, which must be sent too.
