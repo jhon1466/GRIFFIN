@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 
@@ -69,6 +69,31 @@ namespace Griffin.GameServer.Services
                 .Select(id => library[id]).Where(features.Contains).ToArray();
         }
 
+        /// <summary>
+        /// The effects of a new chip, as the official chips have them (the 50+ chips of the captured catalog): item 98 G C 0V (G = grade, C = class)
+        /// has one main effect of its class at level G - 2 (FeaturesEntryData id 1 C xxx LL) and one secondary effect of any class at level 1
+        /// (2 x xxx 01), two from grade 5 on. The PluginData rows of most items are placeholders without effects.
+        /// </summary>
+        public static uint[] RollEntries(ITableService tables, uint item)
+        {
+            uint grade = item / 1000 % 10, cls = item / 100 % 10;
+            List<uint> ids = tables.GetTable<FeaturesEntryData>().Select(r => r.Id).ToList();
+            List<uint> mains = ids.Where(id => id / 1_000_000 == 1 && id / 100_000 % 10 == cls && id % 100 == Math.Max(1, grade - 2)).ToList();
+            if (mains.Count == 0)
+                mains = ids.Where(id => id / 1_000_000 == 1 && id / 100_000 % 10 == cls).ToList();
+            List<uint> seconds = ids.Where(id => id / 1_000_000 == 2 && id % 100 == 1).ToList();
+            List<uint> entries = [];
+            if (mains.Count > 0)
+                entries.Add(mains[Random.Shared.Next(mains.Count)]);
+            for (int n = grade >= 5 ? 2 : 1; n > 0 && seconds.Count > 0; n--)
+            {
+                uint pick = seconds[Random.Shared.Next(seconds.Count)];
+                seconds.RemoveAll(id => id / 100 == pick / 100);
+                entries.Add(pick);
+            }
+            return entries.ToArray();
+        }
+
         /// <summary>The account's plugins: the fixed list without the dismantled ones, plus the gained ones, with their locks.</summary>
         public static SC_GunRemouldingPlugins Catalog(ITableService tables, IAccountStateService accountState, uint uid)
         {
@@ -106,7 +131,7 @@ namespace Griffin.GameServer.Services
                 for (int i = 0; i < count; i++)
                 {
                     PluginData row = usable[Random.Shared.Next(usable.Count)];
-                    Owned owned = new() { Id = (ulong)Interlocked.Increment(ref nextId), Stc = item, Row = row.Id, Entries = EntriesOf(tables, row) };
+                    Owned owned = new() { Id = (ulong)Interlocked.Increment(ref nextId), Stc = item, Row = row.Id, Entries = RollEntries(tables, item) };
                     state.Gained.Add(owned);
                     ids.Add(owned.Id);
                     messages.Add(new SC_AddGunRemouldingPlugin { Plugin = ToProto(owned) });

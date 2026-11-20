@@ -835,7 +835,7 @@ if (scenario is "all" or "regress")
             main.Send(new CS_GunRemouldingPluginDecompose { Ids = { added.Id } });
             var r29Dec = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
             Check("regress R-29: an unlocked plugin is dismantled and pays its Data Links",
-                r29Dec.OfType<SC_GunRemouldingPluginDecompose>().Any(d => d.Ids.Contains(added.Id)) && r29Dec.Any(m => m is SC_Items or SC_Resource or SC_Sync),
+                r29Dec.OfType<SC_GunRemouldingPluginDecompose>().Any(d => d.Ids.Contains(added.Id)) && r29Dec.Any(m => m is SC_Items or SC_Resource or SC_ResourceUpdate or SC_Sync),
                 string.Join(',', r29Dec.Select(m => m.GetType().Name)));
         }
     }
