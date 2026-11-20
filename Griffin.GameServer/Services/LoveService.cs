@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -31,9 +31,28 @@ namespace Griffin.GameServer.Services
         void Advance(uint uid, GunEntity gun, List<IMessage> messages);
     }
 
-    public sealed class LoveService(ITableService tableService, IRewardService rewardService) : ILoveService
+    public sealed class LoveService : ILoveService
     {
         private const uint VowEvent = 9999;
+        private readonly ITableService tableService;
+        private readonly IRewardService rewardService;
+
+        /// <summary>The tables of the last service built: <see cref="PendingSuffix"/> serves the gun protos built outside a handler.</summary>
+        private static ITableService? tables;
+
+        public LoveService(ITableService tableService, IRewardService rewardService)
+        {
+            this.tableService = tableService;
+            this.rewardService = rewardService;
+            tables = tableService;
+        }
+
+        /// <summary>
+        /// The pending event (Love field 3) of a character for every gun the client receives (login, CS_Guns, gun updates): without it the client
+        /// shows a full bar with no event button after leaving the dormitory or losing the together-battle, and the affection is stuck (A-227).
+        /// </summary>
+        public static uint PendingSuffix(GunEntity gun) =>
+            tables is null ? 0 : new LoveService(tables, null!).Pending(gun)?.Suffix ?? 0;
 
         public uint Cap => tableService.GetTable<LoveLevelData>().Where(l => TableFields.U(l, 2) > 0).Select(l => TableFields.U(l, 1)).DefaultIfEmpty(8u).Max();
 

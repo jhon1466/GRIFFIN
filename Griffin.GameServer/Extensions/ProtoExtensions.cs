@@ -34,6 +34,7 @@ public static class ProtoExtensions
             {
                 KFIAKLNJHMB = gun.LoveLevel,
                 ABOJJOJODME = gun.LoveExp,
+                FDKIHAPHHPD = LoveService.PendingSuffix(gun),
                 // the vow (level 9): the client reads the flag (field 4) for the vow icon and its red dot, and the time (field 5) of the ceremony (A-73)
                 APPPIAJDHLD = Handlers.LoveHandler.IsVowed(gun),
                 PCPEAMOJPCF = gun.GunTalentConsume.GetValueOrDefault(Handlers.LoveHandler.VowTimeKey),

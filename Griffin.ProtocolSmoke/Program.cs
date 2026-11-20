@@ -805,6 +805,28 @@ if (scenario is "all" or "lobbyroom")
 // Each check pins a bug that was fixed after a player report; it must fail on the code before the fix.
 if (scenario is "all" or "regress")
 {
+    // R-27 (2026-11-20) a character whose affection bar is full keeps its pending event (Love field 3) in every gun the client receives:
+    // without it, after leaving the dormitory (or losing the together-battle) the bar showed full with no event button and the affection was stuck.
+    {
+        main.Send(new CS_Chat { Uid = 1, Message = "/inventory provision" });
+        main.ReadFor(TimeSpan.FromSeconds(4));
+        main.Send(new CS_Guns());
+        var lovers = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault();
+        var fresh = lovers?.Guns.FirstOrDefault(g => g.Love is null || (g.Love.KFIAKLNJHMB <= 1 && g.Love.ABOJJOJODME == 0));
+        if (fresh is not null)
+        {
+            main.Send(new CS_LoveSendGift { GunId = fresh.Id, MLDDFFDLNHD = { [300040u] = 20u } });
+            var filled = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LoveSendGift>().FirstOrDefault();
+            main.Send(new CS_Guns());
+            var reloaded = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault()?.Guns.FirstOrDefault(g => g.Id == fresh.Id);
+            Check("regress R-27: a full affection bar keeps its pending event when the guns are reloaded",
+                filled is not null && filled.FDKIHAPHHPD != 0 && reloaded?.Love?.FDKIHAPHHPD == filled.FDKIHAPHHPD,
+                $"gun={fresh.Id} gift-pending={filled?.FDKIHAPHHPD} reload-pending={reloaded?.Love?.FDKIHAPHHPD}");
+        }
+        else
+            Check("regress R-27: there is a character without affection to fill", false);
+    }
+
     // R-1 (2026-11-07) rooms without a cleaning cost (LobbyRoomData col 21 empty: 110 历战连廊, 105) are open from the start;
     // otherwise their furniture showed "clear the area first" and could not be bought.
     main.Send(new CS_LobbyGetBuildInfo());
