@@ -121,7 +121,6 @@ namespace Griffin.GameServer.Handlers
             List<IMessage> bundle = [spent];
             if (promoted)
                 GrantLevelRewards(uid, gun.GunId, beforeGift, gun.LoveLevel, bundle);
-            questProgress.AddCondition(uid, conditionClass: 1303, link: "4015", amount: (uint)spend.Values.Sum());
             Log.Information("LoveSendGift: account {Uid} gun {Gun} +{Gained} -> level {Level} exp {Exp}.", uid, gun.GunId, gained, gun.LoveLevel, gun.LoveExp);
             bundle.Add(new SC_LoveSendGift
             {
@@ -142,6 +141,8 @@ namespace Griffin.GameServer.Handlers
             if (love.Pending(gun) is { } filled)
                 bundle.Add(new SC_LoveLevelUpdate { GunId = gun.GunId, JLHFICPMAEI = gun.LoveLevel, FDKIHAPHHPD = filled.Suffix });
             connection.SendAutoEncrypted(bundle.ToArray());
+            // the daily-task counter goes after the gift answer (it used to arrive before it: the answer has to be the first thing the client gets)
+            questProgress.AddCondition(uid, conditionClass: 1303, link: "4015", amount: (uint)spend.Values.Sum());
         }
 
         public override void HandleLoveUpgradeDirectly(CS_LoveUpgradeDirectly request, Connection connection)
