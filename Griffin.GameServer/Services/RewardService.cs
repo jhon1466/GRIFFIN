@@ -39,7 +39,8 @@ namespace Griffin.GameServer.Services
         IResourceService resourceService,
         IItemService itemService,
         IStaminaService staminaService,
-        IWeaponModService weaponModService) : IRewardService
+        IWeaponModService weaponModService,
+        IAccountStateService accountState) : IRewardService
     {
         private const uint StaminaItemId = 101;
 
@@ -78,6 +79,13 @@ namespace Griffin.GameServer.Services
                     relate = GrantWeapon(accountUid, account, itemId, messages);
 
                 return new GrantResult(true, relate, FirstWeapon: first);
+            }
+
+            // a plugin instance item (98xxxx) is a real chip of the core, not a stackable item (A-231)
+            if (PluginInventory.IsPluginItem(tableService, itemId))
+            {
+                IReadOnlyList<ulong> plugins = PluginInventory.Create(tableService, accountState, accountUid, itemId, Math.Max(1, count), messages);
+                return new GrantResult(plugins.Count > 0, itemId);
             }
 
             if (tableService.GetTable<WeaponModData>().Any(m => m.Id == itemId))

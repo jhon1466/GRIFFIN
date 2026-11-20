@@ -166,11 +166,94 @@ namespace Griffin.GameServer.Handlers
             }
         }
 
-        public override void HandleGunRemouldingPluginDecompose(CS_GunRemouldingPluginDecompose request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsGunRemouldingPluginDecompose, HNINDAOJCKP.GunRemouldingPluginNotFound);
+        /// <summary>Dismantles plugins that are not locked nor equipped: they leave the account and pay PluginData column 6 (A-231).</summary>
+        public override void HandleGunRemouldingPluginDecompose(CS_GunRemouldingPluginDecompose request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
 
-        public override void HandleGunRemouldingPluginLockUnlock(CS_GunRemouldingPluginLockUnlock request, Connection connection) =>
-            connection.Refuse(MsgId.MsgCsGunRemouldingPluginLockUnlock, HNINDAOJCKP.GunRemouldingPluginNotFound);
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                Dictionary<ulong, GunRemouldingPlugin> mine = PluginInventory.Catalog(tableService, accountState, uid).RemouldingPlugins.ToDictionary(p => p.Id);
+                PluginInventory.State state = PluginInventory.Load(accountState, uid);
+                List<ulong> ids = request.Ids.Distinct().ToList();
+                if (ids.Count == 0 || ids.Any(id => !mine.ContainsKey(id)))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingPluginDecompose, HNINDAOJCKP.GunRemouldingPluginNotFound);
+                    return;
+                }
+                if (ids.Any(id => state.Locked.Contains(id) || RemouldingPlugins.GunOf(accountState, uid, id) != 0))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingPluginDecompose, HNINDAOJCKP.ClientInputInvalid);
+                    return;
+                }
+
+                List<Google.Protobuf.IMessage> messages = [];
+                Dictionary<uint, int> reward = [];
+                foreach (ulong id in ids)
+                {
+                    foreach ((uint item, int count) in PluginInventory.DismantleReward(PluginInventory.RowOf(tableService, state, mine[id])))
+                        reward[item] = reward.GetValueOrDefault(item) + count;
+                    if (state.Gained.RemoveAll(o => o.Id == id) == 0)
+                        state.Removed.Add(id);
+                }
+                PluginInventory.Save(accountState, uid, state);
+                foreach ((uint item, int count) in reward)
+                    rewardService.Grant(uid, item, count, messages);
+                SC_GunRemouldingPluginDecompose reply = new();
+                reply.Ids.AddRange(ids);
+                messages.Add(reply);
+                connection.SendAutoEncrypted(messages.ToArray());
+            }
+        }
+
+        /// <summary>Locks or unlocks one plugin (a locked plugin cannot be dismantled).</summary>
+        public override void HandleGunRemouldingPluginLockUnlock(CS_GunRemouldingPluginLockUnlock request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                if (!PluginIdsOf(uid).Contains(request.Id))
+                {
+                    connection.Refuse(MsgId.MsgCsGunRemouldingPluginLockUnlock, HNINDAOJCKP.GunRemouldingPluginNotFound);
+                    return;
+                }
+                PluginInventory.State state = PluginInventory.Load(accountState, uid);
+                bool locked = !state.Locked.Remove(request.Id);
+                if (locked)
+                    state.Locked.Add(request.Id);
+                PluginInventory.Save(accountState, uid, state);
+                connection.Send(new SC_GunRemouldingPluginLockUnlock { Id = request.Id, MDFIDAFPBJN = locked });
+            }
+        }
+
+        /// <summary>Locks or unlocks several plugins at once.</summary>
+        public override void HandleGunRemouldingPluginBatchLockUnlock(CS_GunRemouldingPluginBatchLockUnlock request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            lock (AccountLock.For(uid))
+            {
+                IReadOnlySet<ulong> mine = PluginIdsOf(uid);
+                List<ulong> ids = request.Ids.Where(mine.Contains).Distinct().ToList();
+                PluginInventory.State state = PluginInventory.Load(accountState, uid);
+                foreach (ulong id in ids)
+                    if (request.MDFIDAFPBJN)
+                        state.Locked.Add(id);
+                    else
+                        state.Locked.Remove(id);
+                PluginInventory.Save(accountState, uid, state);
+                SC_GunRemouldingPluginBatchLockUnlock reply = new() { MDFIDAFPBJN = request.MDFIDAFPBJN };
+                reply.Ids.AddRange(ids);
+                connection.Send(reply);
+            }
+        }
 
         /// <summary>Unlocks one point of the character's talent tree (see <see cref="ITalentService"/>).</summary>
         public override void HandleGunTalentLvUp(CS_GunTalentLvUp request, Connection connection)
@@ -357,7 +440,8 @@ namespace Griffin.GameServer.Handlers
 
         public override void HandleGunRemouldingPlugins(CS_GunRemouldingPlugins request, Connection connection)
         {
-            SC_GunRemouldingPlugins plugins = PluginCatalog(tableService);
+            SC_GunRemouldingPlugins plugins = connection.Account is null ? PluginCatalog(tableService)
+                : PluginInventory.Catalog(tableService, accountState, connection.Account.Uid);
             if (connection.Account is not null)
                 foreach (GunRemouldingPlugin plugin in plugins.RemouldingPlugins)
                     plugin.GunId = RemouldingPlugins.GunOf(accountState, connection.Account.Uid, plugin.Id);
@@ -365,8 +449,8 @@ namespace Griffin.GameServer.Handlers
             connection.Send(4, plugins);
         }
 
-        private IReadOnlySet<ulong> PluginIds => pluginIds ??= PluginCatalog(tableService).RemouldingPlugins.Select(p => p.Id).ToHashSet();
-        private static IReadOnlySet<ulong>? pluginIds;
+        /// <summary>The plugin ids the account owns (A-231).</summary>
+        private IReadOnlySet<ulong> PluginIdsOf(uint uid) => PluginInventory.Catalog(tableService, accountState, uid).RemouldingPlugins.Select(p => p.Id).ToHashSet();
 
         /// <summary>Puts a plugin in a slot of the core (slot is 1-based; slot 0 takes the plugin off; plugin 0 empties the slot) and keeps it (A-58).</summary>
         public override void HandleGunRemouldingPluginBelong(CS_GunRemouldingPluginBelong request, Connection connection)
@@ -384,7 +468,7 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
-                if (request.Slot > RemouldingPlugins.SlotCount || !RemouldingPlugins.Owns(PluginIds, request.GIBKJMJPLGC))
+                if (request.Slot > RemouldingPlugins.SlotCount || !RemouldingPlugins.Owns(PluginIdsOf(uid), request.GIBKJMJPLGC))
                 {
                     connection.Refuse(MsgId.MsgCsGunRemouldingPluginBelong, request.Slot > RemouldingPlugins.SlotCount
                         ? HNINDAOJCKP.GunRemouldingCoreSlotError : HNINDAOJCKP.GunRemouldingPluginNotFound);
@@ -427,7 +511,7 @@ namespace Griffin.GameServer.Handlers
                     return;
                 }
 
-                if (request.PluginUids.Count > RemouldingPlugins.SlotCount || request.PluginUids.Any(p => !RemouldingPlugins.Owns(PluginIds, p)))
+                if (request.PluginUids.Count > RemouldingPlugins.SlotCount || request.PluginUids.Any(p => !RemouldingPlugins.Owns(PluginIdsOf(uid), p)))
                 {
                     connection.Refuse(MsgId.MsgCsGunRemouldingPluginBatchBelong, HNINDAOJCKP.GunRemouldingPluginNotFound);
                     return;

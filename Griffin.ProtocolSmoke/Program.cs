@@ -805,6 +805,41 @@ if (scenario is "all" or "lobbyroom")
 // Each check pins a bug that was fixed after a player report; it must fail on the code before the fix.
 if (scenario is "all" or "regress")
 {
+    // R-29 (2026-11-20) a core chip item (98xxxx) granted by GM Tools becomes a real plugin of the account (it was stored as a plain item and no
+    // chip appeared); it can be locked, and dismantled once unlocked (both were refused).
+    if (Environment.GetEnvironmentVariable("GRIFFIN_GM_TOKEN") is { Length: > 0 } r29Token)
+    {
+        httpClient.DefaultRequestHeaders.Remove("X-GM-Token");
+        httpClient.DefaultRequestHeaders.Add("X-GM-Token", r29Token);
+        string r29Acc = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var r29Uid = System.Text.RegularExpressions.Regex.Match(r29Acc, @"""uid""\s*:\s*(\d+)");
+        if (r29Uid.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{r29Uid.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":983201,\"count\":1}", System.Text.Encoding.UTF8, "application/json"));
+        var r29Push = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+        var added = r29Push.OfType<SC_AddGunRemouldingPlugin>().FirstOrDefault()?.Plugin;
+        Check("regress R-29: a chip item granted by GM is announced as a new plugin", added is not null && added.StcId == 983201 && added.ACEIFDEGLMH.Count > 0,
+            string.Join(',', r29Push.Select(m => m.GetType().Name)));
+        if (added is not null)
+        {
+            main.Send(new CS_GunRemouldingPlugins());
+            var r29List = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingPlugins>().FirstOrDefault();
+            Check("regress R-29: the new plugin is in the account's plugin list", r29List?.RemouldingPlugins.Any(p => p.Id == added.Id) == true);
+            main.Send(new CS_GunRemouldingPluginLockUnlock { Id = added.Id });
+            var r29Lock = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_GunRemouldingPluginLockUnlock>().FirstOrDefault();
+            Check("regress R-29: a plugin can be locked", r29Lock is not null && r29Lock.MDFIDAFPBJN);
+            main.Send(new CS_GunRemouldingPluginDecompose { Ids = { added.Id } });
+            Check("regress R-29: a locked plugin is not dismantled", !main.ReadFor(TimeSpan.FromSeconds(1)).Any(p => p.Message is SC_GunRemouldingPluginDecompose));
+            main.Send(new CS_GunRemouldingPluginLockUnlock { Id = added.Id });
+            main.ReadFor(TimeSpan.FromSeconds(1));
+            main.Send(new CS_GunRemouldingPluginDecompose { Ids = { added.Id } });
+            var r29Dec = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+            Check("regress R-29: an unlocked plugin is dismantled and pays its Data Links",
+                r29Dec.OfType<SC_GunRemouldingPluginDecompose>().Any(d => d.Ids.Contains(added.Id)) && r29Dec.Any(m => m is SC_Items or SC_Resource or SC_Sync),
+                string.Join(',', r29Dec.Select(m => m.GetType().Name)));
+        }
+    }
+
     // R-28 (2026-11-20) the wished effect of the weapon-part stages (CS_SimCombatWeaponModAssignedDrop) is answered (it was not handled: the
     // chosen perk was lost and the dropped mods came with random effects).
     main.Send(new CS_SimCombatWeaponModAssignedDrop { StageId = 27101, OMCNCBCGMEB = 30, HDABMJHKFIE = 105 });

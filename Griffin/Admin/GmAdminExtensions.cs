@@ -183,8 +183,8 @@ public static class GmAdminExtensions
             // Same path as every other reward (shop, mail, stages): resources, stamina (item 101, its own balance), plain items, weapon mods as
             // their own instances... and the client is told with the messages that path builds (A-150).
             // every weapon mod is its own row with its own affixes: do not create thousands of them at once
-            if (request.Count > 100 && tables.GetTable<WeaponModData>().Any(m => m.Id == request.ItemId))
-                return Results.BadRequest(new { error = "Los accesorios se entregan como unidades independientes: maximo 100 por operacion." });
+            if (request.Count > 100 && (tables.GetTable<WeaponModData>().Any(m => m.Id == request.ItemId) || Griffin.GameServer.Services.PluginInventory.IsPluginItem(tables, request.ItemId)))
+                return Results.BadRequest(new { error = "Los accesorios y chips del nucleo se entregan como unidades independientes: maximo 100 por operacion." });
             List<Google.Protobuf.IMessage> grantMessages = [];
             GrantResult granted = rewards.Grant(uid, request.ItemId, request.Count, grantMessages);
             if (!granted.Granted)
