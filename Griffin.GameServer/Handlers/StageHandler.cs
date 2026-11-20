@@ -340,7 +340,8 @@ namespace Griffin.GameServer.Handlers
                 gun.PublicTalentSkillItemsUid.Where(id => id != 0).Select(id => publicKeys.FirstOrDefault(k => k.Id == id)).Where(k => k.Id != 0)
                     .Select(k => (k.StcId, PublicTalentHandler.AffixesOf(accountState, account.Uid, k.Id))).ToList(),
                 PluginAffixesOf(account.Uid, gun.GunId), cooking.FoodRows(account.Uid, gun.GunId), supportRows,
-                ModSkillsOf(WeaponOf(gun)?.EquippedModIds ?? [], mods));
+                ModSkillsOf(WeaponOf(gun)?.EquippedModIds ?? [], mods),
+                WeaponOf(gun) is { } own ? WeaponModSkins.Of(accountState, account.Uid, own.Id) : null);
             // The squad of a 遗珍回收 battle (A-121; the client names each unit by its GunPresetData id, A-123) is the preset squad of the map, not the account's own characters: a character the account
             // does not own (or owns at another level) fights with the level and grade of its preset (GunPresetData col 6 / 16).
             IReadOnlyList<RougeService.TeamGun> rougeTeam = rougePlan == 0 ? [] : rouge.Team((uint)uid, rougePlan);

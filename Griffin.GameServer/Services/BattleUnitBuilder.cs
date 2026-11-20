@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -25,7 +25,7 @@ namespace Griffin.GameServer.Services
     /// without level, class, weapon or module scaling (the tutorial units are level 1).
     /// </summary>
     /// <summary>What the account adds to the stats of a character besides its own tables (A-73): the character, the control room level and the stages passed.</summary>
-    public sealed record StatInputs(GunEntity Gun, uint ControlRoomLevel, IReadOnlySet<uint> PassedStages, IReadOnlyList<(int Property, int Value)> ModAffixes, IReadOnlyList<(uint Stc, ulong Affixes)> PublicKeys, IReadOnlyList<uint> PluginAffixes, IReadOnlyList<uint> FoodRows, IReadOnlyList<uint> SupportRows, IReadOnlyList<(uint Skill, int[] Values)>? ModSkills = null);
+    public sealed record StatInputs(GunEntity Gun, uint ControlRoomLevel, IReadOnlySet<uint> PassedStages, IReadOnlyList<(int Property, int Value)> ModAffixes, IReadOnlyList<(uint Stc, ulong Affixes)> PublicKeys, IReadOnlyList<uint> PluginAffixes, IReadOnlyList<uint> FoodRows, IReadOnlyList<uint> SupportRows, IReadOnlyList<(uint Skill, int[] Values)>? ModSkills = null, IReadOnlyList<uint>? ModSkins = null);
 
     public static class BattleUnitBuilder
     {
@@ -113,7 +113,7 @@ namespace Griffin.GameServer.Services
         {
             byte[] gunUnit = Encode(output =>
             {
-                WriteBytes(output, 1, WithBattleData(tables, gunId, character, weapon).ToByteArray());
+                WriteBytes(output, 1, WithBattleData(tables, gunId, character, weapon, inputs?.ModSkins).ToByteArray());
                 output.WriteTag(2, WireFormat.WireType.Varint);
                 output.WriteUInt32(pointId);
                 WriteBytes(output, 3, System.Text.Encoding.UTF8.GetBytes(rotation));
@@ -169,7 +169,7 @@ namespace Griffin.GameServer.Services
         /// "skin" or "weapon data"): the skin (<c>GunData</c> column 17 when the character has none) and <c>details_.weapon</c> /
         /// <c>details_.weapon_lite</c> (the character's weapon; a level-1 weapon of <c>GunData</c> column 25 when it has none).
         /// </summary>
-        private static Gun WithBattleData(ITableService tables, uint gunId, Gun character, WeaponEntity? weapon)
+        private static Gun WithBattleData(ITableService tables, uint gunId, Gun character, WeaponEntity? weapon, IReadOnlyList<uint>? modSkins = null)
         {
             Gun unit = character.Clone();
             GunData? row = tables.GetTable<GunData>().FirstOrDefault(r => r.Id == gunId);
@@ -193,7 +193,8 @@ namespace Griffin.GameServer.Services
                     BreakTimes = (uint)(weapon?.BreakTimes ?? 1),
                     Timestamp = unit.Timestamp,
                 },
-                WeaponLite = weapon?.ToProtoWeapon() ?? new GunWeaponLite { StcId = weaponStcId, Level = 1, BreakTimes = 1 },
+                // the skins of the attachments travel with the weapon, as in the lobby: without them the battle showed the plain parts (A-230)
+                WeaponLite = weapon?.ToProtoWeapon(modSkins) ?? new GunWeaponLite { StcId = weaponStcId, Level = 1, BreakTimes = 1 },
             };
 #pragma warning restore CS0612, CS0618
             return unit;
