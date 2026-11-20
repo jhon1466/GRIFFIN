@@ -73,6 +73,19 @@ namespace Griffin.GameServer.Services
         public WeaponModEntity Create(uint accountUid, uint weaponModStcId)
         {
             ulong uid = GenerateUid();
+            // a wished effect (ModWish, weapon-part stages): the power of a mod is drawn from its uid, so take the next uid that draws that effect
+            uint wished = ModWish.CurrentEffect;
+            if (wished != 0)
+            {
+                WeaponModData? data = tableService.GetTable<WeaponModData>().FirstOrDefault(row => row.Id == weaponModStcId);
+                uint plan = data is null ? 0 : TableFields.U(data, 12);
+                IReadOnlyList<uint> powers = plan == 0 ? [] : tableService.GetTable<ModPowerBySuitPlanIdData>().Where(r => TableFields.U(r, 1) == plan)
+                    .Select(r => TableFields.List(r, 2)).FirstOrDefault() ?? [];
+                Dictionary<uint, uint> effects = tableService.GetTable<ModPowerData>().GroupBy(r => TableFields.U(r, 1)).ToDictionary(g => g.Key, g => TableFields.U(g.First(), 3));
+                if (powers.Any(p => effects.GetValueOrDefault(p) == wished))
+                    while (effects.GetValueOrDefault(powers[(int)(uid % (ulong)powers.Count)]) != wished)
+                        uid = GenerateUid();
+            }
             var mod = new WeaponModEntity
             {
                 WeaponModId = weaponModStcId,

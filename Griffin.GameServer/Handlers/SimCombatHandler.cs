@@ -8,6 +8,22 @@ namespace Griffin.GameServer.Handlers
 {
     public sealed class SimCombatHandler(ISimCombatWeekService week, IAccountStateService accountState) : SimCombatHandlerBase
     {
+        /// <summary>The wished effect of a weapon-part stage (ModWish, A-229): saved by stage and by simulation type, answered empty.</summary>
+        public override void HandleSimCombatWeaponModAssignedDrop(CS_SimCombatWeaponModAssignedDrop request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            ModWish.State state = accountState.Get<ModWish.State>(uid, ModWish.Key) ?? new ModWish.State();
+            if (request.StageId != 0)
+                state.Wishes[request.StageId] = request.HDABMJHKFIE;
+            if (request.OMCNCBCGMEB != 0)
+                state.Wishes[request.OMCNCBCGMEB] = request.HDABMJHKFIE;
+            accountState.Set(uid, ModWish.Key, state);
+            connection.Send(new SC_SimCombatWeaponModAssignedDrop());
+        }
+
         /// <summary>Retreat from the attempt of the weekly mode: the squads and the score are dropped, the ticket is not given back (A-131).</summary>
         public override void HandleSimCombatWeekRetreat(CS_SimCombatWeekRetreat request, Connection connection)
         {

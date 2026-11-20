@@ -805,6 +805,12 @@ if (scenario is "all" or "lobbyroom")
 // Each check pins a bug that was fixed after a player report; it must fail on the code before the fix.
 if (scenario is "all" or "regress")
 {
+    // R-28 (2026-11-20) the wished effect of the weapon-part stages (CS_SimCombatWeaponModAssignedDrop) is answered (it was not handled: the
+    // chosen perk was lost and the dropped mods came with random effects).
+    main.Send(new CS_SimCombatWeaponModAssignedDrop { StageId = 27101, OMCNCBCGMEB = 30, HDABMJHKFIE = 105 });
+    Check("regress R-28: choosing the wished effect of a weapon-part stage is answered",
+        main.ReadFor(TimeSpan.FromSeconds(2)).Any(p => p.Message is SC_SimCombatWeaponModAssignedDrop));
+
     // R-27 (2026-11-20) a character whose affection bar is full keeps its pending event (Love field 3) in every gun the client receives:
     // without it, after leaving the dormitory (or losing the together-battle) the bar showed full with no event button and the affection was stuck.
     {

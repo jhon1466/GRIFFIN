@@ -463,6 +463,10 @@ namespace Griffin.GameServer.Handlers
             if (stage.Coin > 0)
                 drops.Add((2, checked((int)stage.Coin)));
 
+            // weapon-part stages: the dropped mods carry the effect the player wished (A-229)
+            ModWish.CurrentEffect = ModWish.EffectOfSuit(tableService, ModWish.SuitFor(tableService, accountState.Get<ModWish.State>(uid, ModWish.Key), stage.Id));
+            try
+            {
             foreach ((uint item, int count) in drops)
             {
                 GrantResult granted = rewardService.Grant(uid, item, count, push);
@@ -475,6 +479,11 @@ namespace Griffin.GameServer.Handlers
                 }
 
                 response.OtherDrop.Add(new UserDropCache { ItemId = item, ItemNum = (uint)count });
+            }
+            }
+            finally
+            {
+                ModWish.CurrentEffect = 0;
             }
         }
     }
