@@ -1,9 +1,34 @@
+<div align="center">
+
+<img src="assets/logo.png" alt="Griffin" width="160" />
+
 # Griffin
+
+**Servidor privado de Girls' Frontline 2: Exilium con GM Tools, parche de idioma y soporte para Android**
+
+[![Release](https://img.shields.io/github/v/release/jhon1466/GRIFFIN?style=for-the-badge&color=b91c1c&label=release)](https://github.com/jhon1466/GRIFFIN/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jhon1466/GRIFFIN/total?style=for-the-badge&color=52525b)](https://github.com/jhon1466/GRIFFIN/releases)
+[![Last commit](https://img.shields.io/github/last-commit/jhon1466/GRIFFIN?style=for-the-badge&color=a3a3a3)](https://github.com/jhon1466/GRIFFIN/commits)
+
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
+![C#](https://img.shields.io/badge/C#-server-239120?style=for-the-badge)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-patcher-B7410E?style=for-the-badge&logo=rust&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge)
+![Android](https://img.shields.io/badge/Android-client-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+
+<a href="https://github.com/jhon1466/GRIFFIN-TOOLS/releases/latest"><img src="https://img.shields.io/badge/Descargar%20Griffin%20GM%20Tools-b91c1c?style=for-the-badge&logo=github&logoColor=white" alt="Descargar Griffin GM Tools" /></a>
 
 **Español** · [English](README.en.md) · [中文](README.zh.md) · [日本語](README.ja.md)
 
+</div>
+
+---
+
 Servidor privado de **Girls' Frontline 2: Exilium** (cliente CN de PC **4.0.5136** y de Android **4.0.5137**, tablas `1195672`), escrito en C# (.NET 8) con PostgreSQL.
 Inspirado en [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (ver [Créditos](#créditos)).
+
+---
 
 ## Proyectos relacionados
 
@@ -13,6 +38,8 @@ Inspirado en [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (ver [Cré
 | [**GRIFFIN-TOOLS**](https://github.com/jhon1466/GRIFFIN-TOOLS) | **Griffin GM Tools**: app de escritorio para administrar el servidor (dar dolls, armas, objetos, gestionar cuentas…). |
 
 > Proyecto sin ánimo de lucro, hecho con fines educativos y de preservación. No está afiliado a SunBorn ni a ningún editor del juego y **no incluye archivos del juego**: necesitas tu propio cliente instalado.
+
+---
 
 ## Forma recomendada: Griffin GM Tools
 
@@ -26,6 +53,8 @@ El launcher aplica además, solo mientras el juego está abierto, un parche del 
 
 Las secciones siguientes solo hacen falta si quieres compilar el servidor tú mismo.
 
+---
+
 ## Requisitos (compilar a mano)
 
 | Requisito | Detalle |
@@ -37,6 +66,8 @@ Las secciones siguientes solo hacen falta si quieres compilar el servidor tú mi
 | Griffin Patcher | `griffin_patcher.dll` + `griffin_launcher.exe`, descargables en [Releases](../../releases) (opcional: [Rust](https://rustup.rs) si quieres compilarlo tú, código en `GriffinPatcher/`) |
 
 Las tablas del cliente (`Resources/Tables`) se preparan solas la primera vez que arranca el servidor: las copia de la caché de tu cliente si es la misma versión (o de la ruta que pongas en la variable `GRIFFIN_CLIENT_TABLES_DIR`) y, si no, las descarga.
+
+---
 
 ## Cómo iniciar
 
@@ -59,6 +90,8 @@ Las tablas del cliente (`Resources/Tables`) se preparan solas la primera vez que
 
 Variables de entorno opcionales (`GRIFFIN_*`): `GRIFFIN_CLIENT_TABLES_DIR`, `GRIFFIN_STAMINA=full` (energía siempre llena, solo para pruebas), `GRIFFIN_FREE_STAGES=1` (misiones sin coste, solo para pruebas).
 
+---
+
 ## Android
 
 El servidor también admite el cliente CN de **Android 4.0.5137**, y a la vez que el de PC: detecta qué cliente le habla y responde a cada uno con su versión.
@@ -79,6 +112,8 @@ Para jugar desde el teléfono:
 5. La primera vez el juego descarga todos sus recursos (unos **44 GB**) del CDN oficial, así que necesita internet y espacio libre.
 
 Si sale una versión nueva del APK, los valores de Android se cambian sin recompilar con `GRIFFIN_ANDROID_CLIENT_VERSION`, `GRIFFIN_ANDROID_AB_RESOURCE_VERSION`, `GRIFFIN_ANDROID_BINARY_VERSION` y `GRIFFIN_ANDROID_GAME_CLIENT_VERSION`.
+
+---
 
 ## Estado y hoja de ruta
 
@@ -114,6 +149,8 @@ El servidor responde a unos 430 de los ~1020 mensajes de petición del cliente c
 - [ ] Zona oscura y otros modos de exploración en línea
 - [ ] Soporte para el servidor global y otras versiones del cliente (ya funcionan PC 4.0.5136 y Android 4.0.5137)
 
+---
+
 ## Estructura
 
 | Carpeta | Contenido |
@@ -131,6 +168,8 @@ El servidor responde a unos 430 de los ~1020 mensajes de petición del cliente c
 | `scripts/` | `start-server.ps1` |
 | `tools/` | generadores de código (ver más abajo) |
 
+---
+
 ## Generadores de código
 
 Parte del código del servidor se genera a partir de los `.proto` y de las tablas del cliente. **El código generado ya está en el repositorio, así que para usar el servidor no hace falta ejecutar nada de esto.** Solo se necesita (con [Python 3](https://www.python.org/downloads/)) si cambias los `.proto` o actualizas las tablas a otra versión del cliente:
@@ -143,6 +182,8 @@ Parte del código del servidor se genera a partir de los `.proto` y de las tabla
 
 Los dos últimos leen las tablas de `Griffin/bin/Release/net8.0/Resources/Tables` (se pueden indicar otra carpeta como argumento). `tools/tabledeep.py` es el lector de tablas que usan; también sirve para inspeccionar una tabla a mano.
 
+---
+
 ## Problemas frecuentes
 
 - **No compila / faltan paquetes**: ejecuta `dotnet restore Griffin.sln` y vuelve a compilar.
@@ -151,9 +192,13 @@ Los dos últimos leen las tablas de `Griffin/bin/Release/net8.0/Resources/Tables
 - **Android: «下载时发生未知错误» (error al descargar)**: el teléfono no tiene salida a internet para bajar los recursos del CDN oficial.
 - **El juego no conecta**: abre `griffin_launcher.exe` como administrador con el servidor ya encendido y comprueba que nada más usa los puertos 80, 443 y 7001.
 
+---
+
 ## Créditos
 
 - **[NTRSimulator](https://github.com/raphaeIl/NTRSimulator)** (raphaeIl): Griffin está inspirado en este proyecto y parte de su base.
+
+---
 
 ## Licencia
 

@@ -1,9 +1,34 @@
+<div align="center">
+
+<img src="assets/logo.png" alt="Griffin" width="160" />
+
 # Griffin
+
+**ドールズフロントライン2：エクシリウム プライベートサーバー（GM Tools、言語パッチ、Android 対応）**
+
+[![Release](https://img.shields.io/github/v/release/jhon1466/GRIFFIN?style=for-the-badge&color=b91c1c&label=release)](https://github.com/jhon1466/GRIFFIN/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jhon1466/GRIFFIN/total?style=for-the-badge&color=52525b)](https://github.com/jhon1466/GRIFFIN/releases)
+[![Last commit](https://img.shields.io/github/last-commit/jhon1466/GRIFFIN?style=for-the-badge&color=a3a3a3)](https://github.com/jhon1466/GRIFFIN/commits)
+
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
+![C#](https://img.shields.io/badge/C#-server-239120?style=for-the-badge)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-patcher-B7410E?style=for-the-badge&logo=rust&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge)
+![Android](https://img.shields.io/badge/Android-client-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+
+<a href="https://github.com/jhon1466/GRIFFIN-TOOLS/releases/latest"><img src="https://img.shields.io/badge/Griffin%20GM%20Tools%20をダウンロード-b91c1c?style=for-the-badge&logo=github&logoColor=white" alt="Griffin GM Tools をダウンロード" /></a>
 
 [Español](README.md) · [English](README.en.md) · [中文](README.zh.md) · **日本語**
 
+</div>
+
+---
+
 **ドールズフロントライン2：エクシリウム** のプライベートサーバーです（中国版 PC クライアント **4.0.5136** と Android **4.0.5137**、テーブル `1195672`）。C#（.NET 8）と PostgreSQL で作られています。
 [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) を参考にしています（[クレジット](#クレジット)を参照）。
+
+---
 
 ## 関連プロジェクト
 
@@ -13,6 +38,8 @@
 | [**GRIFFIN-TOOLS**](https://github.com/jhon1466/GRIFFIN-TOOLS) | **Griffin GM Tools**：サーバーのインストール・起動・管理を行うデスクトップアプリ（人形・武器・アイテムの付与、アカウント管理、イベント開催など）。 |
 
 > 非営利・教育および保存目的のプロジェクトです。SunBorn やゲームの運営会社とは無関係で、**ゲームのファイルは含まれていません**。ご自身でクライアントをインストールする必要があります。
+
+---
 
 ## おすすめの方法：Griffin GM Tools
 
@@ -26,6 +53,8 @@
 
 以下の内容は、サーバーを自分でビルドしたい場合にのみ必要です。
 
+---
+
 ## 必要なもの（手動ビルド）
 
 | 項目 | 詳細 |
@@ -37,6 +66,8 @@
 | Griffin Patcher | `griffin_patcher.dll` + `griffin_launcher.exe`。[Releases](../../releases) からダウンロード（任意：[Rust](https://rustup.rs) で自分でビルド可能、コードは `GriffinPatcher/`） |
 
 クライアントのテーブル（`Resources/Tables`）はサーバーの初回起動時に自動で準備されます。同じバージョンならクライアントのキャッシュ（または `GRIFFIN_CLIENT_TABLES_DIR` で指定したパス）からコピーし、そうでなければダウンロードします。
+
+---
 
 ## 起動方法
 
@@ -59,6 +90,8 @@
 
 任意の環境変数（`GRIFFIN_*`）：`GRIFFIN_CLIENT_TABLES_DIR`、`GRIFFIN_STAMINA=full`（スタミナ常に満タン、テスト用）、`GRIFFIN_FREE_STAGES=1`（ステージ無料、テスト用）。
 
+---
+
 ## Android
 
 サーバーは中国版 **Android 4.0.5137** クライアントにも、PC 版と同時に対応しています。接続してきたクライアントを判別し、それぞれのバージョンで応答します。
@@ -79,6 +112,8 @@
 5. 初回はゲームが公式 CDN から全リソース（約 **44 GB**）をダウンロードするため、インターネット接続と空き容量が必要です。
 
 APK の新バージョンが出た場合は、`GRIFFIN_ANDROID_CLIENT_VERSION`、`GRIFFIN_ANDROID_AB_RESOURCE_VERSION`、`GRIFFIN_ANDROID_BINARY_VERSION`、`GRIFFIN_ANDROID_GAME_CLIENT_VERSION` で再ビルドせずに Android の値を変更できます。
+
+---
 
 ## 現状とロードマップ
 
@@ -114,6 +149,8 @@ APK の新バージョンが出た場合は、`GRIFFIN_ANDROID_CLIENT_VERSION`�
 - [ ] ダークゾーンなどのオンライン探索モード
 - [ ] グローバルサーバーと他のクライアントバージョン（PC 4.0.5136 と Android 4.0.5137 は対応済み）
 
+---
+
 ## 構成
 
 | フォルダ | 内容 |
@@ -131,6 +168,8 @@ APK の新バージョンが出た場合は、`GRIFFIN_ANDROID_CLIENT_VERSION`�
 | `scripts/` | `start-server.ps1` |
 | `tools/` | コード生成ツール（下記参照） |
 
+---
+
 ## コード生成ツール
 
 サーバーのコードの一部は `.proto` とクライアントのテーブルから生成されます。**生成済みのコードはリポジトリに含まれているため、サーバーを使うだけならこれらを実行する必要はありません。** `.proto` を変更したり、テーブルを別のクライアントバージョンに更新したりする場合のみ必要です（[Python 3](https://www.python.org/downloads/) が必要）：
@@ -143,6 +182,8 @@ APK の新バージョンが出た場合は、`GRIFFIN_ANDROID_CLIENT_VERSION`�
 
 後の 2 つは `Griffin/bin/Release/net8.0/Resources/Tables` のテーブルを読み込みます（引数で別のフォルダを指定可能）。`tools/tabledeep.py` はそれらが使うテーブル読み込みツールで、テーブルを手動で確認するのにも使えます。
 
+---
+
 ## よくある問題
 
 - **ビルドできない／パッケージが足りない**：`dotnet restore Griffin.sln` を実行してから再ビルドしてください。
@@ -151,9 +192,13 @@ APK の新バージョンが出た場合は、`GRIFFIN_ANDROID_CLIENT_VERSION`�
 - **Android：「下载时发生未知错误」（ダウンロードエラー）**：スマホが公式 CDN からリソースをダウンロードするためのインターネット接続がありません。
 - **ゲームが接続できない**：サーバーを起動した状態で `griffin_launcher.exe` を管理者として実行し、ポート 80・443・7001 を他のプログラムが使っていないか確認してください。
 
+---
+
 ## クレジット
 
 - **[NTRSimulator](https://github.com/raphaeIl/NTRSimulator)**（raphaeIl）：Griffin はこのプロジェクトを参考にし、その一部を基にしています。
+
+---
 
 ## ライセンス
 

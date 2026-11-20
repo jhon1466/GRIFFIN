@@ -1,9 +1,34 @@
+<div align="center">
+
+<img src="assets/logo.png" alt="Griffin" width="160" />
+
 # Griffin
+
+**Girls' Frontline 2: Exilium private server with GM Tools, language patch and Android support**
+
+[![Release](https://img.shields.io/github/v/release/jhon1466/GRIFFIN?style=for-the-badge&color=b91c1c&label=release)](https://github.com/jhon1466/GRIFFIN/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jhon1466/GRIFFIN/total?style=for-the-badge&color=52525b)](https://github.com/jhon1466/GRIFFIN/releases)
+[![Last commit](https://img.shields.io/github/last-commit/jhon1466/GRIFFIN?style=for-the-badge&color=a3a3a3)](https://github.com/jhon1466/GRIFFIN/commits)
+
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
+![C#](https://img.shields.io/badge/C#-server-239120?style=for-the-badge)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-patcher-B7410E?style=for-the-badge&logo=rust&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge)
+![Android](https://img.shields.io/badge/Android-client-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+
+<a href="https://github.com/jhon1466/GRIFFIN-TOOLS/releases/latest"><img src="https://img.shields.io/badge/Download%20Griffin%20GM%20Tools-b91c1c?style=for-the-badge&logo=github&logoColor=white" alt="Download Griffin GM Tools" /></a>
 
 [Español](README.md) · **English** · [中文](README.zh.md) · [日本語](README.ja.md)
 
+</div>
+
+---
+
 Private server for **Girls' Frontline 2: Exilium** (CN PC client **4.0.5136** and Android **4.0.5137**, tables `1195672`), written in C# (.NET 8) with PostgreSQL.
 Inspired by [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (see [Credits](#credits)).
+
+---
 
 ## Related projects
 
@@ -13,6 +38,8 @@ Inspired by [NTRSimulator](https://github.com/raphaeIl/NTRSimulator) (see [Credi
 | [**GRIFFIN-TOOLS**](https://github.com/jhon1466/GRIFFIN-TOOLS) | **Griffin GM Tools**: desktop app that installs, runs and administers the server (grant dolls, weapons, items, manage accounts, open events…). |
 
 > Non-profit project made for educational and preservation purposes. It is not affiliated with SunBorn or any publisher of the game and **includes no game files**: you need your own installed client.
+
+---
 
 ## Recommended way: Griffin GM Tools
 
@@ -26,6 +53,8 @@ While the game is open, the launcher also applies a patch to the client code tha
 
 The following sections are only needed if you want to build the server yourself.
 
+---
+
 ## Requirements (manual build)
 
 | Requirement | Details |
@@ -37,6 +66,8 @@ The following sections are only needed if you want to build the server yourself.
 | Griffin Patcher | `griffin_patcher.dll` + `griffin_launcher.exe`, from [Releases](../../releases) (optional: [Rust](https://rustup.rs) to build it yourself, code in `GriffinPatcher/`) |
 
 The client tables (`Resources/Tables`) are prepared automatically the first time the server starts: they are copied from your client cache if it is the same version (or from the path in `GRIFFIN_CLIENT_TABLES_DIR`), otherwise they are downloaded.
+
+---
 
 ## How to start
 
@@ -59,6 +90,8 @@ The client tables (`Resources/Tables`) are prepared automatically the first time
 
 Optional environment variables (`GRIFFIN_*`): `GRIFFIN_CLIENT_TABLES_DIR`, `GRIFFIN_STAMINA=full` (always full stamina, testing only), `GRIFFIN_FREE_STAGES=1` (free stages, testing only).
 
+---
+
 ## Android
 
 The server also supports the CN **Android 4.0.5137** client, at the same time as the PC one: it detects which client is talking and answers each with its own version.
@@ -79,6 +112,8 @@ To play from a phone:
 5. The first time, the game downloads all its resources (about **44 GB**) from the official CDN, so it needs internet and free space.
 
 If a new APK version comes out, the Android values are changed without rebuilding with `GRIFFIN_ANDROID_CLIENT_VERSION`, `GRIFFIN_ANDROID_AB_RESOURCE_VERSION`, `GRIFFIN_ANDROID_BINARY_VERSION` and `GRIFFIN_ANDROID_GAME_CLIENT_VERSION`.
+
+---
 
 ## Status and roadmap
 
@@ -114,6 +149,8 @@ The server answers about 430 of the client's ~1020 request messages with its own
 - [ ] Dark zone and other online exploration modes
 - [ ] Support for the global server and other client versions (PC 4.0.5136 and Android 4.0.5137 already work)
 
+---
+
 ## Structure
 
 | Folder | Contents |
@@ -131,6 +168,8 @@ The server answers about 430 of the client's ~1020 request messages with its own
 | `scripts/` | `start-server.ps1` |
 | `tools/` | code generators (see below) |
 
+---
+
 ## Code generators
 
 Part of the server code is generated from the `.proto` files and the client tables. **The generated code is already in the repository, so nothing here has to be run to use the server.** It is only needed (with [Python 3](https://www.python.org/downloads/)) if you change the `.proto` files or update the tables to another client version:
@@ -143,6 +182,8 @@ Part of the server code is generated from the `.proto` files and the client tabl
 
 The last two read the tables from `Griffin/bin/Release/net8.0/Resources/Tables` (another folder can be given as an argument). `tools/tabledeep.py` is the table reader they use; it can also inspect a table by hand.
 
+---
+
 ## Common problems
 
 - **Does not build / missing packages**: run `dotnet restore Griffin.sln` and build again.
@@ -151,9 +192,13 @@ The last two read the tables from `Griffin/bin/Release/net8.0/Resources/Tables` 
 - **Android: "下载时发生未知错误" (download error)**: the phone has no internet access to download the resources from the official CDN.
 - **The game does not connect**: open `griffin_launcher.exe` as administrator with the server already running and check that nothing else uses ports 80, 443 and 7001.
 
+---
+
 ## Credits
 
 - **[NTRSimulator](https://github.com/raphaeIl/NTRSimulator)** (raphaeIl): Griffin is inspired by this project and builds on part of its base.
+
+---
 
 ## License
 

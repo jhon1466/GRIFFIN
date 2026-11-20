@@ -1,9 +1,34 @@
+<div align="center">
+
+<img src="assets/logo.png" alt="Griffin" width="160" />
+
 # Griffin
+
+**少女前线2：追放 私服，附带 GM Tools、语言补丁和安卓支持**
+
+[![Release](https://img.shields.io/github/v/release/jhon1466/GRIFFIN?style=for-the-badge&color=b91c1c&label=release)](https://github.com/jhon1466/GRIFFIN/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jhon1466/GRIFFIN/total?style=for-the-badge&color=52525b)](https://github.com/jhon1466/GRIFFIN/releases)
+[![Last commit](https://img.shields.io/github/last-commit/jhon1466/GRIFFIN?style=for-the-badge&color=a3a3a3)](https://github.com/jhon1466/GRIFFIN/commits)
+
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
+![C#](https://img.shields.io/badge/C#-server-239120?style=for-the-badge)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-patcher-B7410E?style=for-the-badge&logo=rust&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge)
+![Android](https://img.shields.io/badge/Android-client-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+
+<a href="https://github.com/jhon1466/GRIFFIN-TOOLS/releases/latest"><img src="https://img.shields.io/badge/下载%20Griffin%20GM%20Tools-b91c1c?style=for-the-badge&logo=github&logoColor=white" alt="下载 Griffin GM Tools" /></a>
 
 [Español](README.md) · [English](README.en.md) · **中文** · [日本語](README.ja.md)
 
+</div>
+
+---
+
 **少女前线2：追放** 私服（国服 PC 客户端 **4.0.5136** 与安卓 **4.0.5137**，表格版本 `1195672`），使用 C#（.NET 8）和 PostgreSQL 编写。
 灵感来自 [NTRSimulator](https://github.com/raphaeIl/NTRSimulator)（见[致谢](#致谢)）。
+
+---
 
 ## 相关项目
 
@@ -13,6 +38,8 @@
 | [**GRIFFIN-TOOLS**](https://github.com/jhon1466/GRIFFIN-TOOLS) | **Griffin GM Tools**：安装、运行并管理服务器的桌面应用（发放人形、武器、物品，管理账号，开启活动……）。 |
 
 > 本项目非营利，仅用于学习与保存目的。与散爆网络及任何发行商无关，且**不包含任何游戏文件**：需要你自己安装客户端。
+
+---
 
 ## 推荐方式：Griffin GM Tools
 
@@ -26,6 +53,8 @@
 
 以下内容仅在你想自己编译服务器时需要。
 
+---
+
 ## 环境要求（手动编译）
 
 | 要求 | 说明 |
@@ -37,6 +66,8 @@
 | Griffin Patcher | `griffin_patcher.dll` + `griffin_launcher.exe`，可在 [Releases](../../releases) 下载（可选：用 [Rust](https://rustup.rs) 自行编译，代码在 `GriffinPatcher/`） |
 
 客户端表格（`Resources/Tables`）会在服务器首次启动时自动准备：若版本相同则从客户端缓存复制（或从 `GRIFFIN_CLIENT_TABLES_DIR` 指定的路径），否则自动下载。
+
+---
 
 ## 启动方法
 
@@ -59,6 +90,8 @@
 
 可选环境变量（`GRIFFIN_*`）：`GRIFFIN_CLIENT_TABLES_DIR`、`GRIFFIN_STAMINA=full`（体力常满，仅测试用）、`GRIFFIN_FREE_STAGES=1`（关卡免费，仅测试用）。
 
+---
+
 ## 安卓
 
 服务器同时支持国服**安卓 4.0.5137** 客户端，并可与 PC 同时使用：它会识别连接的客户端并按各自版本响应。
@@ -79,6 +112,8 @@
 5. 首次进入游戏会从官方 CDN 下载全部资源（约 **44 GB**），需要联网和足够空间。
 
 若 APK 有新版本，可通过 `GRIFFIN_ANDROID_CLIENT_VERSION`、`GRIFFIN_ANDROID_AB_RESOURCE_VERSION`、`GRIFFIN_ANDROID_BINARY_VERSION` 和 `GRIFFIN_ANDROID_GAME_CLIENT_VERSION` 修改安卓相关值，无需重新编译。
+
+---
 
 ## 状态与路线图
 
@@ -114,6 +149,8 @@
 - [ ] 暗区及其他在线探索模式
 - [ ] 国际服及其他客户端版本（已支持 PC 4.0.5136 和安卓 4.0.5137）
 
+---
+
 ## 目录结构
 
 | 目录 | 内容 |
@@ -131,6 +168,8 @@
 | `scripts/` | `start-server.ps1` |
 | `tools/` | 代码生成器（见下文） |
 
+---
+
 ## 代码生成器
 
 部分服务器代码由 `.proto` 和客户端表格生成。**生成的代码已在仓库中，使用服务器无需运行这些脚本。** 只有修改 `.proto` 或将表格更新到其他客户端版本时才需要（需 [Python 3](https://www.python.org/downloads/)）：
@@ -143,6 +182,8 @@
 
 后两个脚本读取 `Griffin/bin/Release/net8.0/Resources/Tables` 中的表格（可通过参数指定其他目录）。`tools/tabledeep.py` 是它们使用的表格读取器，也可用来手动查看表格。
 
+---
+
 ## 常见问题
 
 - **无法编译 / 缺少包**：运行 `dotnet restore Griffin.sln` 后重新编译。
@@ -151,9 +192,13 @@
 - **安卓：“下载时发生未知错误”**：手机无法联网从官方 CDN 下载资源。
 - **游戏无法连接**：在服务器已启动的情况下以管理员身份运行 `griffin_launcher.exe`，并确认 80、443、7001 端口没有被其他程序占用。
 
+---
+
 ## 致谢
 
 - **[NTRSimulator](https://github.com/raphaeIl/NTRSimulator)**（raphaeIl）：Griffin 受此项目启发，并基于其部分代码。
+
+---
 
 ## 许可证
 
