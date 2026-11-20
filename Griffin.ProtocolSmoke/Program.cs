@@ -816,7 +816,12 @@ if (scenario is "all" or "regress")
         if (fresh is not null)
         {
             main.Send(new CS_LoveSendGift { GunId = fresh.Id, MLDDFFDLNHD = { [300040u] = 20u } });
-            var filled = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LoveSendGift>().FirstOrDefault();
+            var fillPackets = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+            var filled = fillPackets.OfType<SC_LoveSendGift>().FirstOrDefault();
+            // the gift answer alone leaves the panel on the gift list (the client refreshes before storing the event): a level update must follow it
+            Check("regress R-27: filling the bar with gifts is followed by the level update that switches the panel to the event",
+                fillPackets.SkipWhile(m => m is not SC_LoveSendGift).OfType<SC_LoveLevelUpdate>().Any(u => u.GunId == fresh.Id && u.FDKIHAPHHPD == filled?.FDKIHAPHHPD && u.FDKIHAPHHPD != 0),
+                string.Join(',', fillPackets.Select(m => m.GetType().Name)));
             main.Send(new CS_Guns());
             var reloaded = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_Guns>().FirstOrDefault()?.Guns.FirstOrDefault(g => g.Id == fresh.Id);
             Check("regress R-27: a full affection bar keeps its pending event when the guns are reloaded",

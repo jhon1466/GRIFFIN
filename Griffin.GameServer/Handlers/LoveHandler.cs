@@ -136,6 +136,11 @@ namespace Griffin.GameServer.Handlers
                 // the 64-bit field is the experience the affection screen shows ("1792136112/840" appeared when it carried the clock time)
                 JKGBIKEDACK = gun.LoveExp,
             });
+            // The client handler of SC_LoveSendGift refreshes the panel (message 41600) BEFORE it stores the pending event, so the panel stayed on
+            // the gift list with a full bar. SC_LoveLevelUpdate stores (level, pending) first and then refreshes: sent last it switches the panel to
+            // the event button as soon as the bar fills, like the cooking already does (client GCOMAELGEBE.EMKCGGPCBLO / EHBOAKKCOAK, A-228).
+            if (love.Pending(gun) is { } filled)
+                bundle.Add(new SC_LoveLevelUpdate { GunId = gun.GunId, JLHFICPMAEI = gun.LoveLevel, FDKIHAPHHPD = filled.Suffix });
             connection.SendAutoEncrypted(bundle.ToArray());
         }
 
