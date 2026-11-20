@@ -467,8 +467,9 @@ namespace Griffin.GameServer.Handlers
             ModWish.CurrentEffect = ModWish.EffectOfSuit(tableService, ModWish.SuitFor(tableService, accountState.Get<ModWish.State>(uid, ModWish.Key), stage.Id));
             try
             {
-            foreach ((uint item, int count) in drops)
+            foreach ((uint rolled, int count) in drops)
             {
+                uint item = ModWish.Substitute(tableService, rolled, ModWish.CurrentEffect);
                 GrantResult granted = rewardService.Grant(uid, item, count, push);
                 if (granted.ModIds is { Count: > 0 })
                 {

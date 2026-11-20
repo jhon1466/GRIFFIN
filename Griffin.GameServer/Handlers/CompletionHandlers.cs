@@ -199,12 +199,17 @@ namespace Griffin.GameServer.Handlers
                 }
             }
 
+            // weapon-part stages with a wished effect: their parts are effect carriers with that effect (A-229)
+            uint wished = ModWish.EffectOfSuit(tableService, ModWish.SuitFor(tableService, accountState.Get<ModWish.State>(uid, ModWish.Key), stage.Id));
             Dictionary<uint, int> totals = [];
             for (uint i = 0; i < request.RaidTimes; i++)
             {
                 foreach (uint package in stage.NormalDropList)
-                    foreach ((uint item, int count) in itemUse.RollPackage(package))
+                    foreach ((uint rolled, int count) in itemUse.RollPackage(package))
+                    {
+                        uint item = ModWish.Substitute(tableService, rolled, wished);
                         totals[item] = totals.GetValueOrDefault(item) + count;
+                    }
                 // a standardized-sync stage pays the grades of the best value of the account on every sweep (A-149)
                 uint bestSync = accountState.Get<Dictionary<string, Dictionary<string, uint>>>(uid, "simcombat.resource") is { } sync
                     && sync.TryGetValue(TableFields.U(stage, 20).ToString(), out Dictionary<string, uint>? syncStages)
@@ -221,6 +226,9 @@ namespace Griffin.GameServer.Handlers
 
             SC_Raid reply = new() { StcStageId = request.StcStageId, RaidTimes = request.RaidTimes, Drops = new StageTotalDrop { Drop = new StageDrop() } };
             StageDrop.Types.DropCache cache = new() { DropType = StageDrop.Types.DropType.DropPackage };
+            ModWish.CurrentEffect = wished;
+            try
+            {
             foreach ((uint item, int count) in totals)
             {
                 GrantResult granted = rewardService.Grant(uid, item, count, messages);
@@ -233,6 +241,11 @@ namespace Griffin.GameServer.Handlers
                 }
 
                 cache.Cache.Add(new UserDropCache { ItemId = item, ItemNum = (uint)count });
+            }
+            }
+            finally
+            {
+                ModWish.CurrentEffect = 0;
             }
 
             reply.Drops.Drop.DropCache.Add(cache);
