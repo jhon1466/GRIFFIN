@@ -4155,7 +4155,10 @@ sealed class GameClient : IDisposable
         stream.Write(raw, 0, raw.Length);
     }
 
-    /// <summary>Reads framed messages until nothing arrives for <paramref name="quiet"/>.</summary>
+    /// <summary>
+    /// Reads framed messages: waits up to <paramref name="quiet"/> for the first one, then until nothing more arrives for 500 ms (the server sends
+    /// a reply and its pushes together; waiting the whole <paramref name="quiet"/> after every answer made a run take many minutes).
+    /// </summary>
     public List<BasePacket> ReadFor(TimeSpan quiet)
     {
         var packets = new List<BasePacket>();
@@ -4167,6 +4170,7 @@ sealed class GameClient : IDisposable
                 var msg = PacketFramer.Read(stream);
                 if (msg is null) break;
                 packets.AddRange(msg.Packets);
+                stream.ReadTimeout = Math.Min(500, (int)quiet.TotalMilliseconds);
             }
             catch (IOException) { break; } // read timeout
         }
