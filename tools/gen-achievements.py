@@ -9,7 +9,7 @@ the supported kinds as data:
 
   * character level ("人形升至N级" ladders of the talent trees; "<name>升级至N解锁" of the dormitory poses/personal stories)
   * commander level ("指挥官达到N级", "指挥官等级N", "等级达到N级")
-  * stage clear ("完成剧情战役普通1-8", "完成剧情战役困难2-5" -> stage HD-2-5, "通关剧情战役1-8", "完成活动剧情普通N-N"...)
+  * stage clear ("完成剧情战役普通1-8", "完成剧情战役困难2-5" -> stage DF-2-5 (or HD-2-5), "通关剧情战役1-8", "完成活动剧情普通N-N"...)
     resolved to every StageData row with that name (any of them cleared completes it)
 
 Everything else (gun levels, logins, purchases...) has no server-side progress and is not generated.
@@ -97,8 +97,10 @@ for d in rows('AchievementDetailData'):
     if m:
         hard = m.group(1) == '困难'
         code = m.group(2)
-        names = ['HD-' + code] if hard and re.fullmatch(r'\d+-\d+', code) else [code]
-        ids = sorted({s for n in names for s in by_name.get(n, [])})
+        # the hard story stages are DF-X-Y (chapters 9100X, StoryData -> 10X6Y); HD-X-Y are the stages of the difficulty chapters
+        names = ['DF-' + code, 'HD-' + code] if hard and re.fullmatch(r'\d+-\d+', code) else [code]
+        # DF-X-Y also names hard stages of event stories (3xxxx): the story ones are 1XX6Y
+        ids = sorted({s for n in names for s in by_name.get(n, []) if n == code or not n.startswith('DF-') or s < 20000})
         if ids:
             stages[aid] = ids
 
