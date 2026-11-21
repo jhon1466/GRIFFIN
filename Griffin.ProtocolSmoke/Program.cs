@@ -805,6 +805,22 @@ if (scenario is "all" or "lobbyroom")
 // Each check pins a bug that was fixed after a player report; it must fail on the code before the fix.
 if (scenario is "all" or "regress")
 {
+    // R-30 (2026-11-20, players) a costume part bought in the store (ItemData type 14) said "sold out" but stayed locked: it was not put in
+    // collection index 14, which is how the client knows a part is owned.
+    if (Environment.GetEnvironmentVariable("GRIFFIN_GM_TOKEN") is { Length: > 0 } r30Token)
+    {
+        httpClient.DefaultRequestHeaders.Remove("X-GM-Token");
+        httpClient.DefaultRequestHeaders.Add("X-GM-Token", r30Token);
+        string r30Acc = await httpClient.GetStringAsync($"{http}/api/gm/accounts?q={Uri.EscapeDataString(email)}");
+        var r30Uid = System.Text.RegularExpressions.Regex.Match(r30Acc, @"""uid""\s*:\s*(\d+)");
+        if (r30Uid.Success)
+            await httpClient.PostAsync($"{http}/api/gm/accounts/{r30Uid.Groups[1].Value}/items",
+                new StringContent("{\"itemId\":52030102,\"count\":1}", System.Text.Encoding.UTF8, "application/json"));
+        var r30Push = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).ToList();
+        Check("regress R-30: a costume part item is registered in collection index 14",
+            r30Push.OfType<SC_AddIndex>().Any(i => i.Type == 14 && i.Id == 52030102), string.Join(',', r30Push.Select(m => m.GetType().Name)));
+    }
+
     // R-29 (2026-11-20) a core chip item (98xxxx) granted by GM Tools becomes a real plugin of the account (it was stored as a plain item and no
     // chip appeared); it can be locked, and dismantled once unlocked (both were refused).
     if (Environment.GetEnvironmentVariable("GRIFFIN_GM_TOKEN") is { Length: > 0 } r29Token)

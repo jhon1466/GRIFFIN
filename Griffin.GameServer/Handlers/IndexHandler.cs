@@ -735,6 +735,12 @@ namespace Griffin.GameServer.Handlers
                 scIndex.Indices[61].Details[weaponModSkin.WeaponModSkinId] = true;
             }
 
+            // a costume part bought before the parts were registered sits in the bag as an item of type 14: the client only lets the part be worn
+            // when it is in collection index 14 (A-232)
+            foreach (ItemEntity item in inventoryService.GetPlayerInventory<ItemEntity>(connection.Account.Uid))
+                if (item.Type == RewardService.CostumePartItemType && item.Count > 0)
+                    scIndex.Indices[14].Details.TryAdd(item.ItemId, false);
+
             foreach (ItemEntity item in inventoryService.GetPlayerInventory<ItemEntity>(connection.Account.Uid))
             {
                 if (item.Type != 162)

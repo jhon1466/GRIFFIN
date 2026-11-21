@@ -40,7 +40,8 @@ namespace Griffin.GameServer.Services
         IItemService itemService,
         IStaminaService staminaService,
         IWeaponModService weaponModService,
-        IAccountStateService accountState) : IRewardService
+        IAccountStateService accountState,
+        ICostumePartService costumePartService) : IRewardService
     {
         private const uint StaminaItemId = 101;
 
@@ -150,6 +151,15 @@ namespace Griffin.GameServer.Services
             if (CostumeOfItem(tableService, data) is { } costumeId)
                 return Grant(accountUid, costumeId, 1, messages) with { Relate = costumeId };
 
+            // a costume part (ItemData type 14, PartsListData column 6) is owned through collection index 14: register it and tell the client,
+            // otherwise the store showed it as sold out but the part stayed locked (A-232)
+            if (data.Type == CostumePartItemType)
+            {
+                if (!costumePartService.GetPlayerCostumeParts(accountUid).Any(p => p.CostumePartId == itemId))
+                    costumePartService.AddCostumePart(accountUid, new CostumePartEntity { CostumePartId = itemId });
+                messages.Add(new SC_AddIndex { Type = CostumePartItemType, Id = itemId, Ts = 0 });
+            }
+
             if (data.Type == ResourceService.ResourceItemType)
                 messages.Add(resourceService.Add(accountUid, new Dictionary<uint, int> { [itemId] = count }));
             else
@@ -185,6 +195,8 @@ namespace Griffin.GameServer.Services
         }
 
         public const int CostumeItemType = 13;
+
+        public const int CostumePartItemType = 14;
 
         private GrantResult GrantGun(uint uid, AccountEntity account, uint gunId, List<IMessage> messages)
         {
