@@ -18,8 +18,21 @@
 ![Android](https://img.shields.io/badge/Android-client-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 
 <a href="https://github.com/jhon1466/GRIFFIN-TOOLS/releases/latest"><img src="https://img.shields.io/badge/Griffin%20GM%20Tools%20をダウンロード-b91c1c?style=for-the-badge&logo=github&logoColor=white" alt="Griffin GM Tools をダウンロード" /></a>
+<a href="https://discord.gg/sfPVdxpv98"><img src="https://img.shields.io/badge/Discord%20%E3%81%AB%E5%8F%82%E5%8A%A0-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" /></a>
 
 [Español](README.md) · [English](README.en.md) · [中文](README.zh.md) · **日本語**
+
+</div>
+
+---
+
+## 💬 コミュニティ
+
+<div align="center">
+
+<a href="https://discord.gg/sfPVdxpv98"><img src="https://img.shields.io/badge/Discord-Discord%20%E3%81%AB%E5%8F%82%E5%8A%A0-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=404EED" alt="Discord" height="40" /></a>
+
+質問・不具合・アイデアがあれば **Discord サーバー** へどうぞ。最新情報の告知、不具合の報告、導入のサポートを行っています。
 
 </div>
 

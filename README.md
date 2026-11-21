@@ -18,8 +18,21 @@
 ![Android](https://img.shields.io/badge/Android-client-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 
 <a href="https://github.com/jhon1466/GRIFFIN-TOOLS/releases/latest"><img src="https://img.shields.io/badge/Descargar%20Griffin%20GM%20Tools-b91c1c?style=for-the-badge&logo=github&logoColor=white" alt="Descargar Griffin GM Tools" /></a>
+<a href="https://discord.gg/sfPVdxpv98"><img src="https://img.shields.io/badge/%C3%9Anete%20a%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" /></a>
 
 **Español** · [English](README.en.md) · [中文](README.zh.md) · [日本語](README.ja.md)
+
+</div>
+
+---
+
+## 💬 Comunidad
+
+<div align="center">
+
+<a href="https://discord.gg/sfPVdxpv98"><img src="https://img.shields.io/badge/Discord-%C3%9Anete%20a%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=404EED" alt="Discord" height="40" /></a>
+
+¿Dudas, errores o ideas? Únete al **servidor de Discord**: ahí se anuncian las novedades, se reportan fallos y se ayuda con la instalación.
 
 </div>
 
