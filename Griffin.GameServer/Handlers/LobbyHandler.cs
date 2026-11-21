@@ -19,7 +19,7 @@ namespace Griffin.GameServer.Handlers
         {
             uint nowUnix = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-            connection.SendAutoEncrypted(new SC_LobbyGetEventInfo
+            SC_LobbyGetEventInfo info = new SC_LobbyGetEventInfo
             {
                 ELPBKBNCKBP =
                 {
@@ -88,8 +88,19 @@ namespace Griffin.GameServer.Handlers
                 DAHKBJPOFCP = { 43016, 43015, 38003, 43008, 44001, 44002, 44003, 43001 },
                 DBNONLHDHLM = { },
                 HINGCIJFHAC = { 3, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 },
-            });
+            };
+            // the events the account finished (anecdotes...) are finished for good: listed as done and no longer offered as active; they
+            // used to come back as new after logging in again because only the fixed captured list was sent (A-233)
+            if (connection.Account is not null)
+                foreach (uint finished in accountState.Get<HashSet<uint>>(connection.Account.Uid, FinishedEventsKey) ?? [])
+                {
+                    info.ELPBKBNCKBP[finished] = true;
+                    info.MAPKAGCPLIM.Remove(finished);
+                }
+            connection.SendAutoEncrypted(info);
         }
+
+        private const string FinishedEventsKey = "lobby.events.finished";
 
         private const string PartsKey = "lobby.parts";
         private const string BedroomKey = "lobby.bedroom";
@@ -2430,6 +2441,9 @@ namespace Griffin.GameServer.Handlers
             uint uid = connection.Account.Uid;
             IMessage? row = tableService.GetTable<LobbyEventData>().FirstOrDefault(r => TableFields.U(r, 1) == request.EventId);
             List<IMessage> messages = [];
+            HashSet<uint> finished = accountState.Get<HashSet<uint>>(uid, FinishedEventsKey) ?? [];
+            if (finished.Add(request.EventId))
+                accountState.Set(uid, FinishedEventsKey, finished);
             if (row is not null)
             {
                 Dictionary<string, List<uint>> done = accountState.Get<Dictionary<string, List<uint>>>(uid, "lobby.events.done") ?? [];

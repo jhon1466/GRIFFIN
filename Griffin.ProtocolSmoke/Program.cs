@@ -805,6 +805,23 @@ if (scenario is "all" or "lobbyroom")
 // Each check pins a bug that was fixed after a player report; it must fail on the code before the fix.
 if (scenario is "all" or "regress")
 {
+    // R-31 (2026-11-21, players) a finished lobby event (anecdote) came back as not finished after logging in again: the event list was a
+    // fixed capture that never included the account's finished events.
+    main.Send(new CS_LobbyFinishEvent { EventId = 2000003 });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_LobbyGetEventInfo());
+    var r31 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_LobbyGetEventInfo>().FirstOrDefault();
+    Check("regress R-31: a finished lobby event stays finished in the event list",
+        r31 is not null && r31.ELPBKBNCKBP.ContainsKey(2000003) && !r31.MAPKAGCPLIM.ContainsKey(2000003));
+
+    // R-32 (2026-11-21, players) the Hunter Assessment froze on the result screen: the chapter reward the client asks after the last stage
+    // of a chapter had no handler, so nothing answered.
+    main.Send(new CS_SimCombatTutorialChapterGetRewardV2 { ChapterId = 101 });
+    Check("regress R-32: the Hunter Assessment chapter reward request is answered", main.ReadFor(TimeSpan.FromSeconds(2)).Count > 0);
+    main.Send(new CS_SimCombatTutorialInfoV2());
+    var r32 = main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_SimCombatTutorialInfoV2>().FirstOrDefault();
+    Check("regress R-32: the Hunter Assessment info names the current section", r32?.Tutorial is { NPMHOABEFGB: > 0 });
+
     // R-30 (2026-11-20, players) a costume part bought in the store (ItemData type 14) said "sold out" but stayed locked: it was not put in
     // collection index 14, which is how the client knows a part is owned.
     if (Environment.GetEnvironmentVariable("GRIFFIN_GM_TOKEN") is { Length: > 0 } r30Token)
