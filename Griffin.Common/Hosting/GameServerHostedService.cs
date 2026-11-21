@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -17,7 +17,7 @@ namespace Griffin.Common.Hosting
     {
         private readonly ILogger<GameServerHostedService> _logger = loggerFactory.CreateLogger<GameServerHostedService>();
         private readonly IPAddress _address = IPAddress.Parse(
-            ReadEnvironmentOverride("GRIFFIN_GAME_SERVER_HOST") ?? config.GetValue("GameServer:Host", "127.0.0.1") ?? "127.0.0.1");
+            ReadEnvironmentOverride("GRIFFIN_BIND_HOST") ?? config.GetValue("GameServer:BindHost", "0.0.0.0") ?? "0.0.0.0");
         private readonly int _port = int.TryParse(ReadEnvironmentOverride("GRIFFIN_GAME_SERVER_PORT"), out int envPort)
             ? envPort
             : config.GetValue("GameServer:Port", 7001);
