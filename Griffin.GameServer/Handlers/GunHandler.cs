@@ -1,4 +1,4 @@
-﻿using Griffin.Common.Networking;
+using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
 using Griffin.Common.Table;
@@ -419,11 +419,7 @@ namespace Griffin.GameServer.Handlers
                     connection.Refuse(MsgId.MsgCsGunUpgrade, HNINDAOJCKP.ItemNotEnough);
                     return;
                 }
-                using (RewardDrops drops = RewardDrops.Begin())
-                {
-                    rewardService.Grant(uid, request.GunId, 1, spent);
-                    drops.Finish(spent);
-                }
+                rewardService.Grant(uid, request.GunId, 1, spent);
                 spent.Add(new SC_GunUpgrade { GunId = request.GunId, Grade = 0 });
                 connection.SendAutoEncrypted(spent.ToArray());
                 return;
@@ -1341,9 +1337,9 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
+            uint[] peak = TalentKeySlots.Normalize(gun);
             uint[] items = new uint[Math.Max(3, gun.PrivateTalentSkillItems.Length)];
             gun.PrivateTalentSkillItems.CopyTo(items, 0);
-            uint[] peak = TalentKeySlots.Normalize(gun);
             if (TalentKeySlots.IsPeakKey(request.PrivateTalentSkillItemId))
             {
                 // the peak key (峰位键, e.g. 921055) goes to the middle slot of the wheel, not to the side ones (A-61)
@@ -1358,6 +1354,10 @@ namespace Griffin.GameServer.Handlers
             else
             {
                 bool unload = request.PrivateTalentSkillItemId != 0 && items[request.Slot] == request.PrivateTalentSkillItemId;
+                if (request.PrivateTalentSkillItemId != 0)
+                    for (int i = 0; i < items.Length; i++)
+                        if (items[i] == request.PrivateTalentSkillItemId)
+                            items[i] = 0;
                 items[request.Slot] = unload ? 0 : request.PrivateTalentSkillItemId;
                 gun.PrivateTalentSkillItems = items;
             }

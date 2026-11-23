@@ -1,4 +1,4 @@
-﻿using Griffin.Common.Table;
+using Griffin.Common.Table;
 using Griffin.Database.Entities;
 
 namespace Griffin.GameServer.Services
@@ -38,17 +38,25 @@ namespace Griffin.GameServer.Services
                 peak[i] = gun.GunTalentConsume.GetValueOrDefault(PeakBase + (uint)i);
 
             bool changed = false;
+            HashSet<uint> seen = [];
             for (int i = 0; i < gun.PrivateTalentSkillItems.Length; i++)
             {
                 uint item = gun.PrivateTalentSkillItems[i];
-                if (item == 0 || !IsPeakKey(item))
+                if (item == 0)
                     continue;
 
-                gun.PrivateTalentSkillItems[i] = 0;
-                int free = Array.IndexOf(peak, 0u);
-                if (free >= 0 && !peak.Contains(item))
-                    peak[free] = item;
-                changed = true;
+                if (IsPeakKey(item))
+                {
+                    gun.PrivateTalentSkillItems[i] = 0;
+                    int free = Array.IndexOf(peak, 0u);
+                    if (free >= 0 && !peak.Contains(item))
+                        peak[free] = item;
+                    changed = true;
+                }
+                else if (!seen.Add(item))
+                {
+                    gun.PrivateTalentSkillItems[i] = 0;
+                }
             }
 
             if (changed)

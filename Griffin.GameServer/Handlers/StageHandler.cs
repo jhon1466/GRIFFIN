@@ -1,4 +1,4 @@
-﻿using Griffin.Common.Networking;
+using Griffin.Common.Networking;
 using Griffin.Common.Protocol;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
@@ -254,7 +254,7 @@ namespace Griffin.GameServer.Handlers
                 // the dolls fielded in a battle of the run are remembered for the next one (A-141)
                 accountState.Set(connection.Account.Uid, $"rouge.lineup.{pending.RougePlan}", new SavedLineup(request.Guns.OrderBy(p => p.Key).Select(p => p.Value).ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
-                pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan);
+                pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan, request.KOJIOLCLCPO);
             if (pending.BattleId == 0 || pending.RandomSeed == 0)
             {
                 // Migrate an in-flight battle created by an older server build without
@@ -285,7 +285,8 @@ namespace Griffin.GameServer.Handlers
 
         private StageBattle CreateBattle(StageData stage, bool isAuto,
             Google.Protobuf.Collections.MapField<uint, uint>? requestedGuns = null,
-            Connection? connection = null, long battleId = 0, long randomSeed = 0, uint togetherGun = 0, uint rougePlan = 0)
+            Connection? connection = null, long battleId = 0, long randomSeed = 0, uint togetherGun = 0, uint rougePlan = 0,
+            Google.Protobuf.Collections.MapField<uint, uint>? requestedDevices = null)
         {
             uint battleLevel = Math.Max(1u, stage.RecommandedPlayerlevel);
             var battle = new StageBattle
@@ -430,6 +431,14 @@ namespace Griffin.GameServer.Handlers
             // Keep it empty to avoid duplicating the enemies the client creates locally.
             battle.Camps.Add(BattleUnitBuilder.Camp(BattleUnitBuilder.PlayerSide, playerUnits));
             battle.Camps.Add(BattleUnitBuilder.Camp(BattleUnitBuilder.EnemySide, []));
+            if (requestedDevices is { Count: > 0 })
+            {
+                List<byte[]> deviceUnits = requestedDevices
+                    .OrderBy(pair => pair.Key)
+                    .Select(pair => BattleUnitBuilder.DeviceUnit(tableService, pair.Key, pair.Value, stage.RecommandedPlayerlevel))
+                    .ToList();
+                battle.Camps.Add(BattleUnitBuilder.Camp((FMMHAOHCKFN)4, deviceUnits));
+            }
 
             Log.Information("Stage {StageId} battle composed from table config {ConfigId}: {PlayerUnits} player units.",
                 stage.Id, config.StageId, playerUnits.Count);

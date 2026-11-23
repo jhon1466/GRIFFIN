@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -164,6 +164,59 @@ namespace Griffin.GameServer.Services
         }
 
         /// <summary>
+        /// The oneof wrapper (<c>Device</c> case, field 4) of a deployable support unit (<c>CS_StageInto.KOJIOLCLCPO</c>), placed in camp 4
+        /// like the client's own builder (<c>PNHOPEAEIIH</c>): 1 = id, 2 = pointId, 3 = rotation, 4 = property map, 5 = skill message (6 = skills),
+        /// 6 = stcId, 7 = level.
+        /// </summary>
+        public static byte[] DeviceUnit(ITableService tables, uint pointId, uint deviceId, uint stageLevel)
+        {
+            RobotEnemyData? robot = tables.GetTable<RobotEnemyData>().FirstOrDefault(r => r.Id == deviceId);
+            uint addLevel = robot is null ? 0 : TableFields.U(robot, 15);
+            uint level = Math.Max(1u, stageLevel + addLevel);
+            uint propRowId = tables.GetTable<RobotLevelData>().FirstOrDefault(r => TableFields.U(r, 1) == level) is { } lvl
+                ? TableFields.U(lvl, 2)
+                : 0;
+            if (propRowId == 0 && robot is not null)
+                propRowId = TableFields.U(robot, 7);
+
+            IReadOnlyDictionary<int, int> stats = propRowId == 0 ? new Dictionary<int, int>() : RowByDevelopProperty(tables, propRowId);
+
+            List<uint> skills = [];
+            if (robot is not null)
+            {
+                foreach (int col in new[] { 19, 20, 21, 22, 23 })
+                    if (TableFields.U(robot, col) is var s and not 0 && !skills.Contains(s))
+                        skills.Add(s);
+                foreach (string part in TableFields.S(robot, 24).Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    if (uint.TryParse(part, out uint s) && s != 0 && !skills.Contains(s))
+                        skills.Add(s);
+            }
+
+            byte[] unit = Encode(output =>
+            {
+                output.WriteTag(1, WireFormat.WireType.Varint);
+                output.WriteUInt32(deviceId);
+                output.WriteTag(2, WireFormat.WireType.Varint);
+                output.WriteUInt32(pointId);
+                WriteBytes(output, 3, System.Text.Encoding.UTF8.GetBytes("(0.0,0.0,0.0)"));
+                WriteBytes(output, 4, PropertyMap(stats));
+                WriteBytes(output, 5, Encode(skillOut =>
+                {
+                    foreach (uint skill in skills)
+                    {
+                        skillOut.WriteTag(6, WireFormat.WireType.Varint);
+                        skillOut.WriteUInt32(skill);
+                    }
+                }));
+                output.WriteTag(6, WireFormat.WireType.Varint);
+                output.WriteUInt32(deviceId);
+                output.WriteTag(7, WireFormat.WireType.Varint);
+                output.WriteUInt32(level);
+            });
+            return Encode(output => WriteBytes(output, 4, unit));
+        }
+
+        /// <summary>
         /// The client's battle unit factory dereferences parts of the character that the lobby list never needs (the 12:03 client log: a
         /// NullReferenceException in the unit factory right after the camp arrived; the client's own builder refuses a unit without
         /// "skin" or "weapon data"): the skin (<c>GunData</c> column 17 when the character has none) and <c>details_.weapon</c> /
@@ -282,7 +335,7 @@ namespace Griffin.GameServer.Services
                     extraRows.Add(vowStats);
 
                 // talent keys in the private slots: TalentKeyData column 5 = a PropertyData row
-                foreach (uint key in inputs.Gun.PrivateTalentSkillItems.Where(item => item != 0))
+                foreach (uint key in inputs.Gun.PrivateTalentSkillItems.Where(item => item != 0).Distinct())
                 {
                     TalentKeyData? keyData = tables.GetTable<TalentKeyData>().FirstOrDefault(row => TableFields.U(row, 1) == key);
                     if (keyData is not null && Row(TableFields.U(keyData, 5)) is { } keyStats)
@@ -596,7 +649,7 @@ namespace Griffin.GameServer.Services
 
             // Private keys of type 1 replace skills (client HFHFEIBOADO/OACGDMNAAFM, A-87): TalentKeyData column 14 names a ReplaceSkillData row whose four pairs of columns
             // (2/3, 4/5, 6/7, 8/9) are "skills to remove" and "skills to put instead": when something was removed, the first skill of the second list is added.
-            foreach (uint key in privateKeys ?? [])
+            foreach (uint key in (privateKeys ?? []).Distinct())
             {
                 TalentKeyData? keyRow = key == 0 ? null : tables.GetTable<TalentKeyData>().FirstOrDefault(row => TableFields.U(row, 1) == key);
                 uint replaceId = keyRow is null || TableFields.U(keyRow, 2) != 1 ? 0 : TableFields.U(keyRow, 14);
