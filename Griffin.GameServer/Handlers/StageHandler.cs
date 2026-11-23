@@ -212,10 +212,18 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            StageBattle battle = CreateBattle(stage, request.IsAuto);
+            // a heroic chapter battle (英雄模式): the client names the level the enemies scale to in
+            // StageOther.hero_chapter; without it the battle level stayed at the stage's recommended
+            // level and the in-battle units showed the normal-mode level while the preview showed the heroic one
+            GKAIDEKFIKC? heroOther = request.Other?.HeroChapter;
+            if (heroOther is not { LBCHINFNBCM: true, MIELBFDOBBE: > 0 })
+                heroOther = null;
+
+            StageBattle battle = CreateBattle(stage, request.IsAuto, heroLevel: heroOther?.MIELBFDOBBE ?? 0);
             accountState.Set(connection.Account.Uid, "stage.pending",
                 new PendingStage(stage.Id, request.IsAuto, battle.Id, battle.RandomSeed, request.Other?.Together?.GunId ?? 0, request.Other?.Together?.KFIAKLNJHMB ?? 0,
-                    rougeOther?.PlanId ?? 0, rougeOther?.PMFFONMEDCP ?? 0, weeklyOther is not null, weeklyOther?.Id ?? 0, weeklyOther?.Status == SimCombatWeekly.Types.Status.Final ? weeklyOther.KNPHEBDLFFP : 0));
+                    rougeOther?.PlanId ?? 0, rougeOther?.PMFFONMEDCP ?? 0, weeklyOther is not null, weeklyOther?.Id ?? 0, weeklyOther?.Status == SimCombatWeekly.Types.Status.Final ? weeklyOther.KNPHEBDLFFP : 0,
+                    heroOther?.MIELBFDOBBE ?? 0, heroOther?.ChapterId ?? 0));
             if (resourceUpdate is not null)
                 connection.SendAutoEncrypted(resourceUpdate);
             // a plot-only stage (dialogue, no battle) is passed by playing it: the client plays the AVG by itself and reports nothing at the end (A-63).
@@ -254,7 +262,7 @@ namespace Griffin.GameServer.Handlers
                 // the dolls fielded in a battle of the run are remembered for the next one (A-141)
                 accountState.Set(connection.Account.Uid, $"rouge.lineup.{pending.RougePlan}", new SavedLineup(request.Guns.OrderBy(p => p.Key).Select(p => p.Value).ToList(), request.ActionSequence.ToList()));
             StageBattle battle = CreateBattle(stage, pending!.IsAuto, request.Guns, connection,
-                pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan);
+                pending.BattleId, pending.RandomSeed, pending.TogetherGun, pending.RougePlan, heroLevel: pending.HeroLevel);
             if (pending.BattleId == 0 || pending.RandomSeed == 0)
             {
                 // Migrate an in-flight battle created by an older server build without
@@ -270,6 +278,10 @@ namespace Griffin.GameServer.Handlers
                     ? new StageOther { Weekly = new AEMFCIEIHLK { Id = pending.WeeklyId, Status = pending.WeeklyBoss != 0 ? SimCombatWeekly.Types.Status.Final : SimCombatWeekly.Types.Status.StepB, KNPHEBDLFFP = pending.WeeklyBoss } }
                     : pending.RougePlan != 0
                     ? new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = pending.RougeNode, PlanId = pending.RougePlan } }
+                    // the heroic chapter flag has to survive into the battle: the client reads the enemy level
+                    // from it (or from battle_level); dropping it here showed the normal-mode level in battle
+                    : pending.HeroLevel != 0
+                    ? new StageOther { HeroChapter = new GKAIDEKFIKC { LBCHINFNBCM = true, MIELBFDOBBE = pending.HeroLevel, ChapterId = pending.HeroChapterId } }
                     : pending.TogetherGun == 0 ? new StageOther() : new StageOther { Together = new CKAOJMGCFFF { GunId = pending.TogetherGun, KFIAKLNJHMB = pending.TogetherLevel } },
             });
         }
@@ -285,9 +297,12 @@ namespace Griffin.GameServer.Handlers
 
         private StageBattle CreateBattle(StageData stage, bool isAuto,
             Google.Protobuf.Collections.MapField<uint, uint>? requestedGuns = null,
-            Connection? connection = null, long battleId = 0, long randomSeed = 0, uint togetherGun = 0, uint rougePlan = 0)
+            Connection? connection = null, long battleId = 0, long randomSeed = 0, uint togetherGun = 0, uint rougePlan = 0,
+            uint heroLevel = 0)
         {
-            uint battleLevel = Math.Max(1u, stage.RecommandedPlayerlevel);
+            // a heroic battle (英雄模式) scales its enemies to the level the client names in
+            // StageOther.hero_chapter (MIELBFDOBBE), not to the stage's recommended level
+            uint battleLevel = heroLevel > 0 ? heroLevel : Math.Max(1u, stage.RecommandedPlayerlevel);
             var battle = new StageBattle
             {
                 Id = battleId > 0 ? battleId : Random.Shared.NextInt64(1, long.MaxValue),
@@ -474,8 +489,8 @@ namespace Griffin.GameServer.Handlers
             return PluginInventory.Catalog(tableService, accountState, uid).RemouldingPlugins.Where(plugin => slots.Contains(plugin.Id)).SelectMany(plugin => plugin.ACEIFDEGLMH).ToList();
         }
 
-        /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>.</summary>
-        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0, uint RougePlan = 0, uint RougeNode = 0, bool Weekly = false, uint WeeklyId = 0, uint WeeklyBoss = 0);
+        /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>. HeroLevel/HeroChapterId: the enemy level a heroic chapter battle (英雄模式) scales to, named by the client in <c>StageOther.hero_chapter</c>.</summary>
+        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0, uint RougePlan = 0, uint RougeNode = 0, bool Weekly = false, uint WeeklyId = 0, uint WeeklyBoss = 0, uint HeroLevel = 0, uint HeroChapterId = 0);
         internal sealed record SavedLineup(List<uint> Lineup, List<uint> Sequence);
 
 

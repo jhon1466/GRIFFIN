@@ -26,7 +26,8 @@ namespace Griffin.GameServer.Services
 
         HNINDAOJCKP Use(uint uid, uint itemId, uint amount, List<IMessage> messages);
 
-        /// <summary>Opens a keepsake (type 134) whose payload lists the items it offers: the player chooses one of them.</summary>
+        /// <summary>Opens a pick box: a keepsake (type 134, payload = the offered ids) or a selection box (type 8, payload =
+        /// <c>N;id:count,...;</c>); the player chooses up to N of the offered items and each is granted with its payload count.</summary>
         HNINDAOJCKP UseGiftPick(uint uid, uint itemId, IReadOnlyList<uint> selected, uint amount, List<IMessage> messages);
 
         /// <summary>One weighted pick of a <c>DropPackageData</c> package (<c>item:count:weight</c> entries); empty when it drops nothing (count 0).</summary>
@@ -42,8 +43,9 @@ namespace Griffin.GameServer.Services
         IItemService itemService,
         IRewardService rewardService) : IItemUseService
     {
-        private static readonly HashSet<int> PackTypes = [6, 109];
+        private static readonly HashSet<int> PackTypes = [6, 8, 109];
         private const int GiftPickType = 134;
+        private const int SelectionBoxType = 8;
         private static readonly HashSet<int> BoxTypes = [5, 105];
 
         public HNINDAOJCKP Dismantle(uint uid, IReadOnlyDictionary<uint, uint> items, List<IMessage> messages)
@@ -152,22 +154,57 @@ namespace Griffin.GameServer.Services
             if (amount == 0)
                 return HNINDAOJCKP.ItemUseNumInvalid;
 
-            if (row is null || row.Type != GiftPickType)
+            if (row is null || (row.Type != GiftPickType && row.Type != SelectionBoxType))
                 return HNINDAOJCKP.ItemCannotUse;
 
-            HashSet<uint> offered = TableFields.S(row, 18).Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(part => uint.TryParse(part, out uint id) ? id : 0u).Where(id => id != 0).ToHashSet();
-            if (selected.Count != 1 || !offered.Contains(selected[0]))
+            // Type 8 selection boxes carry "N;id:count,id:count;" (N = how many the player may pick, each granted with the
+            // count after its colon); type 134 keepsakes just list the offered ids and grant one per unit used.
+            string payload = TableFields.S(row, 18);
+            Dictionary<uint, uint> offered = [];
+            uint allowed = 1;
+            if (row.Type == SelectionBoxType)
+            {
+                string[] segments = payload.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (segments.Length < 2 || !uint.TryParse(segments[0], out allowed) || allowed == 0)
+                {
+                    Log.Warning("UseGiftPick: selection box {Item} has unusable payload '{Payload}'.", itemId, payload);
+                    return HNINDAOJCKP.ItemCannotUse;
+                }
+
+                foreach (string part in segments[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    string[] pair = part.Split(':', StringSplitOptions.TrimEntries);
+                    if (pair.Length == 2 && uint.TryParse(pair[0], out uint id) && uint.TryParse(pair[1], out uint count) && id != 0 && count > 0)
+                        offered[id] = count;
+                }
+            }
+            else
+            {
+                foreach (string part in payload.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (uint.TryParse(part, out uint id) && id != 0)
+                        offered[id] = 1;
+                }
+            }
+
+            if (offered.Count == 0 || selected.Count == 0 || (uint)selected.Count > allowed)
                 return HNINDAOJCKP.MailGiftPickItemInvalid;
 
-            // the offered items of the 1189260 keepsakes are lobby furniture, which this server does not store as inventory
-            if (Find(selected[0]) is null)
-                return HNINDAOJCKP.ItemConfigNotExist;
+            foreach (uint pick in selected.Distinct())
+            {
+                if (!offered.TryGetValue(pick, out uint pickCount) || pickCount == 0)
+                    return HNINDAOJCKP.MailGiftPickItemInvalid;
+
+                // the offered items of the 1189260 keepsakes are lobby furniture, which this server does not store as inventory
+                if (Find(pick) is null)
+                    return HNINDAOJCKP.ItemConfigNotExist;
+            }
 
             if (!Spend(uid, new Dictionary<uint, int> { [itemId] = (int)amount }, messages))
                 return HNINDAOJCKP.ItemNotEnough;
 
-            rewardService.Grant(uid, selected[0], (int)amount, messages);
+            foreach (uint pick in selected.Distinct())
+                rewardService.Grant(uid, pick, (int)(offered[pick] * amount), messages);
             return HNINDAOJCKP.None;
         }
 

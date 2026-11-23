@@ -282,12 +282,17 @@ namespace Griffin.GameServer.Handlers
                     refine.Polarity = refine.Candidates[index];
                 refine.Candidates = [];
                 ModPolarity.Set(accountState, uid, mod.Id, refine);
-                connection.SendAutoEncrypted<Google.Protobuf.IMessage>(
+                List<Google.Protobuf.IMessage> messages =
                 [
                     new SC_GunWeaponModContinuouslyPolarizationSelect { Id = mod.Id, LMLFNAACPPN = index },
                     new SC_WeaponModAdvanceEnhance { Mod = ModPolarity.ToProto(tableService, accountState, uid, mod) },
                     new SC_GunWeaponModLvUp { Id = mod.Id, Level = Math.Max(1, mod.Level), Exp = mod.Field6 },
-                ]);
+                ];
+                // the mod list and the weapons after the answer, as every other mod answer does: without them the client
+                // keeps its old accessory cards and the batch selection looked like nothing happened until the next
+                // login (the same missing refresh as A-92)
+                messages.AddRange(RefreshBatch(tableService, accountState, inventoryService, weaponMods, uid));
+                connection.SendAutoEncrypted(messages.ToArray());
             }
         }
 

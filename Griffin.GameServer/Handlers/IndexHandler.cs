@@ -630,6 +630,7 @@ namespace Griffin.GameServer.Handlers
                             Details =
                             {
                                 { 1581008u, false },
+                                { 1581009u, false },
                             },
                         }
                     },

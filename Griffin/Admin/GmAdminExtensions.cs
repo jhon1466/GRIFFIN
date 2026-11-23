@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Griffin.Services;
 
 namespace Griffin.Admin;
 
@@ -206,6 +207,7 @@ public static class GmAdminExtensions
         {
             if (request.GunId == 0) return Results.BadRequest(new { error = "gunId debe ser positivo." });
             if (request.Level is < 1 or > 60) return Results.BadRequest(new { error = "El nivel de personaje debe estar entre 1 y 60." });
+            if (request.Segment is < 0 or > 6) return Results.BadRequest(new { error = "El segmento de personaje debe estar entre 0 y 6." });
             GunData? definition = tables.GetTable<GunData>().FirstOrDefault(g => g.Id == request.GunId);
             if (definition is null || definition.Id == 0)
                 return Results.BadRequest(new { error = "El personaje no existe en GunData de las tablas cargadas." });
@@ -216,7 +218,7 @@ public static class GmAdminExtensions
             var achievementsBefore = achievements.Completed(uid);
             if (existing is null)
             {
-                GunEntity gun = GunService.CreateDefault(definition, request.Level);
+                GunEntity gun = GunService.CreateDefault(definition, request.Level, (uint)request.Segment);
                 guns.AddGun(uid, gun);
                 uint defaultWeaponId = GunService.GetDefaultWeaponId(definition);
                 WeaponEntity? weapon = null;
@@ -262,8 +264,10 @@ public static class GmAdminExtensions
                 // the game reads the characters from the service's in-memory account, not from this DbContext: change THAT entity (else the level is
                 // only seen after a server restart)
                 GunEntity cached = guns.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == request.GunId) ?? existing;
+                if (cached.Level != request.Level && cached.GunClass > 1)
+                    return Results.BadRequest(new { error = $"El personaje ya está ascendido (clase {cached.GunClass}); solo puedes sobrescribir el nivel de personajes de clase 1." });
                 cached.Level = request.Level;
-                cached.GunClass = Math.Max(cached.GunClass, GunService.ClassForLevel(request.Level));
+                cached.Grade = (uint)request.Segment;
                 guns.Save();
                 SC_Guns update = new();
                 foreach (GunEntity gun in guns.GetPlayerGuns(uid)) update.Guns.Add(gun.ToProtoGunCharacter());
@@ -282,8 +286,8 @@ public static class GmAdminExtensions
                 catch (Exception ex) { loggerFactory.CreateLogger("GmAdmin").LogWarning(ex, "Could not push the character grant to account {Uid}.", uid); }
             }
 
-            await AuditAsync(app, uid, "character.grant_or_level", new { request.GunId, request.Level });
-            return Results.Ok(new { uid, gunId = request.GunId, level = existing.Level, online = connections.Connections.Any(c => c.Account?.Uid == uid) });
+            await AuditAsync(app, uid, "character.grant_or_level", new { request.GunId, request.Level, request.Segment, gunClass = existing.GunClass });
+            return Results.Ok(new { uid, gunId = request.GunId, level = existing.Level, segment = existing.Grade, gunClass = existing.GunClass, online = connections.Connections.Any(c => c.Account?.Uid == uid) });
         });
 
         // removes one character from an account (to hand it out again, or to test unlocking it with its fragments)
@@ -408,6 +412,202 @@ public static class GmAdminExtensions
             if (added) SendLive(connections, uid, new SC_AddIndex { Type = 60, Id = request.SkinId, Ts = 0 }, loggerFactory);
             await AuditAsync(app, uid, "weapon_skin.grant", new { request.SkinId, added });
             return Results.Ok(new { uid, skinId = request.SkinId, added, online = connections.Connections.Any(c => c.Account?.Uid == uid) });
+        });
+
+        /// <summary>Returns characters that have equipped cores (non-zero slots in remoulding.plugins).</summary>
+        api.MapGet("/accounts/{uid}/remoulding/characters", async (uint uid, GriffinDbContext db, ITableService tables, IAccountStateService accountState, IGunService guns) =>
+        {
+            if (!await db.Accounts.AnyAsync(a => a.Uid == uid)) return Results.NotFound(new { error = "No existe esa cuenta." });
+
+            var oldState = accountState.Get<Dictionary<string, ulong[]>>(uid, "remoulding.plugins");
+            if (oldState is null) return Results.Ok(new { uid, characters = new object[0] });
+
+            // character level comes from the GunEntity (Lv.60), not from any table row
+            Dictionary<uint, int> gunLevels = guns.GetPlayerGuns(uid).ToDictionary(g => g.GunId, g => g.Level);
+            var result = new List<(uint GunId, uint Level, ulong[] Slots)>();
+            foreach ((string gunIdStr, ulong[] slots) in oldState)
+            {
+                if (!uint.TryParse(gunIdStr, out uint gunId)) continue;
+                if (slots.All(s => s == 0)) continue; // ignore dolls without equipped cores
+                result.Add((gunId, (uint)gunLevels.GetValueOrDefault(gunId), slots));
+            }
+            // plugin UIDs exceed Number.MAX_SAFE_INTEGER in JS -> serialize as strings.
+            return Results.Ok(new
+            {
+                uid,
+                characters = result.OrderBy(c => c.GunId).Select(c => new
+                {
+                    id = c.GunId,
+                    level = c.Level,
+                    slots = c.Slots.Select(s => s.ToString()).ToList()
+                }).ToList()
+            });
+        });
+
+        /// <summary>Returns the 6 slots for a character: plugin UID per slot, whether editable (exists in inventory.v1), and trait entries with ID+level.</summary>
+        api.MapGet("/accounts/{uid}/remoulding/slots/{gunId}", async (uint uid, uint gunId, GriffinDbContext db, ITableService tables, IAccountStateService accountState) =>
+        {
+            if (!await db.Accounts.AnyAsync(a => a.Uid == uid)) return Results.NotFound(new { error = "No existe esa cuenta." });
+
+            var oldState = accountState.Get<Dictionary<string, ulong[]>>(uid, "remoulding.plugins");
+            ulong[] slots = oldState?.TryGetValue(gunId.ToString(), out var s) ?? false ? s : new ulong[6];
+            if (slots.Length < 6) slots = new ulong[6];
+
+            PluginInventory.State invState = PluginInventory.Load(accountState, uid);
+            var gainedById = invState.Gained.ToDictionary(g => g.Id);
+            // fixed catalog: entries of the chips that are not gained (not editable, but still shown)
+            var catalogById = PluginInventory.Catalog(tables, accountState, uid).RemouldingPlugins
+                .GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First());
+
+            var plugins = tables.GetTable<PluginData>().ToDictionary(p => p.Id, p => p);
+            var features = tables.GetTable<FeaturesEntryData>().ToDictionary(f => f.Id, f => f);
+            const ulong Generated = 1_800_000_000_000_000_000UL;
+
+            var slotList = new List<object>();
+            for (int i = 0; i < 6; i++)
+            {
+                ulong pluginUid = slots[i];
+                if (pluginUid == 0)
+                {
+                    slotList.Add(new { slot = i + 1, pluginId = (string?)null, editable = false, coreId = (uint?)null, stcId = (uint?)null, type = (uint?)null, entries = new object[0] });
+                    continue;
+                }
+
+                PluginInventory.Owned? owned = gainedById.GetValueOrDefault(pluginUid);
+                bool editable = owned is not null;
+
+                // core (Stc) resolution: gained chip -> inventory Stc; generated chip -> id - base;
+                // captured/fixed chip -> PluginData row of its uid.
+                uint? stcId = owned?.Stc;
+                PluginData? row = null;
+                if (owned is not null)
+                {
+                    row = plugins.GetValueOrDefault(owned.Row);
+                    stcId ??= owned.Stc;
+                }
+                else
+                {
+                    if (pluginUid <= uint.MaxValue) row = plugins.GetValueOrDefault((uint)pluginUid);
+                    if (row is null && pluginUid > Generated && pluginUid - Generated <= uint.MaxValue)
+                        row = plugins.GetValueOrDefault((uint)(pluginUid - Generated));
+                    if (catalogById.TryGetValue(pluginUid, out var catalogPlugin)) stcId = catalogPlugin.StcId;
+                    stcId ??= row?.Id ?? (pluginUid <= uint.MaxValue ? (uint)pluginUid : null);
+                }
+
+                uint[] entryIds = owned?.Entries
+                    ?? (catalogById.TryGetValue(pluginUid, out var catalogEntry) ? catalogEntry.ACEIFDEGLMH.ToArray() : []);
+
+                var traitList = entryIds.Select(id =>
+                {
+                    FeaturesEntryData? f = features.GetValueOrDefault(id);
+                    // level (field 9) and name (field 2) both come from FeaturesEntryData itself
+                    // Use trait mapping service to get better trait names
+                    var traitInfo = new TraitMappingService().GetTraitInfo(id.ToString());
+                    return new
+                    {
+                        id,
+                        name = traitInfo.Name,
+                        description = traitInfo.Description,
+                        category = traitInfo.Category,
+                        element = traitInfo.Element,
+                        stat = traitInfo.Stat,
+                        level = f is not null ? TableFields.U(f, 9) : 0u,
+                        type = f is not null ? TableFields.U(f, 7) : 0u
+                    };
+                }).ToList();
+
+                slotList.Add(new
+                {
+                    slot = i + 1,
+                    // exceeds Number.MAX_SAFE_INTEGER -> string so JS keeps it exact
+                    pluginId = pluginUid.ToString(),
+                    editable,
+                    coreId = owned?.Stc ?? row?.Id,
+                    stcId,
+                    // core category/color (PluginData.type): 1 Bulwark, 2 Vanguard, 3 Support, 4 Sentinel
+                    type = row?.Type,
+                    entries = traitList
+                });
+            }
+
+            return Results.Ok(new { uid, gunId, slots = slotList });
+        });
+
+        api.MapPost("/accounts/{uid}/remoulding/traits", async (uint uid, TraitsRequest request,
+            GriffinDbContext db, ITableService tables, IAccountStateService accountState,
+            ILoggerFactory loggerFactory) =>
+        {
+            if (!await db.Accounts.AnyAsync(a => a.Uid == uid))
+                return Results.NotFound(new { error = "No existe esa cuenta." });
+
+            if (request.Traits is not { Length: >= 1 and <= 3 })
+                return Results.BadRequest(new { error = "Deben enviarse entre 1 y 3 rasgos (trait IDs)." });
+
+            PluginInventory.State state = PluginInventory.Load(accountState, uid);
+            PluginInventory.Owned? owned = state.Gained.FirstOrDefault(o => o.Id == request.PluginId);
+            if (owned is null)
+                return Results.BadRequest(new { error = "Ese plugin no es un chip real de la cuenta (solo se pueden editar chips ganados)." });
+
+            PluginData? pluginRow = tables.GetTable<PluginData>().FirstOrDefault(p => p.Id == owned.Row);
+            if (pluginRow is null)
+                return Results.BadRequest(new { error = "No se encontró la definición del plugin en PluginData." });
+
+            var features = tables.GetTable<FeaturesEntryData>().ToDictionary(f => f.Id, f => f);
+            uint[] traitLevels = new uint[request.Traits.Length];
+            for (int i = 0; i < request.Traits.Length; i++)
+            {
+                if (!features.TryGetValue((uint)request.Traits[i], out FeaturesEntryData? feat))
+                    return Results.BadRequest(new { error = $"El rasgo {request.Traits[i]} no existe en FeaturesEntryData." });
+                traitLevels[i] = TableFields.U(feat, 9);
+            }
+
+            // first trait must belong to the core's own category/color
+            static string ColorName(uint t) => t switch
+            {
+                1 => "Bulwark",
+                2 => "Vanguard",
+                3 => "Support",
+                4 => "Sentinel",
+                _ => t.ToString(),
+            };
+            uint firstType = features[(uint)request.Traits[0]].Type;
+            if (firstType != pluginRow.Type)
+                return Results.BadRequest(new { error = $"El primer rasgo debe ser de la categoría {ColorName(pluginRow.Type)} del core (recibido: {ColorName(firstType)})." });
+
+            // point budget: same color (all traits match plugin type) max 6 pts, hybrid max 5 pts, max 3 traits
+            bool sameColor = request.Traits.All(t => features[(uint)t].Type == pluginRow.Type);
+            uint totalPoints = traitLevels.Aggregate(0u, (a, b) => a + b);
+            uint allowed = sameColor ? 6u : 5u;
+            if (totalPoints > allowed)
+                return Results.BadRequest(new { error = $"Puntos excedidos: {totalPoints} > {allowed} ({(sameColor ? "mismo color" : "hibrido")})." });
+
+            lock (AccountLock.For(uid))
+            {
+                owned.Entries = request.Traits.Select(t => (uint)t).ToArray();
+                PluginInventory.Save(accountState, uid, state);
+            }
+
+            await AuditAsync(app, uid, "remoulding.traits", new { pluginId = request.PluginId.ToString(), traits = request.Traits });
+            return Results.Ok(new { uid, pluginId = request.PluginId.ToString(), traits = request.Traits, saved = true });
+        });
+
+        api.MapGet("/remoulding/traits-catalog", (ITableService tables) =>
+        {
+            var traitMappingService = new TraitMappingService();
+            var features = tables.GetTable<FeaturesEntryData>().Select(f => new
+            {
+                id = f.Id,
+                name = TableFields.S(f, 2),
+                mappedName = traitMappingService.GetTraitInfo(f.Id.ToString()).Name,
+                mappedDescription = traitMappingService.GetTraitInfo(f.Id.ToString()).Description,
+                mappedCategory = traitMappingService.GetTraitInfo(f.Id.ToString()).Category,
+                type = TableFields.U(f, 7),
+                group = TableFields.U(f, 8),
+                level = TableFields.U(f, 9),
+                value = TableFields.U(f, 12)
+            }).Where(f => f.level > 0).OrderBy(f => f.group).ThenBy(f => f.level).ToList();
+
+            return Results.Ok(features);
         });
 
         api.MapPost("/accounts/{uid}/inventory/add-all", async (uint uid, AddAllRequest request,
@@ -550,13 +750,16 @@ public static class GmAdminExtensions
     }
 
     public sealed record GrantItemRequest(uint ItemId, int Count);
-    public sealed record CharacterRequest(uint GunId, int Level = 1);
+    public sealed record CharacterRequest(uint GunId, int Level = 1, int Segment = 6);
     public sealed record GrantWeaponRequest(uint WeaponId, int Count = 1);
     public sealed record GrantCostumeRequest(uint CostumeId);
     public sealed record GrantWeaponSkinRequest(uint SkinId);
     public sealed record AddAllRequest(string? Category = "all");
     public sealed record CleanRequest(uint ConfirmUid, string? Type);
     public sealed record CommandRequest(string Command);
+    public sealed record TraitsRequest(
+        [property: System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)] ulong PluginId,
+        ulong[] Traits);
 }
 
 public sealed record EventOpenRequest(int Days);
