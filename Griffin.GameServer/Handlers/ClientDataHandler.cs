@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.GameServer.Services;
@@ -16,30 +16,47 @@ namespace Griffin.GameServer.Handlers
     /// from then on; the fixed blob below is only the starting value. Every upload is answered (an unanswered or refused upload
     /// would make the client report an error each time).
     /// </summary>
-    public class ClientDataHandler(IAccountStateService accountState) : ClientDataHandlerBase
+    public class ClientDataHandler(IAccountStateService accountState, IGunService gunService) : ClientDataHandlerBase
     {
         private const string StateKey = "client.data";
+        private const int LobbyPresetStride = 19;
 
         public override void HandleClientDataGet(CS_ClientDataGet request, Connection connection)
         {
+            HashSet<uint> ownedGuns = connection.Account is null
+                ? []
+                : gunService.GetPlayerGuns(connection.Account.Uid).Select(g => g.GunId).ToHashSet();
+
             if (connection.Account is not null && accountState.Get<string>(connection.Account.Uid, StateKey) is { Length: > 0 } saved)
             {
                 byte[] data = ByteString.FromBase64(saved).ToByteArray();
+                bool changed = false;
                 // accounts that started with the captured blob keep its "skip the barrack animations" (A-85): changed once to "always play"
                 if (accountState.Get<bool?>(connection.Account.Uid, BarrackFixKey) != true)
                 {
                     data = WithBarrackSkip(data, BarrackAlwaysPlay);
-                    accountState.Set(connection.Account.Uid, StateKey, Convert.ToBase64String(data));
                     accountState.Set<bool?>(connection.Account.Uid, BarrackFixKey, true);
+                    changed = true;
                 }
+
+                byte[] sanitized = SanitizeLobbyPresets(data, ownedGuns);
+                if (sanitized != data)
+                {
+                    data = sanitized;
+                    changed = true;
+                }
+
+                if (changed)
+                    accountState.Set(connection.Account.Uid, StateKey, Convert.ToBase64String(data));
 
                 connection.Send(new SC_ClientDataGet { Data = ByteString.CopyFrom(data) });
                 return;
             }
 
+            byte[] initial = SanitizeLobbyPresets(WithBarrackSkip(DefaultBlob, BarrackAlwaysPlay), ownedGuns);
             connection.Send(new SC_ClientDataGet
             {
-                Data = ByteString.CopyFrom(WithBarrackSkip(DefaultBlob, BarrackAlwaysPlay))
+                Data = ByteString.CopyFrom(initial)
             });
         }
 
@@ -87,6 +104,94 @@ namespace Griffin.GameServer.Handlers
                     writer.WriteTag(9, WireFormat.WireType.Varint);
                     writer.WriteUInt32(value);
                 }
+
+                writer.Flush();
+                return output.ToArray();
+            }
+            catch (InvalidProtocolBufferException)
+            {
+                return data;
+            }
+        }
+
+        /// <summary>
+        /// Field 14 of the client data holds up to 3 Barrack/Lobby camera presets (19 ints each + 1 active index = 58 ints, where
+        /// index 0 of each 19-int slot is the GunId). The captured DefaultBlob carries GunId 1052 in slots 0 and 2; if the account
+        /// does not own a doll referenced there, opening the Barrack "Set as Lobby" dialog throws NullReferenceException in the client
+        /// after hiding the UI. Clear any slot referencing an unowned doll (and drop field 14 when all slots are empty).
+        /// </summary>
+        private static byte[] SanitizeLobbyPresets(byte[] data, HashSet<uint> ownedGuns)
+        {
+            using MemoryStream output = new();
+            CodedInputStream input = new(data);
+            CodedOutputStream writer = new(output);
+            bool modified = false;
+            try
+            {
+                uint tag;
+                while ((tag = input.ReadTag()) != 0)
+                {
+                    if (tag >> 3 == 14 && (tag & 7) == 2)
+                    {
+                        byte[] packed = input.ReadBytes().ToByteArray();
+                        List<int> ints = [];
+                        CodedInputStream packedIn = new(packed);
+                        while (!packedIn.IsAtEnd)
+                            ints.Add(packedIn.ReadInt32());
+
+                        bool slotChanged = false;
+                        int slotCount = ints.Count / LobbyPresetStride;
+                        bool anyOwned = false;
+                        for (int s = 0; s < slotCount; s++)
+                        {
+                            int start = s * LobbyPresetStride;
+                            int gunId = ints[start];
+                            if (gunId > 0 && !ownedGuns.Contains((uint)gunId))
+                            {
+                                for (int i = 0; i < LobbyPresetStride; i++)
+                                    ints[start + i] = 0;
+                                slotChanged = true;
+                            }
+                            else if (gunId > 0)
+                            {
+                                anyOwned = true;
+                            }
+                        }
+
+                        if (!slotChanged)
+                        {
+                            writer.WriteTag(tag);
+                            writer.WriteBytes(ByteString.CopyFrom(packed));
+                            continue;
+                        }
+
+                        modified = true;
+                        if (anyOwned)
+                        {
+                            using MemoryStream repacked = new();
+                            CodedOutputStream repackedOut = new(repacked);
+                            foreach (int v in ints)
+                                repackedOut.WriteInt32(v);
+                            repackedOut.Flush();
+                            writer.WriteTag(tag);
+                            writer.WriteBytes(ByteString.CopyFrom(repacked.ToArray()));
+                        }
+                        continue;
+                    }
+
+                    writer.WriteTag(tag);
+                    switch (tag & 7)
+                    {
+                        case 0: writer.WriteUInt64(input.ReadUInt64()); break;
+                        case 1: writer.WriteFixed64(input.ReadFixed64()); break;
+                        case 2: writer.WriteBytes(input.ReadBytes()); break;
+                        case 5: writer.WriteFixed32(input.ReadFixed32()); break;
+                        default: return data;
+                    }
+                }
+
+                if (!modified)
+                    return data;
 
                 writer.Flush();
                 return output.ToArray();

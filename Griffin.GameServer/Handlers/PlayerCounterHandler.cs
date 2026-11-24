@@ -1,4 +1,4 @@
-﻿using Griffin.Common.Networking;
+using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.Common.Protocol;
 using Griffin.Database.Entities;
@@ -3009,9 +3009,8 @@ namespace Griffin.GameServer.Handlers
 
             foreach (GunEntity gun in gunService.GetPlayerGuns(connection.Account.Uid))
             {
-                uint dormId = gunData.Where(g => g.Id == gun.GunId).FirstOrDefault().POBHEFFJGOP[0];
-
-                countSection6.Counters[0].Rewards.Add(dormId, false);
+                if (gunData.FirstOrDefault(g => g.Id == gun.GunId) is { POBHEFFJGOP.Count: > 0 } row)
+                    countSection6.Counters[0].Rewards.TryAdd(row.POBHEFFJGOP[0], false);
             }
 
             connection.SendUnsequenced(countSection6);
