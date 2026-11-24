@@ -94,6 +94,11 @@ namespace Griffin.GameServer.Services
                 done[background.Args] = 1;
             }
 
+            // Dormitory / character-obtain unlock achievements on GunData column 60 (44xxx, 46034): 24+ dolls are not in CommandBackgroundData
+            foreach (GunData gun in tableService.GetTable<GunData>())
+                if (owned.ContainsKey(gun.Id) && TableFields.U(gun, 60) is var obtainAch and not 0)
+                    done[obtainAch] = 1;
+
             HashSet<uint> cleared = ClearedStages(accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? []);
             foreach ((uint id, uint[] stages) in AchievementConditions.Stages)
                 if (stages.Any(cleared.Contains))

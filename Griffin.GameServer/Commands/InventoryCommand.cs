@@ -1,4 +1,4 @@
-﻿using Griffin.Command;
+using Griffin.Command;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -293,8 +293,12 @@ public sealed class InventoryCommand(IInventoryService inventoryService, ITableS
         List<GunData> gunData = tableService.GetTable<GunData>();
         foreach (GunEntity gun in inventoryService.GetPlayerInventory<GunEntity>(accountUid))
         {
-            uint dormId = gunData.Where(g => g.Id == gun.GunId).FirstOrDefault().POBHEFFJGOP[0];
-            countSection.Counters[0].Rewards.Add(dormId, false);
+            if (gunData.FirstOrDefault(g => g.Id == gun.GunId) is not { } row)
+                continue;
+            if (row.POBHEFFJGOP.Count > 0)
+                countSection.Counters[0].Rewards.TryAdd(row.POBHEFFJGOP[0], false);
+            if (TableFields.U(row, 60) is var obtainAch and not 0)
+                countSection.Counters[0].Rewards.TryAdd(obtainAch, false);
         }
 
         return countSection;

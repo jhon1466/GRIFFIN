@@ -419,12 +419,15 @@ namespace Griffin.GameServer.Handlers
                     connection.Refuse(MsgId.MsgCsGunUpgrade, HNINDAOJCKP.ItemNotEnough);
                     return;
                 }
+                var achievementsBefore = achievements.Completed(uid);
                 using (RewardDrops drops = RewardDrops.Begin())
                 {
                     rewardService.Grant(uid, request.GunId, 1, spent);
                     drops.Finish(spent);
                 }
                 spent.Add(new SC_GunUpgrade { GunId = request.GunId, Grade = 0 });
+                if (achievements.NewlyCompleted(uid, achievementsBefore) is { } unlocked)
+                    spent.Add(new SC_CommonQuestCountUpdate { Counters = unlocked });
                 connection.SendAutoEncrypted(spent.ToArray());
                 return;
             }

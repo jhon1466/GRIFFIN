@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Protocol;
 using Griffin.Common.Proto;
@@ -20,7 +20,8 @@ namespace Griffin.GameServer.Handlers
         IGachaService gachaService,
         IResourceService resourceService,
         IRewardService rewardService,
-        IAccountStateService accountState) : GachaHandlerBase
+        IAccountStateService accountState,
+        IAchievementService achievements) : GachaHandlerBase
     {
         /// <summary>
         /// Rolls <paramref name="count"/> pulls of a table-driven banner, charges the cost, grants the results and sends the
@@ -50,6 +51,7 @@ namespace Griffin.GameServer.Handlers
                 return true;
             }
 
+            IReadOnlyDictionary<uint, bool> achievementsBefore = achievements.Completed(uid);
             IReadOnlyList<GachaPull> pulls = banner.Type == 9 ? gachaService.RollClothes(uid, gachaId, count, out GachaPity pity) : gachaService.Roll(uid, banner, count, out pity);
 
             List<IMessage> bundle = [];
@@ -91,6 +93,9 @@ namespace Griffin.GameServer.Handlers
             message.Add(acquirement);
             if (resourceUpdate.ResourceEx.Count > 0)
                 message.Add(resourceUpdate);
+            message.Add(BuildCumulativeInfo(uid));
+            if (achievements.NewlyCompleted(uid, achievementsBefore) is { } unlocked)
+                message.Add(new SC_CommonQuestCountUpdate { Counters = unlocked });
 
             connection.SendAutoEncrypted(message.ToArray());
 
@@ -109,21 +114,22 @@ namespace Griffin.GameServer.Handlers
         /// <c>GachaCumulativeCsData</c> the rewards (2 = group, 3 = pulls needed, 4 = item → amount). The pull count of a group is the
         /// sum of the pity totals of its banners; claimed reward ids are stored per group.
         /// </summary>
-        public override void HandleGetGachaCumulativeInfo(CS_GetGachaCumulativeInfo request, Connection connection)
+        private SC_GetGachaCumulativeInfo BuildCumulativeInfo(uint uid)
         {
             SC_GetGachaCumulativeInfo response = new();
-            if (connection.Account is not null)
+            Dictionary<uint, List<uint>> claimed = accountState.Get<Dictionary<uint, List<uint>>>(uid, CumulativeKey) ?? [];
+            foreach (GachaCumulativeGroupData group in tableService.GetTable<GachaCumulativeGroupData>())
             {
-                uint uid = connection.Account.Uid;
-                Dictionary<uint, List<uint>> claimed = accountState.Get<Dictionary<uint, List<uint>>>(uid, CumulativeKey) ?? [];
-                foreach (GachaCumulativeGroupData group in tableService.GetTable<GachaCumulativeGroupData>())
-                {
-                    KBDFEEOPPJK entry = new() { GachaTimes = CumulativePulls(uid, group) };
-                    entry.Rewards.AddRange(claimed.GetValueOrDefault(TableFields.U(group, 1)) ?? []);
-                    response.EMFOHMKKMKA[TableFields.U(group, 1)] = entry;
-                }
+                KBDFEEOPPJK entry = new() { GachaTimes = CumulativePulls(uid, group) };
+                entry.Rewards.AddRange(claimed.GetValueOrDefault(TableFields.U(group, 1)) ?? []);
+                response.EMFOHMKKMKA[TableFields.U(group, 1)] = entry;
             }
+            return response;
+        }
 
+        public override void HandleGetGachaCumulativeInfo(CS_GetGachaCumulativeInfo request, Connection connection)
+        {
+            SC_GetGachaCumulativeInfo response = connection.Account is null ? new() : BuildCumulativeInfo(connection.Account.Uid);
             connection.Send(response);
         }
 
