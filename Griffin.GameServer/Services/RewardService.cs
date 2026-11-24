@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 using Griffin.Database.Entities;
@@ -222,11 +222,14 @@ namespace Griffin.GameServer.Services
             if (weapon is not null)
             {
                 messages.Add(new SC_NewGunWeapon { Weapon = weapon.ToProtoWeapon() });
-                messages.Add(new SC_GunWeaponBelong { Id = weapon.Id, GunId = gunId });
                 AddWeaponIndices(uid, account, weapon.WeaponId, messages);
             }
 
             messages.Add(new SC_NewGun { Gun = gun.ToProtoGunCharacter() });
+            // Send GunWeaponBelong after SC_NewGun so IKOCJDBCPOM.MAGGIKOLLDD finds the newly-added doll and calls
+            // IIOGCOKODAC -> GPDCACJHBGB.NFCCOPAEJEN(), keeping EBEBHDJOLKA.BGEEFFIGOCF true so BarrackModel hides on switch.
+            if (weapon is not null)
+                messages.Add(new SC_GunWeaponBelong { Id = weapon.Id, GunId = gunId });
             messages.Add(new SC_AddIndex { Type = 10, Id = gunId, Ts = 0 });
 
             if (gun.CostumeId != 0)

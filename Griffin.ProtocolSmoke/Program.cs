@@ -1,4 +1,4 @@
-﻿// Protocol smoke test for the private server. Plays the client side of the documented flow:
+// Protocol smoke test for the private server. Plays the client side of the documented flow:
 //   HTTP /email/login -> TCP CS_Login -> startup requests -> inventory/gacha/dorm requests -> reconnect.
 // It never touches the user's game client. Test account credentials come from args/env, never hardcoded secrets.
 //
@@ -2170,9 +2170,9 @@ if (scenario is "all" or "achievements")
     Check("plot stage: the passed plot stage is in the stage records",
         main.ReadFor(TimeSpan.FromSeconds(2)).Select(p => p.Message).OfType<SC_StageRecord>().FirstOrDefault()?.Records.ContainsKey(10281) == true);
 
-    // the command-center backgrounds (all scenes and 3D skins) are unlocked by the achievement of CommandBackgroundData column 7 (A-62)
-    Check("achievements: the unlock ids of the command-center backgrounds (43001..43006 the 3D scenes, 44023, 70000, 71000) are all complete",
-        achCounters is not null && new uint[] { 43001, 43002, 43003, 43004, 43005, 43006, 44023, 70000, 71000 }.All(achCounters.Rewards.ContainsKey));
+    // the default command-center background (43001) is unlocked, while skin/character backgrounds (43002..43006) stay locked until owned
+    Check("achievements: default command-center background (43001) is complete and unowned 3D skin scenes (43002..43006) stay locked",
+        achCounters is not null && achCounters.Rewards.ContainsKey(43001) && new uint[] { 43002, 43003, 43004, 43005, 43006 }.All(id => !achCounters.Rewards.ContainsKey(id)));
     Check("achievements: 'normal SL-2-5 cleared' (99002) is not complete before that stage is cleared", achCounters is not null && !achCounters.Rewards.ContainsKey(99002));
     // SL-2-5 is a plot-only stage: starting it passes it (A-63), so the achievement update comes with the start (a battle stage would send it with the result)
     main.Send(new CS_StageStart { StcStageId = 10285 });

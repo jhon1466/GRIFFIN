@@ -602,9 +602,6 @@ namespace Griffin.GameServer.Handlers
             resourceService.SeedMissing(
                 account.Uid,
                 scResource.Res.ResourceEx.Select((amount, itemId) => new KeyValuePair<uint, int>((uint)itemId, amount)));
-            // Once per account: objects the client tables list (currencies, gifts, ingredients, keys, furniture...) that the account lacks or
-            // has at 0; positive balances are never touched and spent ones are not refilled at later logins (see ProvisioningService).
-            provisioning.ProvisionOnce(account.Uid);
             resourceService.ApplyTo(account.Uid, scResource.Res);
 
             SC_Sync scSync = new SC_Sync()

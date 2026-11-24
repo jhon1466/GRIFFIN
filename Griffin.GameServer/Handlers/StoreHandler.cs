@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using System.Collections.Concurrent;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
@@ -92,6 +92,20 @@ namespace Griffin.GameServer.Handlers
                     connection.Account.Uid, ManualRefreshKey) ?? [];
                 foreach ((uint tagId, uint count) in manualRefresh)
                     response.ManualRefreshTimes[tagId] = count;
+            }
+
+            // BasePacket length is uint16 (65535 bytes): if active tags push SC_Store over 64 KB, drop real-money goods (PriceType == 0) first.
+            if (response.CalculateSize() > 64000)
+            {
+                foreach (uint tagId in response.Tags.Keys.ToList())
+                {
+                    MarketTag tag = response.Tags[tagId];
+                    for (int i = tag.Goods.Count - 1; i >= 0; i--)
+                        if (tag.Goods[i].PriceType == 0)
+                            tag.Goods.RemoveAt(i);
+                    if (tag.Goods.Count == 0)
+                        response.Tags.Remove(tagId);
+                }
             }
 
             connection.Send(8, response);
@@ -318,7 +332,21 @@ namespace Griffin.GameServer.Handlers
             long totalPrice = unitPrice * quantity;
             if (totalPrice > int.MaxValue)
                 return Reply(MANKAOBLPBJ.Types.Code.CostError);
-            Dictionary<uint, int> cost = new() { [good.PriceType] = (int)totalPrice };
+            Dictionary<uint, int> cost;
+            if (good.PriceType == 11)
+            {
+                // PriceType 11 (free Credit Token) accepts free (11) first and falls back to paid (10), matching the combined UI balance.
+                int useFree = Math.Min(resourceService.GetBalance(uid, 11), (int)totalPrice);
+                int usePaid = (int)totalPrice - useFree;
+                cost = [];
+                if (useFree > 0) cost[11] = useFree;
+                if (usePaid > 0) cost[10] = usePaid;
+                if (cost.Count == 0) cost[11] = 0;
+            }
+            else
+            {
+                cost = new() { [good.PriceType] = (int)totalPrice };
+            }
             IMessage spent;
             if (paidWithItem)
             {
@@ -355,7 +383,7 @@ namespace Griffin.GameServer.Handlers
             messages.AddRange(granted);
             messages.Add(spent);
             Log.Information("Store: account {Uid} bought goods {GoodsId} for {Cost} ({Bought}/{Limit}).",
-                uid, good.Id, $"{good.PriceType}x{cost[good.PriceType]}", bought + quantity, LimitOf(good) == 0 ? "unlimited" : LimitOf(good));
+                uid, good.Id, string.Join("+", cost.Select(p => $"{p.Key}x{p.Value}")), bought + quantity, LimitOf(good) == 0 ? "unlimited" : LimitOf(good));
             // field 3 must be 0 on success: the client only shows the reward window and runs the buy callback when it is 0 (LODBPMDNMIG.FCMKPNCGMEK, A-200)
             return new() { Code = MANKAOBLPBJ.Types.Code.Normal, GoodsId = request.GoodsId, PriceType = 0 };
         }

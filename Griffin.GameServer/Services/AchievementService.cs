@@ -1,6 +1,7 @@
 using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
+using Griffin.Database.Entities;
 
 namespace Griffin.GameServer.Services
 {
@@ -28,7 +29,7 @@ namespace Griffin.GameServer.Services
         List<uint> Claim(uint uid, IEnumerable<uint> ids, List<IMessage> messages);
     }
 
-    public sealed class AchievementService(ITableService tableService, IAccountStateService accountState, IRewardService rewardService, IGunService gunService) : IAchievementService
+    public sealed class AchievementService(ITableService tableService, IAccountStateService accountState, IRewardService rewardService, IGunService gunService, IInventoryService inventoryService) : IAchievementService
     {
         private const string ClaimedKey = "achievement.claimed";
 
@@ -78,12 +79,20 @@ namespace Griffin.GameServer.Services
                 if (owned.TryGetValue(gun, out int have) && have >= level)
                     done[id] = (uint)have;
 
-            // The cards of the command-center backgrounds (CommandBackgroundData column 7: 43001..43006 for the 3D scenes, 44xxx, 70000.., 71xxx) are
-            // unlocked by the achievement named there; a card that has column 9 = 1 (Loreley's 3D scene 3058) is not even listed while it is locked.
-            // The server unlocks them all, so every scene and 3D skin shows and opens (A-62).
-            foreach (IMessage background in tableService.GetTable<CommandBackgroundData>())
-                if (TableFields.U(background, 7) is var unlock and not 0)
-                    done[unlock] = 1;
+            // Command-center backgrounds (CommandBackgroundData column 7: 43001..43006 for the 3D scenes, 44xxx, 70000.., 71xxx):
+            // 3056 (43001, default command room) has no character/costume requirement; rows with GunId (col 12) unlock when that character is owned,
+            // and rows with ClothesId (col 15) unlock when that skin is owned.
+            HashSet<uint> ownedCostumes = inventoryService.GetPlayerInventory<CostumeEntity>(uid).Select(c => c.CostumeId).ToHashSet();
+            foreach (CommandBackgroundData background in tableService.GetTable<CommandBackgroundData>())
+            {
+                if (background.Args == 0)
+                    continue;
+                if (background.GunId != 0 && !owned.ContainsKey(background.GunId))
+                    continue;
+                if (background.ClothesId != 0 && !ownedCostumes.Contains(background.ClothesId))
+                    continue;
+                done[background.Args] = 1;
+            }
 
             HashSet<uint> cleared = ClearedStages(accountState.Get<Dictionary<string, StageRecord>>(uid, "stage.records") ?? []);
             foreach ((uint id, uint[] stages) in AchievementConditions.Stages)

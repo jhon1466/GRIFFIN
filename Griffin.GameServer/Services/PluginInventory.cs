@@ -1,4 +1,4 @@
-﻿using Google.Protobuf;
+using Google.Protobuf;
 using Griffin.Common.Proto;
 using Griffin.Common.Table;
 
@@ -27,6 +27,7 @@ namespace Griffin.GameServer.Services
             public List<Owned> Gained { get; set; } = [];
             public HashSet<ulong> Removed { get; set; } = [];
             public HashSet<ulong> Locked { get; set; } = [];
+            public Dictionary<ulong, uint[]> TraitOverrides { get; set; } = [];
         }
 
         private static readonly object Gate = new();
@@ -105,8 +106,40 @@ namespace Griffin.GameServer.Services
             foreach (Owned owned in state.Gained)
                 mine.RemouldingPlugins.Add(ToProto(owned));
             foreach (GunRemouldingPlugin plugin in mine.RemouldingPlugins)
+            {
                 plugin.MDFIDAFPBJN = state.Locked.Contains(plugin.Id);
+                if (state.TraitOverrides.TryGetValue(plugin.Id, out uint[]? overridden) && overridden.Length > 0)
+                {
+                    plugin.ACEIFDEGLMH.Clear();
+                    plugin.ACEIFDEGLMH.AddRange(overridden);
+                }
+            }
             return mine;
+        }
+
+        /// <summary>Updates the trait entries of a plugin owned by <paramref name="uid"/> (both gained and catalog plugins).</summary>
+        public static bool SetTraits(ITableService tables, IAccountStateService accountState, uint uid, ulong pluginId, IReadOnlyList<uint> traits)
+        {
+            if (traits.Count == 0)
+                return false;
+
+            HashSet<uint> validTraits = tables.GetTable<FeaturesEntryData>().Select(r => r.Id).ToHashSet();
+            uint[] normalized = traits.Where(id => id != 0 && validTraits.Contains(id)).ToArray();
+            if (normalized.Length == 0)
+                return false;
+
+            lock (Gate)
+            {
+                if (!Catalog(tables, accountState, uid).RemouldingPlugins.Any(p => p.Id == pluginId))
+                    return false;
+
+                State state = Load(accountState, uid);
+                if (state.Gained.FirstOrDefault(o => o.Id == pluginId) is { } owned)
+                    owned.Entries = normalized;
+                state.TraitOverrides[pluginId] = normalized;
+                Save(accountState, uid, state);
+                return true;
+            }
         }
 
         public static GunRemouldingPlugin ToProto(Owned owned)

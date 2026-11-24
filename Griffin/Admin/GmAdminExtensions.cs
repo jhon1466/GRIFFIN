@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -216,7 +216,7 @@ public static class GmAdminExtensions
             var achievementsBefore = achievements.Completed(uid);
             if (existing is null)
             {
-                GunEntity gun = GunService.CreateDefault(definition, request.Level);
+                GunEntity gun = GunService.CreateDefault(definition, request.Level, grade: (uint)Math.Clamp(request.Segment ?? 0, 0, 6));
                 guns.AddGun(uid, gun);
                 uint defaultWeaponId = GunService.GetDefaultWeaponId(definition);
                 WeaponEntity? weapon = null;
@@ -233,7 +233,6 @@ public static class GmAdminExtensions
                 if (weapon is not null)
                 {
                     live.Add(new SC_NewGunWeapon { Weapon = weapon.ToProtoWeapon() });
-                    live.Add(new SC_GunWeaponBelong { Id = weapon.Id, GunId = request.GunId });
                     live.Add(new SC_AddIndex { Type = 20, Id = weapon.WeaponId, Ts = 0 });
                     WeaponSkinData? weaponSkin = tables.GetTable<WeaponSkinData>().Where(k => k.WeaponId == weapon.WeaponId).OrderByDescending(k => k.OpenType == 1).FirstOrDefault();
                     if (weaponSkin is not null)
@@ -246,6 +245,8 @@ public static class GmAdminExtensions
                 }
 
                 live.Add(new SC_NewGun { Gun = gun.ToProtoGunCharacter() });
+                if (weapon is not null)
+                    live.Add(new SC_GunWeaponBelong { Id = weapon.Id, GunId = request.GunId });
                 live.Add(new SC_AddIndex { Type = 10, Id = request.GunId, Ts = 0 });
                 if (gun.CostumeId != 0)
                 {
@@ -264,6 +265,8 @@ public static class GmAdminExtensions
                 GunEntity cached = guns.GetPlayerGuns(uid).FirstOrDefault(g => g.GunId == request.GunId) ?? existing;
                 cached.Level = request.Level;
                 cached.GunClass = Math.Max(cached.GunClass, GunService.ClassForLevel(request.Level));
+                if (request.Segment is int segment)
+                    cached.Grade = (uint)Math.Clamp(segment, 0, 6);
                 guns.Save();
                 SC_Guns update = new();
                 foreach (GunEntity gun in guns.GetPlayerGuns(uid)) update.Guns.Add(gun.ToProtoGunCharacter());
@@ -497,6 +500,109 @@ public static class GmAdminExtensions
             return Results.Ok(new { command = name, output });
         });
 
+        api.MapGet("/remoulding/traits-catalog", (ITableService tables) =>
+        {
+            var catalog = tables.GetTable<FeaturesEntryData>().Select(r => new
+            {
+                id = r.Id,
+                name = $"Trait #{r.Id}",
+                type = TableFields.U(r, 7),
+                group = TableFields.U(r, 8),
+                level = TableFields.U(r, 9),
+                value = TableFields.U(r, 12),
+            });
+            return Results.Ok(catalog);
+        });
+
+        api.MapGet("/accounts/{uid}/remoulding/characters", async (uint uid, GriffinDbContext db, IGunService guns, IAccountStateService accountState) =>
+        {
+            if (!await db.Accounts.AnyAsync(a => a.Uid == uid)) return Results.NotFound(new { error = "No existe esa cuenta." });
+            var characters = guns.GetPlayerGuns(uid)
+                .Where(RemouldingPlugins.HasCore)
+                .Select(g => new
+                {
+                    id = g.GunId,
+                    level = g.Level,
+                    slots = RemouldingPlugins.SlotsOf(accountState, uid, g.GunId).Select(s => s.ToString()).ToArray(),
+                });
+            return Results.Ok(new { uid, characters });
+        });
+
+        api.MapGet("/accounts/{uid}/remoulding/slots/{gunId}", async (uint uid, uint gunId, GriffinDbContext db, ITableService tables, IAccountStateService accountState) =>
+        {
+            if (!await db.Accounts.AnyAsync(a => a.Uid == uid)) return Results.NotFound(new { error = "No existe esa cuenta." });
+            SC_GunRemouldingPlugins catalog = PluginInventory.Catalog(tables, accountState, uid);
+            Dictionary<ulong, GunRemouldingPlugin> byId = catalog.RemouldingPlugins.ToDictionary(p => p.Id);
+            ulong[] slotIds = RemouldingPlugins.SlotsOf(accountState, uid, gunId);
+            var slots = slotIds.Select((pluginUid, idx) =>
+            {
+                byId.TryGetValue(pluginUid, out GunRemouldingPlugin? plugin);
+                uint? stcId = plugin?.StcId;
+                int? type = stcId is > 0 ? (int)((stcId.Value / 100) % 10) : null;
+                var entries = plugin?.ACEIFDEGLMH.Select(id => new
+                {
+                    id,
+                    name = $"Trait #{id}",
+                    level = (int)(id % 100),
+                }).ToArray() ?? [];
+                return new
+                {
+                    slot = idx + 1,
+                    pluginId = pluginUid == 0 ? null : pluginUid.ToString(),
+                    editable = plugin is not null,
+                    coreId = stcId,
+                    stcId,
+                    type,
+                    entries,
+                };
+            });
+            return Results.Ok(new { uid, gunId, slots });
+        });
+
+        api.MapGet("/accounts/{uid}/remoulding/plugins", async (uint uid, GriffinDbContext db, ITableService tables, IAccountStateService accountState) =>
+        {
+            if (!await db.Accounts.AnyAsync(a => a.Uid == uid)) return Results.NotFound(new { error = "No existe esa cuenta." });
+            SC_GunRemouldingPlugins catalog = PluginInventory.Catalog(tables, accountState, uid);
+            var plugins = catalog.RemouldingPlugins.Select(p =>
+            {
+                uint stcId = p.StcId;
+                int type = (int)((stcId / 100) % 10);
+                int rank = (int)((stcId / 1000) % 10);
+                return new
+                {
+                    pluginId = p.Id.ToString(),
+                    stcId,
+                    row = (uint?)null,
+                    type,
+                    rank,
+                    gunId = RemouldingPlugins.GunOf(accountState, uid, p.Id),
+                    locked = p.MDFIDAFPBJN,
+                    entries = p.ACEIFDEGLMH.ToArray(),
+                    traits = p.ACEIFDEGLMH.Select(id => new { id, level = (int)(id % 100), type }).ToArray(),
+                };
+            });
+            return Results.Ok(plugins);
+        });
+
+        api.MapPost("/accounts/{uid}/remoulding/traits", async (uint uid, RemouldingTraitsRequest request, GriffinDbContext db, ITableService tables, IAccountStateService accountState, ConnectionManager connections, ILoggerFactory loggerFactory) =>
+        {
+            if (!await db.Accounts.AnyAsync(a => a.Uid == uid)) return Results.NotFound(new { error = "No existe esa cuenta." });
+            if (!ulong.TryParse(request.PluginId, out ulong pluginId) || pluginId == 0)
+                return Results.BadRequest(new { error = "pluginId inválido." });
+            if (request.Traits is null || request.Traits.Count == 0)
+                return Results.BadRequest(new { error = "Indica al menos un rasgo (trait)." });
+            if (!PluginInventory.SetTraits(tables, accountState, uid, pluginId, request.Traits))
+                return Results.BadRequest(new { error = "No se encontró el chip o los rasgos indicados." });
+
+            SC_GunRemouldingPlugins updated = PluginInventory.Catalog(tables, accountState, uid);
+            foreach (GunRemouldingPlugin plugin in updated.RemouldingPlugins)
+                plugin.GunId = RemouldingPlugins.GunOf(accountState, uid, plugin.Id);
+            SendLive(connections, uid, updated, loggerFactory);
+
+            await AuditAsync(app, uid, "remoulding.traits", new { pluginId = request.PluginId, traits = request.Traits });
+            return Results.Ok(new { uid, pluginId = request.PluginId, traits = request.Traits });
+        });
+
         return app;
     }
 
@@ -550,7 +656,8 @@ public static class GmAdminExtensions
     }
 
     public sealed record GrantItemRequest(uint ItemId, int Count);
-    public sealed record CharacterRequest(uint GunId, int Level = 1);
+    public sealed record CharacterRequest(uint GunId, int Level = 1, int? Segment = null);
+    public sealed record RemouldingTraitsRequest(string PluginId, List<uint> Traits);
     public sealed record GrantWeaponRequest(uint WeaponId, int Count = 1);
     public sealed record GrantCostumeRequest(uint CostumeId);
     public sealed record GrantWeaponSkinRequest(uint SkinId);
