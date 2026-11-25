@@ -158,6 +158,23 @@ namespace Griffin.GameServer.Handlers
                             }
                         }
 
+                        if (anyOwned && ints.Count > slotCount * LobbyPresetStride)
+                        {
+                            int activeIdx = ints[slotCount * LobbyPresetStride];
+                            if (activeIdx < 0 || activeIdx >= slotCount || ints[activeIdx * LobbyPresetStride] <= 0)
+                            {
+                                for (int s = 0; s < slotCount; s++)
+                                {
+                                    if (ints[s * LobbyPresetStride] > 0)
+                                    {
+                                        ints[slotCount * LobbyPresetStride] = s;
+                                        slotChanged = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
                         if (!slotChanged)
                         {
                             writer.WriteTag(tag);
@@ -1065,6 +1082,13 @@ namespace Griffin.GameServer.Handlers
                         while (!packedIn.IsAtEnd)
                             ints.Add(packedIn.ReadInt32());
                         int slotCount = ints.Count / LobbyPresetStride;
+                        if (slotCount <= 0)
+                            return false;
+                        if (ints.Count > slotCount * LobbyPresetStride)
+                        {
+                            int active = ints[slotCount * LobbyPresetStride];
+                            return active >= 0 && active < slotCount && ints[active * LobbyPresetStride] > 0;
+                        }
                         for (int s = 0; s < slotCount; s++)
                             if (ints[s * LobbyPresetStride] > 0)
                                 return true;
