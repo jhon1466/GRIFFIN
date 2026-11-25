@@ -1048,6 +1048,42 @@ namespace Griffin.GameServer.Handlers
         85
         };
 
+        public static bool HasLobbyPreset(IAccountStateService accountState, uint uid)
+        {
+            if (accountState.Get<string>(uid, StateKey) is not { Length: > 0 } saved)
+                return false;
+            try
+            {
+                CodedInputStream input = new(ByteString.FromBase64(saved).ToByteArray());
+                uint tag;
+                while ((tag = input.ReadTag()) != 0)
+                {
+                    if (tag >> 3 == 14 && (tag & 7) == 2)
+                    {
+                        CodedInputStream packedIn = new(input.ReadBytes().ToByteArray());
+                        List<int> ints = [];
+                        while (!packedIn.IsAtEnd)
+                            ints.Add(packedIn.ReadInt32());
+                        int slotCount = ints.Count / LobbyPresetStride;
+                        for (int s = 0; s < slotCount; s++)
+                            if (ints[s * LobbyPresetStride] > 0)
+                                return true;
+                        return false;
+                    }
+                    switch (tag & 7)
+                    {
+                        case 0: input.ReadUInt64(); break;
+                        case 1: input.ReadFixed64(); break;
+                        case 2: input.ReadBytes(); break;
+                        case 5: input.ReadFixed32(); break;
+                        default: return false;
+                    }
+                }
+            }
+            catch (InvalidProtocolBufferException) { }
+            return false;
+        }
+
         public override void HandleClientDataUpload(CS_ClientDataUpload request, Connection connection)
         {
             if (connection.Account is not null && request.Data.Length > 0)

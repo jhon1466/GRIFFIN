@@ -1,15 +1,17 @@
-﻿using Griffin.Common.Networking;
+using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.GameServer.Services;
 
 namespace Griffin.GameServer.Handlers
 {
-    public sealed class BackgroundHandler(IBackgroundService backgroundService) : BackgroundHandlerBase
+    public sealed class BackgroundHandler(IBackgroundService backgroundService, IAccountStateService accountState) : BackgroundHandlerBase
     {
         public override void HandleBackgroundInfo(CS_BackgroundInfo request, Connection connection)
         {
             // the stored choice (BackgroundChange); the default for an account that never changed it
             uint background = connection.Account is null ? 3056 : backgroundService.GetCurrentBackground(connection.Account.Uid);
+            if (connection.Account is not null && background == 998 && !ClientDataHandler.HasLobbyPreset(accountState, connection.Account.Uid))
+                background = BackgroundService.DefaultBackgroundId;
             connection.Send(new SC_BackgroundInfo { Background = background });
         }
 

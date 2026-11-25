@@ -320,11 +320,17 @@ namespace Griffin.GameServer.Handlers
             WeaponEntity? WeaponOf(GunEntity gun) =>
                 weapons.FirstOrDefault(w => w.Id == gun.WeaponId && w.Id != 0) ?? weapons.FirstOrDefault(w => w.GunId == gun.GunId);
             // "pointId:(rotation):gunId:..." per starter unit: the facing the client expects for each deployment point
-            Dictionary<uint, string> rotations = config.DefaultGuns.Split('|', StringSplitOptions.RemoveEmptyEntries)
-                .Select(row => row.Split(':'))
-                .Where(fields => fields.Length >= 2 && uint.TryParse(fields[0], out _))
-                .GroupBy(fields => uint.Parse(fields[0]))
-                .ToDictionary(group => group.Key, group => group.First()[1]);
+            // Merge col 16 (default_guns) and col 3 (gun_birth_points) so fixed/preset points also get their facing.
+            Dictionary<uint, string> rotations = new();
+            foreach (string sourceText in new[] { TableFields.S(config, 16), config.DefaultGuns })
+            {
+                foreach (string row in sourceText.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string[] fields = row.Split(':');
+                    if (fields.Length >= 2 && uint.TryParse(fields[0], out uint pt) && !string.IsNullOrWhiteSpace(fields[1]))
+                        rotations.TryAdd(pt, fields[1]);
+                }
+            }
             string RotationOf(uint pointId) => rotations.GetValueOrDefault(pointId, BattleUnitBuilder.DefaultRotation);
             var playerUnits = new List<byte[]>();
             // account data that adds to the stats of every character: control room level and the stages passed (A-73)
@@ -364,23 +370,62 @@ namespace Griffin.GameServer.Handlers
                     playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
                 }
             }
-            else if (requestedGuns is { Count: > 0 })
+            else
             {
-                foreach ((uint unitId, uint gunId) in requestedGuns.OrderBy(pair => pair.Key))
+                // StageConfigData col 16 (default_guns): fixed/preset units required by story/campaign stages
+                // Formats: "point:rot:gunId:0", "point:rot:presetId:1", "point:rot:gunId:2:presetId"
+                List<(uint PointId, uint GunOrPresetId, uint PresetId)> fixedEntries = [];
+                foreach (string row in TableFields.S(config, 16).Split('|', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    GunEntity? gun;
-                    // Stages that lend characters (story fights of the lobby parties, A-130) name each unit by its GunPresetData id, not by a character id:
-                    // the character fights with the level and grade of the preset (like the 遗珍回收 squad, A-123) and a preset is also used for characters the account lacks.
-                    if (ownedGuns.TryGetValue(gunId, out GunEntity? owned) && gunId < 100000)
-                        gun = owned;
-                    else if (tableService.GetTable<GunPresetData>().FirstOrDefault(row => row.Id == gunId) is { } preset)
-                    {
-                        uint source = TableFields.U(preset, 2);
-                        gun = RougeUnitOf(new RougeService.TeamGun(source, TableFields.U(preset, 16), gunId, TableFields.U(preset, 6)), ownedGuns.GetValueOrDefault(source));
-                    }
-                    else
+                    string[] fields = row.Split(':');
+                    if (fields.Length < 4 || !uint.TryParse(fields[0], out uint pt) || !uint.TryParse(fields[2], out uint id))
                         continue;
-                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
+                    uint entryType = uint.TryParse(fields[3], out uint t) ? t : 0;
+                    uint presetId = entryType == 2 && fields.Length >= 5 && uint.TryParse(fields[4], out uint pid) ? pid
+                        : entryType == 1 ? id : 0;
+                    fixedEntries.Add((pt, id, presetId));
+                }
+
+                GunEntity? ResolveUnit(uint unitId, uint gunId)
+                {
+                    if (ownedGuns.TryGetValue(gunId, out GunEntity? owned) && gunId < 100000)
+                    {
+                        // If this point is a type-2 fixed unit and the client sent the raw gunId instead of presetId, use its preset.
+                        if (fixedEntries.FirstOrDefault(e => e.PointId == unitId && e.PresetId != 0 && e.GunOrPresetId == gunId) is { PresetId: not 0 } fixedMatch
+                            && tableService.GetTable<GunPresetData>().FirstOrDefault(row => row.Id == fixedMatch.PresetId) is { } fixedPreset)
+                            return PresetUnitOf(fixedPreset, owned);
+                        return owned;
+                    }
+                    if (tableService.GetTable<GunPresetData>().FirstOrDefault(row => row.Id == gunId) is { } preset)
+                        return PresetUnitOf(preset, ownedGuns.GetValueOrDefault(TableFields.U(preset, 2)));
+                    if (fixedEntries.FirstOrDefault(e => e.PointId == unitId && e.PresetId != 0) is { PresetId: not 0 } fallbackFixed
+                        && tableService.GetTable<GunPresetData>().FirstOrDefault(row => row.Id == fallbackFixed.PresetId) is { } fallbackPreset)
+                        return PresetUnitOf(fallbackPreset, ownedGuns.GetValueOrDefault(TableFields.U(fallbackPreset, 2)));
+                    return null;
+                }
+
+                HashSet<uint> deployedPoints = [];
+                if (requestedGuns is { Count: > 0 })
+                {
+                    foreach ((uint unitId, uint gunId) in requestedGuns.OrderBy(pair => pair.Key))
+                    {
+                        if (ResolveUnit(unitId, gunId) is not { } gun)
+                            continue;
+                        deployedPoints.Add(unitId);
+                        playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, unitId, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(unitId), InputsOf(gun)));
+                    }
+                }
+
+                // Ensure any required fixed/preset units from StageConfigData col 16 are deployed even if omitted by auto-battle or StageStart.
+                foreach ((uint pt, uint id, uint presetId) in fixedEntries)
+                {
+                    if (deployedPoints.Contains(pt))
+                        continue;
+                    uint lookupId = presetId != 0 ? presetId : id;
+                    if (ResolveUnit(pt, lookupId) is not { } gun)
+                        continue;
+                    deployedPoints.Add(pt);
+                    playerUnits.Add(BattleUnitBuilder.GunUnit(tableService, pt, gun.GunId, gun.ToProtoGunCharacter(), WeaponOf(gun), RotationOf(pt), InputsOf(gun)));
                 }
             }
 
@@ -443,6 +488,20 @@ namespace Griffin.GameServer.Handlers
             Log.Information("Stage {StageId} battle composed from table config {ConfigId}: {PlayerUnits} player units.",
                 stage.Id, config.StageId, playerUnits.Count);
             return battle;
+        }
+
+        private GunEntity PresetUnitOf(GunPresetData preset, GunEntity? owned)
+        {
+            uint source = TableFields.U(preset, 2);
+            uint level = Math.Max(1u, TableFields.U(preset, 6));
+            uint costume = TableFields.U(preset, 3);
+            GunEntity gun = RougeUnitOf(new RougeService.TeamGun(source, TableFields.U(preset, 16), preset.Id, level), owned);
+            gun.Preset = (int)GunPresetType.Preset;
+            gun.PresetId = preset.Id;
+            gun.GunClass = Math.Max(gun.GunClass, GunService.ClassForLevel((int)level));
+            if (costume != 0)
+                gun.CostumeId = costume;
+            return gun;
         }
 
         /// <summary>The character of a 遗珍回收 preset: the account's own entry (its weapon, costume...) with the level and grade of the preset, or a bare entry when it does not own the character.</summary>
