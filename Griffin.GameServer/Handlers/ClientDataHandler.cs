@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.GameServer.Services;
@@ -16,7 +16,7 @@ namespace Griffin.GameServer.Handlers
     /// from then on; the fixed blob below is only the starting value. Every upload is answered (an unanswered or refused upload
     /// would make the client report an error each time).
     /// </summary>
-    public class ClientDataHandler(IAccountStateService accountState, IGunService gunService) : ClientDataHandlerBase
+    public class ClientDataHandler(IAccountStateService accountState, IGunService gunService, IDarkovService darkov) : ClientDataHandlerBase
     {
         private const string StateKey = "client.data";
         private const int LobbyPresetStride = 19;
@@ -50,6 +50,7 @@ namespace Griffin.GameServer.Handlers
                     accountState.Set(connection.Account.Uid, StateKey, Convert.ToBase64String(data));
 
                 connection.Send(new SC_ClientDataGet { Data = ByteString.CopyFrom(data) });
+                PushDarkovInfo(connection);
                 return;
             }
 
@@ -58,6 +59,24 @@ namespace Griffin.GameServer.Handlers
             {
                 Data = ByteString.CopyFrom(initial)
             });
+        }
+
+        /// <summary>
+        /// The main lobby panel reads the Darkov season pass (SC_GetDarkovInfo field 6) for its red points as soon as it opens, but the
+        /// client asks for that info near the end of the login: on the first lobby the panel threw NullReferenceException half-built and
+        /// the barrack doll never appeared until the player opened a menu and came back. Sent here, early in the login, as well.
+        /// </summary>
+        private void PushDarkovInfo(Connection connection)
+        {
+            try
+            {
+                darkov.Answer(connection, new CS_GetDarkovInfo(), new SC_GetDarkovInfo());
+                connection.Send(LobbyHandler.DurabilityInfo());
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex, "Early Darkov info could not be sent");
+            }
         }
 
         private const string BarrackFixKey = "client.data.barrack";
@@ -1064,6 +1083,48 @@ namespace Griffin.GameServer.Handlers
         16,
         85
         };
+
+        /// <summary>The doll of the active lobby preset saved by the client (0 when none).</summary>
+        public static uint ActiveLobbyDoll(IAccountStateService accountState, uint uid)
+        {
+            if (accountState.Get<string>(uid, StateKey) is not { Length: > 0 } saved)
+                return 0;
+            try
+            {
+                CodedInputStream input = new(ByteString.FromBase64(saved).ToByteArray());
+                uint tag;
+                while ((tag = input.ReadTag()) != 0)
+                {
+                    if (tag >> 3 == 14 && (tag & 7) == 2)
+                    {
+                        CodedInputStream packedIn = new(input.ReadBytes().ToByteArray());
+                        List<int> ints = [];
+                        while (!packedIn.IsAtEnd)
+                            ints.Add(packedIn.ReadInt32());
+                        int slotCount = ints.Count / LobbyPresetStride;
+                        if (slotCount <= 0)
+                            return 0;
+                        int active = ints.Count > slotCount * LobbyPresetStride ? ints[slotCount * LobbyPresetStride] : 0;
+                        if (active >= 0 && active < slotCount && ints[active * LobbyPresetStride] > 0)
+                            return (uint)ints[active * LobbyPresetStride];
+                        for (int s = 0; s < slotCount; s++)
+                            if (ints[s * LobbyPresetStride] > 0)
+                                return (uint)ints[s * LobbyPresetStride];
+                        return 0;
+                    }
+                    switch (tag & 7)
+                    {
+                        case 0: input.ReadUInt64(); break;
+                        case 1: input.ReadFixed64(); break;
+                        case 2: input.ReadBytes(); break;
+                        case 5: input.ReadFixed32(); break;
+                        default: return 0;
+                    }
+                }
+            }
+            catch (InvalidProtocolBufferException) { }
+            return 0;
+        }
 
         public static bool HasLobbyPreset(IAccountStateService accountState, uint uid)
         {

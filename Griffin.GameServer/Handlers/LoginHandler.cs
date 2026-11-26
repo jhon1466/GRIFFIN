@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Newtonsoft.Json;
 using Griffin.Common.Networking;
 using Griffin.Common.Proto;
@@ -946,7 +946,9 @@ namespace Griffin.GameServer.Handlers
 
             //01 00 00 6A 09 
             connection.SendAutoEncrypted<IMessage>(
-                scActivityBackDailyRefresh,
+                // no SC_ActivityBackDailyRefresh: the official server sends none and answers ActivityBackInfo empty (capture of 2026-11-26).
+                // An open "returning player" activity put the client of 2026-11-23 in its Regress mode at every login, which never switched
+                // the lobby to the chosen background: the barrack doll only appeared after opening a menu and coming back.
                 endgame_acc_scLogin,
                 scResource,
                 scSync,

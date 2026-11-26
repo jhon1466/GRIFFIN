@@ -10,6 +10,45 @@ public static class OfficialResourceCatalog
 {
     private static readonly ConcurrentDictionary<string, string> ResourceVersionsByBuild = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, int> PreDownloadVersionsByBuild = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, string> BinaryVersionsByBuild = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, bool> RequestedBuilds = new(StringComparer.Ordinal);
+
+    /// <summary>Signalled when a client asks for a build the catalog does not know yet, so the watcher checks it right away.</summary>
+    public static readonly SemaphoreSlim BuildRequested = new(0);
+
+    /// <summary>Remembers a build a client actually runs (e.g. "4.0.5171"), so the watcher follows it.</summary>
+    public static void NoteRequested(string? clientVersion)
+    {
+        string build = BuildOf(clientVersion);
+        if (string.IsNullOrWhiteSpace(build) || !build.StartsWith("4.", StringComparison.Ordinal))
+            return;
+        if (RequestedBuilds.TryAdd(build, true) && !ResourceVersionsByBuild.ContainsKey(build))
+            BuildRequested.Release();
+    }
+
+    /// <summary>Every build worth asking the official service about: remembered, requested and discovered ones.</summary>
+    public static IReadOnlyCollection<string> KnownBuilds()
+        => ResourceVersionsByBuild.Keys.Concat(RequestedBuilds.Keys).Distinct(StringComparer.Ordinal).ToArray();
+
+    /// <summary>True when the catalog holds official resources for that client build.</summary>
+    public static bool Knows(string? clientVersion) => ResourceVersionsByBuild.ContainsKey(BuildOf(clientVersion));
+
+    public static void PublishBinary(string clientVersion, string binaryVersion)
+    {
+        string build = BuildOf(clientVersion);
+        if (string.IsNullOrWhiteSpace(build) || string.IsNullOrWhiteSpace(binaryVersion) || BuildOf(binaryVersion) != build)
+            return;
+        if (!BinaryVersionsByBuild.TryGetValue(build, out string? before) || before != binaryVersion)
+        {
+            BinaryVersionsByBuild[build] = binaryVersion;
+            Persist();
+        }
+    }
+
+    public static string ResolveBinary(string clientVersion, string configuredVersion)
+        => BinaryVersionsByBuild.TryGetValue(BuildOf(clientVersion), out string? official) ? official : configuredVersion;
+
+    public static string BuildOfVersion(string? version) => BuildOf(version);
 
     /// <summary>
     /// The last official versions seen, kept in Resources/official-versions.json (keyed by client build). Without them a start during
@@ -20,6 +59,7 @@ public static class OfficialResourceCatalog
     {
         public Dictionary<string, string> Res { get; set; } = [];
         public Dictionary<string, int> PreDownload { get; set; } = [];
+        public Dictionary<string, string> Binary { get; set; } = [];
         public string? Stc { get; set; }
     }
 
@@ -37,6 +77,8 @@ public static class OfficialResourceCatalog
                     ResourceVersionsByBuild[BuildOf(build)] = res;
                 foreach ((string build, int pre) in saved.PreDownload)
                     PreDownloadVersionsByBuild[BuildOf(build)] = pre;
+                foreach ((string build, string bin) in saved.Binary ?? [])
+                    BinaryVersionsByBuild[BuildOf(build)] = bin;
                 RememberedStc = saved.Stc;
             }
         }
@@ -65,6 +107,7 @@ public static class OfficialResourceCatalog
                 {
                     Res = new Dictionary<string, string>(ResourceVersionsByBuild),
                     PreDownload = new Dictionary<string, int>(PreDownloadVersionsByBuild),
+                    Binary = new Dictionary<string, string>(BinaryVersionsByBuild),
                     Stc = RememberedStc,
                 };
                 Directory.CreateDirectory(StaticConfig.ResourceDir);

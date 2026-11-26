@@ -805,6 +805,51 @@ if (scenario is "all" or "lobbyroom")
 // Each check pins a bug that was fixed after a player report; it must fail on the code before the fix.
 if (scenario is "all" or "regress")
 {
+    main.Send(new CS_Chat { Uid = 1, Message = "/inventory addall gun" });
+    main.ReadFor(TimeSpan.FromSeconds(4));
+    // R-33 (2026-11-26, players) the MOD costume on the base doll was refused with 10114: ClothesData 1108400 is owned by 1084 and also lists 1009 (col 40)
+    main.Send(new CS_GunCostume { GunId = 1009, CostumeId = 1108400 });
+    var r33 = main.ReadFor(TimeSpan.FromSeconds(2));
+    Check("regress R-33: a costume shared by a doll and its MOD version can be worn by both",
+        r33.Any(p => p.Message is SC_GunCostume c && c.GunId == 1009 && c.CostumeId == 1108400),
+        string.Join(",", r33.Select(p => p.Message is SC_ReportError e ? "error" + e.ErrorNo : p.Message.GetType().Name)));
+
+    // R-34 (2026-11-26, players) the forced unit of CA-1-6 (33605) vanished at the start of the battle: it was sent marked as a preset (Gun.preset = 2)
+    static IEnumerable<byte[]> Fields(byte[] data, int field)
+    {
+        var r = new CodedInputStream(data); var list = new List<byte[]>();
+        while (!r.IsAtEnd) { uint tag = r.ReadTag(); if (tag >> 3 == field && (tag & 7) == 2) list.Add(r.ReadBytes().ToByteArray()); else r.SkipLastField(); }
+        return list;
+    }
+    main.Send(new CS_StageStart { StcStageId = 33605 });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_StageInto());
+    var r34 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault();
+    // the Gun of each unit sits a few levels down (camp 2 -> unit 1 -> gun unit 1 -> battle data ...): take every nested message that parses as the doll
+    static IEnumerable<byte[]> Nested(byte[] data, int depth)
+    {
+        if (depth == 0) yield break;
+        List<byte[]> inner;
+        try { inner = Fields(data, 1).Concat(Fields(data, 2)).ToList(); } catch { yield break; }
+        foreach (byte[] b in inner) { yield return b; foreach (byte[] d in Nested(b, depth - 1)) yield return d; }
+    }
+    var r34Guns = (r34?.Stage?.Camps ?? []).SelectMany(c => Nested(c.ToByteArray(), 6))
+        .Select(b => { try { return Gun.Parser.ParseFrom(b); } catch { return null; } }).Where(g => g is { Id: 1069 }).Select(g => g!).ToList();
+    Check("regress R-34: the forced unit of CA-1-6 is sent as a normal unit, not marked as preset",
+        r34Guns.Any(g => g.Id == 1069) && r34Guns.All(g => g.Preset == GunPresetType.None),
+        string.Join(",", r34Guns.Select(g => $"{g.Id}:{g.Preset}")));
+    main.Send(new CS_StageExit());
+    main.ReadFor(TimeSpan.FromSeconds(1));
+
+    // R-35 (2026-11-26, players) heroic mode: SC_StageInto lost the hero_chapter the client sent in CS_StageStart (the client gives it to its battle core)
+    main.Send(new CS_StageStart { StcStageId = 33604, Other = new StageOther { HeroChapter = new GKAIDEKFIKC { LBCHINFNBCM = true, MIELBFDOBBE = 60, ChapterId = 1017 } } });
+    main.ReadFor(TimeSpan.FromSeconds(2));
+    main.Send(new CS_StageInto());
+    var r35 = main.ReadFor(TimeSpan.FromSeconds(3)).Select(p => p.Message).OfType<SC_StageInto>().FirstOrDefault();
+    Check("regress R-35: the heroic mode of the battle reaches SC_StageInto", r35?.Other?.HeroChapter is { LBCHINFNBCM: true, ChapterId: 1017 }, r35?.Other?.ToString() ?? "no reply");
+    main.Send(new CS_StageExit());
+    main.ReadFor(TimeSpan.FromSeconds(1));
+
     // R-31 (2026-11-21, players) a finished lobby event (anecdote) came back as not finished after logging in again: the event list was a
     // fixed capture that never included the account's finished events.
     main.Send(new CS_LobbyFinishEvent { EventId = 2000003 });

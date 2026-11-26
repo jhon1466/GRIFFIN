@@ -1,4 +1,4 @@
-using Griffin.Common.Networking;
+﻿using Griffin.Common.Networking;
 using Griffin.Common.Proto;
 using Griffin.GameServer.Services;
 
@@ -39,7 +39,7 @@ namespace Griffin.GameServer.Handlers
     public sealed class RedDotReadHandler : RedDotHandlerBase
     {
         public override void HandleRedDotInfo(CS_RedDotInfo request, Connection connection) =>
-            connection.Send(new SC_RedDotInfo());
+            connection.Send(new SC_RedDotInfo { EHGMDCFNHAG = new NJCLEAHGIDI() }); // the client reads field 1 without a null check
 
         public override void HandleRedDotRead(CS_RedDotRead request, Connection connection) =>
             connection.Send(new SC_RedDotRead { Type = request.Type });

@@ -2303,9 +2303,12 @@ namespace Griffin.GameServer.Handlers
             AddHeat(connection, 99020);
         }
 
-        public override void HandleLobbyDurabilityInfo(CS_LobbyDurabilityInfo request, Connection connection)
-        {
-            connection.Send(new SC_LobbyDurabilityInfo
+        public override void HandleLobbyDurabilityInfo(CS_LobbyDurabilityInfo request, Connection connection) =>
+            connection.Send(DurabilityInfo());
+
+        /// <summary>Also sent early in the login (ClientDataHandler): the lobby panel reads it as soon as it opens.</summary>
+        public static SC_LobbyDurabilityInfo DurabilityInfo() =>
+            new SC_LobbyDurabilityInfo
             {
                 Info = new IHADGDPBCLM
                 {
@@ -2330,8 +2333,7 @@ namespace Griffin.GameServer.Handlers
                     },
                     MCJCANKLOAP = 1787185299,
                 },
-            });
-        }
+            };
 
         private const string AvatarKey = "lobby.avatar";
 

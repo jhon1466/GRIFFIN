@@ -1091,7 +1091,10 @@ namespace Griffin.GameServer.Handlers
                 return;
             }
 
-            if (!tableService.GetTable<ClothesData>().Any(c => c.Id == request.CostumeId && TableFields.U(c, 21) == request.GunId))
+            // A costume is shared by a doll and its MOD version (ClothesData col 40, e.g. 1108400 -> [1084, 1009]; col 21 is only its owner):
+            // checking col 21 alone refused the MOD costume on the base doll and the other way round with 10114.
+            if (!tableService.GetTable<ClothesData>().Any(c => c.Id == request.CostumeId
+                    && (TableFields.U(c, 21) == request.GunId || TableFields.List(c, 40).Contains(request.GunId))))
             {
                 connection.Refuse(MsgId.MsgCsGunCostume, HNINDAOJCKP.GunConfigNotExist);
                 return;

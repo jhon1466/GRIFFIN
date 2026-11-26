@@ -59,25 +59,75 @@ namespace Griffin.SDKServer.Controllers
             return b.Length == 4 && (b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168));
         }
 
+        private static readonly HttpClient OfficialHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> LastOfficial = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The game asks here which code, binary, resources and tables it must download. The answer is the official one for the
+        /// exact platform and version the game sends, taken live, so every official update, pre-download or new build reaches the
+        /// game the same way it does on the official server. Only the CDN address (when GRIFFIN_CDN_ORIGIN points elsewhere) and the
+        /// shifted table set (when an event is moved) are replaced. Without the official service: its last answer, else the built-in profile.
+        /// </summary>
         [HttpGet("client_res_v1")]
-        public IResult GetClientResV1(
+        public async Task<IResult> GetClientResV1(
             [FromQuery(Name = "type_id")] string? typeId,
             [FromQuery] string? version,
             [FromQuery(Name = "game_channel_id")] string? gameChannelId,
             [FromQuery] string? t)
         {
-            ClientResV1Dto clientRes = CreateClientResV1(StaticConfig.IsAndroidVersion(version));
+            OfficialResourceCatalog.NoteRequested(version);
+            bool android = typeId == "1" || (typeId != "3" && StaticConfig.IsAndroidVersion(version));
+            string key = $"{typeId}|{version}|{gameChannelId}";
+            string? official = null;
+            try
+            {
+                string url = "https://gf2-zoneinfo.sunborngame.com/zone/client_res_v1"
+                    + $"?type_id={Uri.EscapeDataString(typeId ?? (android ? "1" : "3"))}"
+                    + $"&version={Uri.EscapeDataString(version ?? (android ? StaticConfig.AndroidClientVersion : StaticConfig.ClientVersion))}"
+                    + $"&game_channel_id={Uri.EscapeDataString(gameChannelId ?? "5")}";
+                string body = await OfficialHttp.GetStringAsync(url, HttpContext.RequestAborted);
+                using (System.Text.Json.JsonDocument check = System.Text.Json.JsonDocument.Parse(body))
+                    if (check.RootElement.TryGetProperty("data", out var d) && d.TryGetProperty("ResVersion", out _))
+                    {
+                        official = body;
+                        LastOfficial[key] = body;
+                    }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                Log.Warning("Official client_res_v1 unreachable for {Key} ({Error}); using the last official answer", key, ex.Message);
+            }
+            official ??= LastOfficial.TryGetValue(key, out string? last) ? last : null;
+            if (official is null)
+                return Results.Json(CreateClientResV1(android, version));
 
-            return Results.Json(clientRes);
+            System.Text.Json.Nodes.JsonNode root = System.Text.Json.Nodes.JsonNode.Parse(official)!;
+            System.Text.Json.Nodes.JsonNode data = root["data"]!;
+            string? cdnOrigin = Environment.GetEnvironmentVariable("GRIFFIN_CDN_ORIGIN")?.TrimEnd('/');
+            if (cdnOrigin is not null && !cdnOrigin.Contains("sunborngame.com", StringComparison.OrdinalIgnoreCase))
+            {
+                data["ResUrlCdn"] = $"{cdnOrigin}/game_resources";
+                data["ResUrlOss"] = $"{cdnOrigin}/game_resources";
+            }
+            // the official forced-update thresholds reject the Griffin clients ("当前客户端版本已过时"): keep the server's own
+            data["MustUpdateVersionClient"] = StaticConfig.MustUpdateVersionClient;
+            data["MustUpdateVersionBin"] = StaticConfig.MustUpdateVersionBin;
+            data["MustUpdateVersionStc"] = StaticConfig.MustUpdateVersionStc;
+            if (ShiftedTables.Version is { } shifted)
+                data["StcVersion"] = shifted;
+            return Results.Text(root.ToJsonString(), "application/json");
         }
 
-        private static ClientResV1Dto CreateClientResV1(bool android)
+        private static ClientResV1Dto CreateClientResV1(bool android, string? requestedVersion = null)
         {
             string? cdnOrigin = Environment.GetEnvironmentVariable("GRIFFIN_CDN_ORIGIN")?.TrimEnd('/');
             string resUrl = StaticConfig.ResUrlCdn;
             if (cdnOrigin is not null && !cdnOrigin.Contains("sunborngame.com", StringComparison.OrdinalIgnoreCase))
                 resUrl = $"{cdnOrigin}/game_resources";
             string clientVersion = android ? StaticConfig.AndroidClientVersion : StaticConfig.ClientVersion;
+            // a client on a newer (or older) official build gets that build's official resources, not the configured build's
+            if (!string.IsNullOrWhiteSpace(requestedVersion) && OfficialResourceCatalog.Knows(requestedVersion))
+                clientVersion = requestedVersion;
             string configuredResVersion = android ? StaticConfig.AndroidAbResourceVersion : StaticConfig.AbResourceVersion;
             string resVersion = OfficialResourceCatalog.Resolve(clientVersion, configuredResVersion);
             return new ClientResV1Dto
@@ -95,13 +145,14 @@ namespace Griffin.SDKServer.Controllers
                     ModifyHotfix = false,
                     AppVersionCompatible = [string.Empty],
                     IsAudit = false,
-                    BinaryVersion = android ? StaticConfig.AndroidBinaryVersion : StaticConfig.BinaryVersion,
+                    BinaryVersion = OfficialResourceCatalog.ResolveBinary(
+                        clientVersion, android ? StaticConfig.AndroidBinaryVersion : StaticConfig.BinaryVersion),
                     MustUpdateVersionClient = StaticConfig.MustUpdateVersionClient,
                     MustUpdateVersionBin = StaticConfig.MustUpdateVersionBin,
                     MustUpdateVersionStc = StaticConfig.MustUpdateVersionStc,
                     IsCloseBattle = 1,
                     PreDownloadResVersion = OfficialResourceCatalog.ResolvePreDownloadVersion(
-                        clientVersion, android ? 29122 : 29123),
+                        clientVersion, android ? 29759 : 29758),
                 },
             };
         }

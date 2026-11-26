@@ -215,7 +215,8 @@ namespace Griffin.GameServer.Handlers
             StageBattle battle = CreateBattle(stage, request.IsAuto);
             accountState.Set(connection.Account.Uid, "stage.pending",
                 new PendingStage(stage.Id, request.IsAuto, battle.Id, battle.RandomSeed, request.Other?.Together?.GunId ?? 0, request.Other?.Together?.KFIAKLNJHMB ?? 0,
-                    rougeOther?.PlanId ?? 0, rougeOther?.PMFFONMEDCP ?? 0, weeklyOther is not null, weeklyOther?.Id ?? 0, weeklyOther?.Status == SimCombatWeekly.Types.Status.Final ? weeklyOther.KNPHEBDLFFP : 0));
+                    rougeOther?.PlanId ?? 0, rougeOther?.PMFFONMEDCP ?? 0, weeklyOther is not null, weeklyOther?.Id ?? 0, weeklyOther?.Status == SimCombatWeekly.Types.Status.Final ? weeklyOther.KNPHEBDLFFP : 0,
+                    request.Other is { } startOther ? Convert.ToBase64String(startOther.ToByteArray()) : null));
             if (resourceUpdate is not null)
                 connection.SendAutoEncrypted(resourceUpdate);
             // a plot-only stage (dialogue, no battle) is passed by playing it: the client plays the AVG by itself and reports nothing at the end (A-63).
@@ -270,7 +271,9 @@ namespace Griffin.GameServer.Handlers
                     ? new StageOther { Weekly = new AEMFCIEIHLK { Id = pending.WeeklyId, Status = pending.WeeklyBoss != 0 ? SimCombatWeekly.Types.Status.Final : SimCombatWeekly.Types.Status.StepB, KNPHEBDLFFP = pending.WeeklyBoss } }
                     : pending.RougePlan != 0
                     ? new StageOther { Rouge = new GPNFHGOODHA { PMFFONMEDCP = pending.RougeNode, PlanId = pending.RougePlan } }
-                    : pending.TogetherGun == 0 ? new StageOther() : new StageOther { Together = new CKAOJMGCFFF { GunId = pending.TogetherGun, KFIAKLNJHMB = pending.TogetherLevel } },
+                    // any other case (the heroic mode's hero_chapter, A-258...) is the StageOther the client sent in CS_StageStart: the client hands
+                    // SC_StageInto.Other to its battle core (MFLIDGNAOFD.OLBGLAABAHH -> BLFPGCKKFLE), and an empty one dropped the heroic flag there
+                    : pending.TogetherGun == 0 ? (pending.StartOther is { Length: > 0 } saved ? StageOther.Parser.ParseFrom(Convert.FromBase64String(saved)) : new StageOther()) : new StageOther { Together = new CKAOJMGCFFF { GunId = pending.TogetherGun, KFIAKLNJHMB = pending.TogetherLevel } },
             });
         }
 
@@ -496,8 +499,9 @@ namespace Griffin.GameServer.Handlers
             uint level = Math.Max(1u, TableFields.U(preset, 6));
             uint costume = TableFields.U(preset, 3);
             GunEntity gun = RougeUnitOf(new RougeService.TeamGun(source, TableFields.U(preset, 16), preset.Id, level), owned);
-            gun.Preset = (int)GunPresetType.Preset;
-            gun.PresetId = preset.Id;
+            // No Preset/PresetId marking (A-257): every unit built with it vanished as soon as the battle began (CA-1-6 33605 / CA-1-8 33607 forced
+            // units, also when the player put their own copy there, and the partner of the affection battle 42071), while the lent units of A-123/A-130/A-170,
+            // built exactly like this without the marking, fight normally.
             gun.GunClass = Math.Max(gun.GunClass, GunService.ClassForLevel((int)level));
             if (costume != 0)
                 gun.CostumeId = costume;
@@ -543,7 +547,7 @@ namespace Griffin.GameServer.Handlers
         }
 
         /// <summary>TogetherGun/TogetherLevel: the character of a together-battle (affection event, A-55) that the client names in <c>StageOther.together</c>.</summary>
-        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0, uint RougePlan = 0, uint RougeNode = 0, bool Weekly = false, uint WeeklyId = 0, uint WeeklyBoss = 0);
+        internal sealed record PendingStage(uint StageId, bool IsAuto, long BattleId = 0, long RandomSeed = 0, uint TogetherGun = 0, uint TogetherLevel = 0, uint RougePlan = 0, uint RougeNode = 0, bool Weekly = false, uint WeeklyId = 0, uint WeeklyBoss = 0, string? StartOther = null);
         internal sealed record SavedLineup(List<uint> Lineup, List<uint> Sequence);
 
 
