@@ -386,6 +386,7 @@ Griffin/Resources/session.key
 !Griffin.Common.Proto/
 
 temp/
+/.work/
 
 
 .vscode/

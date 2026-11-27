@@ -338,6 +338,12 @@ namespace Griffin.GameServer.Handlers
                     scGuns.GDJOKNOBNBM[costume] = parts;
             }
 
+            // field 4 of SC_Guns = which form of a transformable character is on show, as base character -> form (the same kind
+            // of client dictionary as field 2 above): the⇄ choice arrives with CS_GunSelected and used to be only echoed,
+            // so it was lost at every login and the character came back in its base form.
+            foreach ((uint gunId, uint form) in SelectedForms(connection.Account.Uid).Where(p => p.Value != 0))
+                scGuns.EBNELAOPLIE[gunId] = form;
+
             //uint[] chars = new uint[] { 1017, 1024, 1001, 1008 };
             //uint[] chars = new uint[] { 1032, 1063 };
             //scGuns.Guns.Add(CreateNewGunCharacter(1032, 20));
@@ -1155,6 +1161,11 @@ namespace Griffin.GameServer.Handlers
 
         private Dictionary<string, uint> SavedParts(uint uid) => accountState.Get<Dictionary<string, uint>>(uid, PartsStateKey) ?? [];
 
+        /// <summary>The form shown for each transformable character (base character -> form, 0 when it shows its own form).</summary>
+        private const string SelectedStateKey = "gun.selected";
+
+        private Dictionary<uint, uint> SelectedForms(uint uid) => accountState.Get<Dictionary<uint, uint>>(uid, SelectedStateKey) ?? [];
+
         /// <summary>
         /// Puts a public talent skill item in a slot (index 0..2) of a character, or empties the slot (item uid 0). The item leaves the
         /// character that wore it and the item that was in the target slot is taken out; both characters and both items are reported.
@@ -1244,13 +1255,115 @@ namespace Griffin.GameServer.Handlers
             connection.Send(new SC_GetGunRemouldingPluginLockPlan { DJNPEOFHKHD = plan });
         }
 
+        /// <summary>
+        /// The⇄ button of a character that has an alternate form (<c>CS_GunSelected</c>, 11128): <c>gun_id</c> is the base
+        /// character and <c>KOPLHBNFPIN</c> the form to show (0 = its own form), pairs kept in <c>GunTransformData</c>
+        /// (1008 to 1075, 1009 to 1084). Until now the request was only echoed, so the choice lived exactly as long as the
+        /// session and every login brought the base character back. The pair is now kept in <c>AccountStates</c> (key
+        /// <c>gun.selected</c>) and reported again through field 4 of <c>SC_Guns</c>.
+        /// </summary>
         public override void HandleGunSelected(CS_GunSelected request, Connection connection)
         {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            if (request.GunId == 0 || !gunService.GetPlayerGuns(uid).Any(g => g.GunId == request.GunId))
+            {
+                connection.Refuse(MsgId.MsgCsGunSelected, HNINDAOJCKP.GunNotFound);
+                return;
+            }
+
+            // the button only ever fires for a transformable character; anything else (or a form it cannot take) is a
+            // forged request, so it is refused instead of stored and replayed at every login.
+            GunTransformData? forms = tableService.GetTable<GunTransformData>().FirstOrDefault(r => r.GunId == request.GunId);
+            if (forms is null || (request.KOPLHBNFPIN != 0 && !forms.IFENFDOHEIC.Contains(request.KOPLHBNFPIN)))
+            {
+                connection.Refuse(MsgId.MsgCsGunSelected, HNINDAOJCKP.ClientInputInvalid);
+                return;
+            }
+
+            lock (AccountLock.For(uid))
+            {
+                Dictionary<uint, uint> selected = accountState.Get<Dictionary<uint, uint>>(uid, SelectedStateKey) ?? [];
+                selected[request.GunId] = request.KOPLHBNFPIN;
+                accountState.Set(uid, SelectedStateKey, selected);
+            }
+
             connection.Send(new SC_GunSelected
             {
                 GunId = request.GunId,
                 KOPLHBNFPIN = request.KOPLHBNFPIN,
             });
+        }
+
+        /// <summary>
+        /// The MOD unlock of a character with an alternate form (<c>CS_GunTransform</c>, 11197): <c>gun_id</c> is the
+        /// base character and <c>KOPLHBNFPIN</c> the MOD form to unlock (pairs in <c>GunTransformData</c>, price in
+        /// <c>GunTransformCostData</c> keyed by the target form: item 1581008 for 1075, 1581009 for 1084). The unlock
+        /// buys the MOD doll as its own character (its own level and core, announced like any new doll) and activates
+        /// the form, so the character comes back in its MOD form after the next login instead of the base one. An
+        /// account that already owns the doll only activates the form: the price and the doll are granted together,
+        /// never apart. Until now the request was only echoed, so the animation played against an answer that changed
+        /// nothing and every login brought the base character back.
+        /// </summary>
+        public override void HandleGunTransform(CS_GunTransform request, Connection connection)
+        {
+            if (connection.Account is null)
+                return;
+
+            uint uid = connection.Account.Uid;
+            if (request.GunId == 0 || !gunService.GetPlayerGuns(uid).Any(g => g.GunId == request.GunId))
+            {
+                connection.Refuse(MsgId.MsgCsGunTransform, HNINDAOJCKP.GunNotFound);
+                return;
+            }
+
+            // the pair has to be a transformable character with that exact form, and the form has to be a real doll
+            // (the grant below would otherwise fall through to a plain item grant)
+            GunTransformData? forms = tableService.GetTable<GunTransformData>().FirstOrDefault(r => r.GunId == request.GunId);
+            if (forms is null || request.KOPLHBNFPIN == 0 || !forms.IFENFDOHEIC.Contains(request.KOPLHBNFPIN)
+                || !tableService.GetTable<GunData>().Any(g => g.Id == request.KOPLHBNFPIN))
+            {
+                connection.Refuse(MsgId.MsgCsGunTransform, HNINDAOJCKP.GunTransformCannot);
+                return;
+            }
+
+            lock (AccountLock.For(uid))
+            {
+                List<Google.Protobuf.IMessage> messages = [];
+                if (!gunService.GetPlayerGuns(uid).Any(g => g.GunId == request.KOPLHBNFPIN))
+                {
+                    // the MOD doll costs its own item; the check and the grant stay together in this lock so two
+                    // transforms at once can never buy the same doll twice
+                    Dictionary<uint, int> cost = [];
+                    if (tableService.GetTable<GunTransformCostData>().FirstOrDefault(r => r.GunId == request.KOPLHBNFPIN) is { } price)
+                        foreach ((uint item, uint count) in price.ELGHGKIOBEF)
+                            cost[item] = (int)count;
+
+                    if (cost.Count > 0 && !itemUse.Spend(uid, cost, messages))
+                    {
+                        connection.Refuse(MsgId.MsgCsGunTransform, HNINDAOJCKP.ItemNotEnough);
+                        return;
+                    }
+
+                    // a separate character with its own progression, granted with the same announcements as any new
+                    // doll (its weapon first, A-147), which include the collection index (10)
+                    rewardService.Grant(uid, request.KOPLHBNFPIN, 1, messages);
+                }
+
+                // the form stays on show after the next login (field 4 of SC_Guns), the same state the ⇄ button writes
+                Dictionary<uint, uint> selected = accountState.Get<Dictionary<uint, uint>>(uid, SelectedStateKey) ?? [];
+                selected[request.GunId] = request.KOPLHBNFPIN;
+                accountState.Set(uid, SelectedStateKey, selected);
+
+                messages.Add(new SC_GunTransform
+                {
+                    GunId = request.GunId,
+                    KOPLHBNFPIN = request.KOPLHBNFPIN,
+                });
+                connection.SendAutoEncrypted(messages.ToArray());
+            }
         }
 
         // Affection talent item: the account has no such item (the item list is the three public ones), so only the character is reported.
